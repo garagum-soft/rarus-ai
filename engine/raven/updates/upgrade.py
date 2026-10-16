@@ -1324,18 +1324,8 @@ class UpgradePlan:
 
 
 def fetch_latest_for_channel() -> tuple[ReleaseInfo, Callable[[str], tuple[int, ...]]]:
-    """The newest build this install should see, and the ordering to judge it by.
-
-    Imported lazily because ``beta_channel`` imports this module for its release
-    type. Its comparison reads a plain ``X.Y.Z`` too, so the beta channel can
-    keep using it after a tester's build catches up with a stable one.
-    """
-    from raven.updates import beta_channel
-
-    chan = beta_channel.channel()
-    if chan is None:
-        return _fetch_latest_release(), _version_key
-    return beta_channel.fetch_latest(chan), beta_channel.release_key
+    """The newest stable build, and the ordering to judge it by."""
+    return _fetch_latest_release(), _version_key
 
 
 def plan_upgrade() -> UpgradePlan:

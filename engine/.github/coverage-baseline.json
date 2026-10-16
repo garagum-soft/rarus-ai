@@ -1640,14 +1640,6 @@
       "line_percent": 87.878788,
       "statements": 132
     },
-    "raven/updates/beta_channel.py": {
-      "branch_percent": 89.285714,
-      "branches": 28,
-      "covered_branches": 25,
-      "covered_lines": 98,
-      "line_percent": 96.078431,
-      "statements": 102
-    },
     "raven/cli/channel_commands.py": {
       "branch_percent": 79.166667,
       "branches": 72,

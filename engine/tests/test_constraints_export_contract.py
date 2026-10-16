@@ -34,7 +34,6 @@ TRUNK_SITES = (
     "install.sh",
     "install.ps1",
     ".github/workflows/release.yml",
-    "scripts/publish_beta.py",
 )
 
 

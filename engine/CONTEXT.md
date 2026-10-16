@@ -1896,9 +1896,8 @@ A2A face reaches `raven.a2a.gate` only.
 **Updates** (`updates/`):
 The install's own lifecycle as an inner feature library (the browser/importer
 pattern): release lookup and version keys, the upgrade plan and detached
-handoff (`upgrade`), the startup update nudge (`update_notice`), the beta
-channel pointer (`beta_channel`), and the install-integrity record
-(`install_guard`). Consumed by the cli (which keeps only the `raven upgrade`
+handoff (`upgrade`), the startup update nudge (`update_notice`), and the
+install-integrity record (`install_guard`). Consumed by the cli (which keeps only the `raven upgrade`
 typer shell) and by `rpc.methods.system` -- the largest chunk of the
 rpc-imports-cli edges retired by moving it inward (2026-08-31).
 

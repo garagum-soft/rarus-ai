@@ -1463,7 +1463,6 @@ class TestAResidentGatewayAnnouncesUpdatesItself:
     def fast_clock(self, monkeypatch):
         """Collapse the poll delays so the loop runs its ticks immediately."""
         monkeypatch.setattr(serve_commands, "_UPDATE_FIRST_CHECK_S", 0.001)
-        monkeypatch.setattr(serve_commands, "_UPDATE_POLL_BETA_S", 0.001)
         monkeypatch.setattr(serve_commands, "_UPDATE_POLL_STABLE_S", 0.001)
         monkeypatch.setattr(serve_commands, "_UPDATE_BACKOFF_CEILING_S", 0.001)
 
@@ -1548,48 +1547,14 @@ class TestAResidentGatewayAnnouncesUpdatesItself:
         assert checks["n"] >= 3, "one failed fetch ended the announcer"
 
 
-class TestThePollFollowsTheChannelItIsWatching:
-    """A beta reaches its testers by this poll and no other route, so it runs on
-    a minute. Stable does not: those releases land days apart and the check reads
-    GitHub's release page rather than our own registry, where a minute from every
-    install behind one egress would buy nothing."""
+class TestThePollBacksOffWhenTheSourceDoesNotAnswer:
+    """The release check runs on a slow cadence: releases land days apart and the
+    check reads a release page, so a short interval would buy nothing."""
 
-    @pytest.fixture
-    def channel(self, monkeypatch):
-        """Put the install on, or off, the beta channel."""
-        from raven.updates import beta_channel
-
-        def _set(active: bool) -> None:
-            monkeypatch.setattr(beta_channel, "is_active", lambda: active)
-
-        return _set
-
-    def test_the_beta_channel_is_watched_every_minute(self, channel) -> None:
-        channel(True)
-        assert serve_commands._update_poll_seconds() == 60.0
-
-    def test_stable_keeps_its_half_hour(self, channel) -> None:
-        channel(False)
+    def test_the_plain_cadence_is_half_an_hour(self) -> None:
         assert serve_commands._update_poll_seconds() == 30 * 60.0
 
-    def test_the_cadence_is_read_per_tick_not_at_startup(self, channel) -> None:
-        """Joining the channel is a file appearing; a resident gateway that
-        outlives that should follow it without a restart."""
-        channel(False)
-        assert serve_commands._update_poll_seconds() == 30 * 60.0
-        channel(True)
-        assert serve_commands._update_poll_seconds() == 60.0
-
-    def test_failures_double_the_wait_up_to_a_half_hour_ceiling(self, channel) -> None:
-        channel(True)
-        grown = [serve_commands._update_delay(n) for n in range(7)]
-
-        assert grown[:5] == [60.0, 120.0, 240.0, 480.0, 960.0]
-        assert grown[5] == 1800.0, "the ceiling is where an offline gateway settles"
-        assert grown[6] == 1800.0, "and it stops there"
-
-    def test_stable_is_already_at_the_ceiling_so_it_never_grows(self, channel) -> None:
-        channel(False)
+    def test_the_delay_is_already_at_the_ceiling_so_it_never_grows(self) -> None:
         assert serve_commands._update_delay(0) == serve_commands._update_delay(4) == 30 * 60.0
 
     async def test_consecutive_failures_back_off_and_one_answer_resets(self, monkeypatch) -> None:
