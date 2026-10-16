@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -6475,65 +6474,6 @@ def test_each_provider_sits_in_the_group_its_credentials_put_it_in() -> None:
 # --------------------------------------------------------------------------- first-run hints
 
 
-def test_installers_send_first_run_to_the_page_not_the_wizard() -> None:
-    """Neither installer ends by naming a command to type.
-
-    Both now finish by starting ``raven web``, and the page carries its own
-    onboarding, so a first run is walked through in the browser. The pin that
-    matters is the one that used to matter for the closing hint: ``raven
-    onboard`` must not appear, because the startup gate runs the wizard and
-    continues in the same process -- naming it would present one continuous
-    flow as two steps.
-    """
-    root = Path(__file__).resolve().parents[1]
-    for name in ("install.sh", "install.ps1"):
-        text = (root / name).read_text()
-        assert "raven onboard" not in text, name
-        assert "web --foreground" in text, name
-
-
-def test_installers_build_both_web_assets_for_an_editable_install() -> None:
-    """An editable install of a checkout has to build the served page too.
-
-    ``ui-web/dist/index.html`` and ``ui-tui/dist/entry.js`` are both gitignored, so
-    a release wheel carries them and a clone install gets neither. The bundle
-    was built here from the start; the page was not, which left ``raven web``
-    refusing to start on every source install until someone ran ui-web/build.py by
-    hand. Both now share one node/npm probe, so its skip path has to name both
-    consequences rather than only the TUI's.
-    """
-    root = Path(__file__).resolve().parents[1]
-    for name, page, assembler, tui_skip, stale in (
-        (
-            "install.sh",
-            "ui-web/dist/index.html",
-            "ui-web/build.py",
-            "skipping TUI build",
-            ("$src/ui/dist", '"$1/ui"', "$1/ui/build.py"),
-        ),
-        (
-            "install.ps1",
-            r"ui-web\dist\index.html",
-            r"ui-web\build.py",
-            "skipping TUI bundle build",
-            (r'"ui\dist\index.html"', r'"ui\build.py"', 'Join-Path $ScriptDir "ui"'),
-        ),
-    ):
-        text = (root / name).read_text()
-        assert page in text, f"{name}: does not probe for a built page"
-        assert assembler in text, f"{name}: never runs the page assembler"
-        assert tui_skip in text, f"{name}: lost the TUI bundle's own skip warning"
-        assert "raven web will not start" in text, f"{name}: page skip names no consequence"
-        # Naming the new path is not the same as having dropped the old one. The
-        # page's sources moved from `ui/` to `ui-web/` and this test was where the
-        # omission hid: it asserted the strings it was handed, so an installer
-        # still probing, entering and assembling the directory that no longer
-        # exists satisfied it. A source install that does that produces no page
-        # and only warns, which is the failure this case exists to prevent.
-        for path in stale:
-            assert path not in text, f"{name}: still builds from the removed ui/ tree ({path})"
-
-
 def test_no_workflow_step_enters_the_removed_page_directory() -> None:
     """CI must not `cd` into a directory the repository no longer has.
 
@@ -6558,70 +6498,6 @@ def test_no_workflow_step_enters_the_removed_page_directory() -> None:
         assert "python3 ui/build.py" not in text and "python ui/build.py" not in text, (
             f"{path.name}: assembles the page from the removed ui/ tree"
         )
-
-
-def test_the_windows_installer_reads_back_every_npm_exit_code() -> None:
-    """No unchecked native call may decide a build succeeded.
-
-    PowerShell's ``$ErrorActionPreference`` does not cover native commands, and
-    the variable that would change that, ``$PSNativeCommandUseErrorActionPreference``,
-    is False by default as late as 7.6.5 -- so this is not a 5.1-only hazard. An
-    unchecked ``npm`` failure returns to the caller, runs the next ``npm``
-    anyway, and the installer goes on to report success with no artifact. The
-    bundle's own build was the one that did this, which left bare ``raven`` --
-    the TUI -- unusable after a green install.
-    """
-    lines = (Path(__file__).resolve().parents[1] / "install.ps1").read_text().splitlines()
-    calls = [i for i, line in enumerate(lines) if "$npm.Source" in line]
-    assert calls, "no npm invocation found; this test no longer guards anything"
-    unchecked = [lines[i].strip() for i in calls if "$LASTEXITCODE" not in (lines[i + 1] if i + 1 < len(lines) else "")]
-    assert not unchecked, f"npm invocations with no exit-code check: {unchecked}"
-
-
-def test_installers_no_longer_probe_config_to_word_a_closing_hint() -> None:
-    """Both installers used to read config.json only so the closing hint could
-    say "Raven updated" instead of "All set". There is no closing hint now --
-    both paths end on the same running page -- so the probe has to go with it,
-    or it reads as a decision the script still makes.
-    """
-    root = Path(__file__).resolve().parents[1]
-    for name in ("install.sh", "install.ps1"):
-        text = (root / name).read_text()
-        assert "config.json" not in text, name
-        assert "All set" not in text, name
-        assert "Raven updated" not in text, name
-
-
-def test_readme_quickstart_matches_the_installer() -> None:
-    """Both READMEs' Quick Start must describe the clone install the way the
-    installer behaves. ``./install.sh`` and a piped run do different things from
-    inside a checkout -- local mode requires ``$0`` to be a real file -- and
-    RAVEN_LOCAL_SRC is the documented opt-out. A reader who cannot see that from
-    the README installs the release wheel believing they installed their tree.
-
-    This replaces a pin on the old "Onboard and run" heading. The installers no
-    longer close with a first-run hint and the READMEs no longer carry that
-    section, so the two have no shared command left to agree on; the clone
-    install is what they must not drift on now.
-
-    The section is located by its heading text rather than by the decorative
-    prefix in front of it. Pinning that prefix meant a purely cosmetic heading
-    restyle failed here with a bare StopIteration that named neither the file
-    nor what it had been looking for. Each README carries its own heading word
-    because the two are written in different languages.
-    """
-    root = Path(__file__).resolve().parents[1]
-    assert "RAVEN_LOCAL_SRC" in (root / "install.sh").read_text(encoding="utf-8")
-    for name, heading in (("README.md", "Quick Start"), ("README.zh-CN.md", "快速开始")):
-        text = (root / name).read_text(encoding="utf-8")
-        sections = [
-            b for b in re.split(r"^## ", text, flags=re.MULTILINE) if b.partition("\n")[0].rstrip().endswith(heading)
-        ]
-        assert len(sections) == 1, f"{name}: expected one '## ...{heading}' section, found {len(sections)}"
-        quickstart = sections[0]
-        assert "git clone" in quickstart, name
-        assert "./install.sh" in quickstart, name
-        assert "RAVEN_LOCAL_SRC" in quickstart, name
 
 
 def test_pick_model_shows_default_positioning_line(

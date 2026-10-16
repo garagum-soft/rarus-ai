@@ -31,8 +31,6 @@ SCANNED_SUFFIXES = {".sh", ".ps1", ".yml", ".yaml", ".py"}
 # silently leaving the renamed site unchecked: a contract that stops seeing
 # its subject keeps passing while describing nothing.
 TRUNK_SITES = (
-    "install.sh",
-    "install.ps1",
     ".github/workflows/release.yml",
 )
 

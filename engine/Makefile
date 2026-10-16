@@ -1,4 +1,4 @@
-.PHONY: help install install-deps fetch-resources lint lint-python lint-imports lint-deps lint-types lint-tui lint-bridge test test-python test-tui build build-tui build-bridge build-ui build-core check-commits check-pr-title check-large-files check-source-language check-core-wheel fetch-templates verify-templates ci clean coverage coverage-shard coverage-combine coverage-summary coverage-diff coverage-ratchet coverage-baseline-check coverage-baseline-candidate docker-build docker-up docker-down docs-serve docs-build
+.PHONY: help install install-deps fetch-resources lint lint-python lint-imports lint-deps lint-types lint-tui lint-bridge test test-python test-tui build build-tui build-bridge build-ui build-core check-commits check-pr-title check-large-files check-source-language check-core-wheel fetch-templates verify-templates ci clean coverage coverage-shard coverage-combine coverage-summary coverage-diff coverage-ratchet coverage-baseline-check coverage-baseline-candidate docs-serve docs-build
 
 PYTHON ?= python3
 PYTHON_VERSION ?= 3.12
@@ -9,7 +9,6 @@ COVERAGE_BASE_REF ?= origin/main
 COVERAGE_DIFF_THRESHOLD ?= 90
 # Allowed line or branch regression in percentage points to absorb rounding noise.
 COVERAGE_RATCHET_TOLERANCE ?= 0.05
-DOCKER_IMAGE ?= raven:local
 COVERAGE_REPORT_ARGS = --cov=raven --cov=raven_everos --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=json --cov-report=html
 # One slice of the suite, K/N; the shard writes its .coverage data and no report.
 COVERAGE_SHARD ?= 1/1
@@ -48,9 +47,6 @@ help:
 	@echo "  check-core-wheel  Build the raven-core wheel and smoke it in a clean venv"
 	@echo "  fetch-templates Re-pull the deck engine's ten bundled templates over the tracked copies (maintainers; needs GITLAB_TOKEN)"
 	@echo "  verify-templates Hash the tracked deck templates against their pins"
-	@echo "  docker-build   Build the container image (page + engine + nginx)"
-	@echo "  docker-up      Build if needed and start the stack from docker/"
-	@echo "  docker-down    Stop the stack (the data volume is kept)"
 	@echo "  ci             Run the local CI gate"
 	@echo "  clean          Remove generated caches and build output"
 
@@ -188,17 +184,6 @@ check-source-language:
 # venv); this target is what CI and `make ci` run so the artifact stays honest.
 check-core-wheel:
 	uv run --frozen --python $(PYTHON_VERSION) pytest tests/integration/test_kernel_wheel_smoke.py -q -o addopts=""
-
-# The image builds the page and the Python environment itself, so these need
-# no prior `make build`. Compose reads docker/.env for ports and extras.
-docker-build:
-	docker build -t $(DOCKER_IMAGE) .
-
-docker-up:
-	cd docker && docker compose up --build $(COMPOSE_ARGS)
-
-docker-down:
-	cd docker && docker compose down
 
 ci: lint test build check-core-wheel
 
