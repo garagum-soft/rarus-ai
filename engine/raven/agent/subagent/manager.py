@@ -11,8 +11,6 @@ from typing import Any
 
 from loguru import logger
 
-from raven.accounts.estimate import note_external_usage
-from raven.accounts.gate import refusal_for_spawn
 from raven.agent import workdir
 from raven.agent.subagent import activity, mailbox
 from raven.agent.subagent.areas import note_spawn_result
@@ -964,9 +962,6 @@ class SubagentManager:
         if self._dispatch_closed:
             logger.info("DAG run refused: the host is shutting down")
             return _DAG_SHUTDOWN_REFUSAL
-        if (blocked := refusal_for_spawn()) is not None:
-            logger.info("DAG run refused: the account is blocked")
-            return f"Error: {blocked} No sub-agent was run."
         quota_key = session_key or "default"
         if self._charge_dispatch_quota(quota_key):
             return None
@@ -1084,11 +1079,6 @@ class SubagentManager:
                 f"{SPAWN_REFUSED_PREFIX}delegation is paused. The user paused sub-agent "
                 "spawning; do the work in this turn instead, or ask them to resume."
             )
-        if (blocked := refusal_for_spawn()) is not None:
-            # An account's engine at zero credits or over its disk allowance; only
-            # outside a turn, since a turn already running finishes with its spawns.
-            logger.info("Spawn refused: the account is blocked")
-            return f"{SPAWN_REFUSED_PREFIX}{blocked} Nothing was run."
         try:
             backend = self._resolve_backend(agent)
         except RuntimeError as exc:
@@ -1396,12 +1386,10 @@ class SubagentManager:
                 except Exception as exc:
                     await _write_spawn_status(session_key, agent, handle, "failed")
                     record.finish(status="failed", error=f"Error: {exc}", activity=did)
-                    note_external_usage(backend, agent, text, "", session_key=session_key, activity=did)
                     raise DirectChatError(record.meta()) from exc
                 else:
                     await _write_spawn_status(session_key, agent, handle, "completed")
                     record.finish(status="completed", output=reply, activity=did)
-                    note_external_usage(backend, agent, text, reply, session_key=session_key, activity=did)
                     return reply, record.meta()
                 finally:
                     # Not for a cancelled call: this poller would be created
@@ -2029,7 +2017,6 @@ class SubagentManager:
                         stopped_at = time.time()
                         await self._wait_out_limit(did, agent, task_id, wait_s, limit_waits)
                         text = limit_retry_task(task, stopped_at)
-                note_external_usage(backend, agent, task, final_result, session_key=session_key, activity=did)
                 await _write_spawn_status(session_key, agent, handle, "completed")
                 self._emit_status(
                     origin, task_id, task_summary, "completed", call_id=call_id, ended_at=int(time.time() * 1000)
@@ -2086,8 +2073,6 @@ class SubagentManager:
                 )
                 error_msg = f"Error: {str(e)}" + limit_note(str(e))
                 logger.error("Subagent [{}] failed: {}", task_id, e)
-                if backend is not None:
-                    note_external_usage(backend, agent, task, "", session_key=session_key, activity=did)
                 record.finish(status="failed", error=error_msg, activity=did)
                 await self._announce_result(
                     task_id, task_summary, task, error_msg, origin, "error", record_path=str(record.file("out.md"))

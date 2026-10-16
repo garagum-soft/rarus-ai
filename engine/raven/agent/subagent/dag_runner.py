@@ -21,7 +21,6 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from raven.accounts.estimate import note_external_usage
 from raven.agent.subagent import activity, mailbox
 from raven.agent.subagent.backends.base import llm_error_reply, optional_keyword
 from raven.agent.subagent.dag_adjudication import (
@@ -1772,15 +1771,6 @@ async def _run_node(
                             raise SubagentNoAnswerError(failure)
                     finally:
                         stall_watch.cancel()
-                        # An external agent's run, for the account its engine charges (accounts mode only).
-                        note_external_usage(
-                            agent_backend,
-                            node.subagent,
-                            prompt,
-                            result if isinstance(result, str) else "",
-                            session_key=session_key,
-                            activity=did,
-                        )
                         node_activity[node.id] = did.as_meta()
                         # Set aside for the reader until the manifest carries
                         # it: `collecting` drops the live entry as this block

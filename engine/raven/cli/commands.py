@@ -194,7 +194,6 @@ upgrade_commands.register(app)
 # ============================================================================
 
 from raven.cli.a2a_commands import a2a_app
-from raven.cli.accounts_commands import accounts_app
 from raven.cli.acp_commands import acp_app
 from raven.cli.areas_commands import areas_app
 from raven.cli.attention_commands import attention_app
@@ -224,7 +223,6 @@ from raven.cli.voice_commands import voice_app
 from raven.cli.watch_commands import watch_app
 
 app.add_typer(a2a_app, name="a2a")
-app.add_typer(accounts_app, name="accounts")
 app.add_typer(acp_app, name="acp")
 app.add_typer(channels_app, name="channels")
 app.add_typer(ci_app, name="ci")

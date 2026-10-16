@@ -686,11 +686,6 @@ def _no_real_raven_home(tmp_path, monkeypatch):
     # itself, which lands after this.
     monkeypatch.delenv("RAVEN_HOME", raising=False)
     monkeypatch.setattr("raven.home._current_config_path", None)
-    # Accounts mode keeps its state under the server's home; on Windows that would
-    # be the real ~/.raven of whoever runs the suite. A test that sets RAVEN_HOME
-    # (and unsets this) gets it under its own home instead.
-    monkeypatch.setenv("RAVEN_ACCOUNTS_ROOT", str(raven_home / "accounts"))
-    monkeypatch.delenv("RAVEN_ACCOUNT", raising=False)
 
     # The attention queue is written by every broker a test drives. On Windows
     # ``Path.home()`` reads USERPROFILE, not the HOME set above, so without this

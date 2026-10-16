@@ -13,8 +13,7 @@ roster discovers it like any product and the main agent can delegate to it:
 - ``employee.json``: what the page lists about it.
 
 Each employee runs as its own Raven over ACP, with its own home and therefore
-its own sessions, starting from none. In accounts mode every account hires into
-its own engine's home, so every person has a team of their own.
+its own sessions, starting from none.
 """
 
 from __future__ import annotations

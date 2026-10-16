@@ -2325,27 +2325,6 @@ same `rateLimitWaitMaxS` and asked again, told that part of the work may be done
 run, its console saying when; `SubagentManager._limit_wait`); a later reset fails the run with a
 sentence saying when the limit lifts, for the parent to dispatch it again.
 
-**Accounts mode** (`raven accounts serve`, `raven/accounts/`, `<RAVEN_HOME>/accounts/`):
-One server for several people, off unless `raven accounts serve` runs. The **account gateway**
-(`accounts/hub.py`) is all a browser reaches: it signs people in (a password; self-registration
-when open; Google Sign-In once the administrator entered the client and the public address) and
-relays each signed-in person's requests -- HTTP and the `/rpc` socket, at the root of the origin --
-to that person's own **engine**: an ordinary `raven gateway` on a home of its own
-(`accounts/users/<id>/home`; the superadmin's is the server's own home), started with
-`RAVEN_ACCOUNT`, its own token and CLI logins and none of the server's keys (`accounts/engines.py`).
-Three roles: the superadmin (the first account, made only from the server itself or with
-`raven accounts init`), admins with the permissions granted to them, users. **Credits** come from
-the administrator's price table -- per model, US dollars per million input, output and cache-hit
-tokens -- times `credits_per_usd`, times the share: full on access the server lends the account,
-a tenth on its own keys and subscriptions (`accounts/billing.py`), read off each engine's usage
-files; an external agent is charged on the usage it reported or an estimate from its text,
-marked estimated (`accounts/estimate.py`). At zero credits, or over the disk allowance (50 GB;
-administrators have none), the gateway's **gate file** stops the engine starting new work -- a
-turn of any origin, a sub-agent started outside a turn -- while work already running finishes
-(`accounts/gate.py`). Without `RAVEN_ACCOUNT` an engine reads none of it.
-_Avoid_: reading the separation as the operating system's -- every engine runs as the server's
-user, so an agent allowed shell commands without a sandbox can read another home.
-
 **Context restart** (`agents.defaults.compaction.restartOnOverflow`, `shrink.restart_window`, `compaction.mechanical_brief`):
 The last resort of in-turn compaction at critical fill: an overflow with nothing left to elide and no
 head summary that worked rebuilds the working transcript as the protected prefix, a mechanical brief of

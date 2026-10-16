@@ -263,9 +263,6 @@ include = [
     "raven/cli/tracing_viewer/**/*.json",
     # The account gateway's own pages (sign-in, account, admin) and the strip it
     # adds to an engine's page.
-    "raven/accounts/static/*.html",
-    "raven/accounts/static/*.js",
-    "raven/accounts/static/*.css",
 ]
 
 [tool.hatch.build.targets.sdist]

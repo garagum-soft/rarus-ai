@@ -6,7 +6,6 @@ Module-level names live in ``_shared``; method groups live in mixins
 
 from __future__ import annotations
 
-from raven.accounts.gate import refusal_for_turn
 from raven.agent import knowledge_scope
 from raven.agent.harness import bind_harness, default_harness_modules
 from raven.agent.loop._shared import (
@@ -52,7 +51,6 @@ from raven.agent.loop.wiring import WiringMixin
 from raven.agent.subagent.charter import charter_scope
 from raven.agent.subagent.delegate import delegate_scope
 from raven.agent.subagent.team_state import team_brief as _team_brief
-from raven.spine.turn import AnswerlessTurnError
 
 if TYPE_CHECKING:
     from raven.agent.hook import CompositeHook
@@ -881,11 +879,6 @@ class AgentLoop(TurnPathMixin, WiringMixin, McpGlueMixin, OrganGlueMixin):
         concurrently, which is the point.
         """
         session_key = req.conversation or f"{req.source.channel}:{req.source.chat_id}"
-        # An account's engine at zero credits or over its disk allowance starts no new
-        # turn (accounts mode only -- outside it this is always None); a turn already
-        # running, and the sub-agent results that come back to it, still finish.
-        if (blocked := refusal_for_turn(req)) is not None:
-            raise AnswerlessTurnError(blocked)
         flush = True
         capture = None
         failure: BaseException | None = None

@@ -176,9 +176,6 @@ REGISTERED_COMMAND_NAMES = {
     # sub-agent process, since serving a port does not ride the tool
     # registry the way outbound `a2a_send` does.
     "a2a",
-    # Accounts mode: `raven accounts serve` is the account gateway in front of an
-    # engine per person; the rest administers accounts, credits and prices.
-    "accounts",
     # The ACP agent server: an editor spawns `raven acp` and speaks
     # JSON-RPC to its stdio. Distinct from the client direction, which is
     # not a command -- raven spawns those agents itself.
