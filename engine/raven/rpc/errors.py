@@ -1,0 +1,283 @@
+"""Custom RPC exception classes mapped to JSON-RPC 2.0 error codes.
+
+Code table (server-defined range -32000..-32099):
+
+| code   | message                       | meaning                          |
+|--------|-------------------------------|----------------------------------|
+| -32001 | session_not_found             | session_key unknown              |
+| -32002 | session_locked                | session held by another client   |
+| -32003 | turn_in_progress              | session currently running a turn |
+| -32004 | mcp_server_not_connected      | unknown / disconnected MCP       |
+| -32005 | mcp_tool_call_failed          | MCP list_tools failure           |
+| -32006 | skill_not_found               | skill_name not indexed           |
+| -32007 | skill_pin_conflict            | pin/unpin already in that state  |
+| -32008 | model_not_available           | model_id not routable            |
+| -32010 | config_field_readonly         | not on hot-changeable whitelist  |
+| -32011 | config_validation_error       | Pydantic / semver validation     |
+| -32012 | not_supported_in_v01          | hermes-only stub methods         |
+| -32013 | cli_command_failed            | cli.dispatch exit_code != 0      |
+| -32014 | cli_command_timeout           | cli.dispatch 30s timeout         |
+| -32015 | not_dispatch_compatible       | interactive Rich widget rejected |
+| -32017 | subagent_not_found            | subagent name unknown            |
+| -32020 | trajectory_disabled           | trajectory view not enabled here |
+| -32021 | entry_not_found               | trajectory entry / block unknown |
+| -32022 | cursor_expired                | trajectory page cursor stale     |
+| -32023 | revision_changed              | trajectory entry moved on        |
+
+JSON-RPC pre-defined codes (-32700/-32600/-32601) are emitted directly by the
+dispatcher and have no dedicated exception class.
+
+-32602 ``invalid_params`` is dispatcher-emitted for a frame it can reject on
+sight, and has an ``InvalidParamsError`` class for the handlers that validate
+their own params -- without it a malformed ``turn.send`` reached the client as
+an internal error with a traceback.
+
+-32603 ``internal_error`` is also dispatcher-emitted for uncaught handler
+exceptions, but it has a dedicated ``InternalError`` class so non-dispatcher
+code-paths (notably the ``_build_agent_loop`` factory invoked from
+``_spawn_agent_loop_task``) can raise typed -32603 cross-module. Without it
+those paths conflated init crashes into -32008 ``model_not_available``.
+"""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+
+class RpcError(Exception):
+    """Base class for all RPC errors mapped to JSON-RPC error frames.
+
+    Subclasses set the class-level `CODE` and `MESSAGE` constants; the
+    dispatcher reads them when serializing the error frame. `data` is
+    optional structured context (echoed into JSON-RPC `error.data`).
+    """
+
+    CODE: ClassVar[int] = -32099  # catch-all
+    MESSAGE: ClassVar[str] = "rpc_error"
+
+    def __init__(self, detail: str = "", data: dict[str, Any] | None = None):
+        self.detail = detail
+        self.data = data
+        # Default str() shows code + message + optional detail
+        super().__init__(f"{self.MESSAGE}: {detail}" if detail else self.MESSAGE)
+
+    @property
+    def code(self) -> int:
+        return self.CODE
+
+    @property
+    def message(self) -> str:
+        return self.MESSAGE
+
+
+class SessionNotFoundError(RpcError):
+    CODE = -32001
+    MESSAGE = "session_not_found"
+
+
+class SessionLockedError(RpcError):
+    CODE = -32002
+    MESSAGE = "session_locked"
+
+
+class TurnInProgressError(RpcError):
+    CODE = -32003
+    MESSAGE = "turn_in_progress"
+
+
+class McpServerNotConnectedError(RpcError):
+    CODE = -32004
+    MESSAGE = "mcp_server_not_connected"
+
+
+class McpToolCallFailedError(RpcError):
+    CODE = -32005
+    MESSAGE = "mcp_tool_call_failed"
+
+
+class SkillNotFoundError(RpcError):
+    CODE = -32006
+    MESSAGE = "skill_not_found"
+
+
+class SkillPinConflictError(RpcError):
+    CODE = -32007
+    MESSAGE = "skill_pin_conflict"
+
+
+class ModelNotAvailableError(RpcError):
+    CODE = -32008
+    MESSAGE = "model_not_available"
+
+
+class ConfigFieldReadonlyError(RpcError):
+    CODE = -32010
+    MESSAGE = "config_field_readonly"
+
+
+class ConfigValidationError(RpcError):
+    CODE = -32011
+    MESSAGE = "config_validation_error"
+
+
+class NotSupportedError(RpcError):
+    """A method the TUI knows but Raven does not back.
+
+    The wire message keeps the ``_in_v01`` spelling: the client matches on it,
+    so it changes together with the TUI, not before.
+    """
+
+    CODE = -32012
+    MESSAGE = "not_supported_in_v01"
+
+
+class CliCommandFailedError(RpcError):
+    CODE = -32013
+    MESSAGE = "cli_command_failed"
+
+
+class CliCommandTimeoutError(RpcError):
+    CODE = -32014
+    MESSAGE = "cli_command_timeout"
+
+
+class NotDispatchCompatibleError(RpcError):
+    CODE = -32015
+    MESSAGE = "not_dispatch_compatible"
+
+
+# Follow-up extension range (-32016..-32049). -32016 is subscription
+# overflow; was incorrectly aliased to -32010 in early drafts — -32010 is
+# already ConfigFieldReadonlyError.
+class SessionTitleTooLongError(RpcError):
+    CODE = -32018
+    MESSAGE = "session_title_too_long"
+
+
+class SubscriptionCapacityExceededError(RpcError):
+    CODE = -32016
+    MESSAGE = "subscription_capacity_exceeded"
+
+
+class SubagentNotFoundError(RpcError):
+    CODE = -32017
+    MESSAGE = "subagent_not_found"
+
+
+class SubagentNotReadyError(RpcError):
+    CODE = -32019
+    MESSAGE = "subagent_not_ready"
+
+
+class TrajectoryDisabledError(RpcError):
+    CODE = -32020
+    MESSAGE = "trajectory_disabled"
+
+
+class EntryNotFoundError(RpcError):
+    CODE = -32021
+    MESSAGE = "entry_not_found"
+
+
+class CursorExpiredRpcError(RpcError):
+    CODE = -32022
+    MESSAGE = "cursor_expired"
+
+
+class RevisionChangedRpcError(RpcError):
+    CODE = -32023
+    MESSAGE = "revision_changed"
+
+
+# JSON-RPC pre-defined ``invalid_params`` (-32602). Class added for the same
+# reason as the one below: a handler that validates its own params answers the
+# caller with the code for a bad request, instead of letting the pydantic
+# failure escape as an internal error with a traceback in it.
+class InvalidParamsError(RpcError):
+    CODE = -32602
+    MESSAGE = "invalid_params"
+
+
+# JSON-RPC pre-defined ``internal_error`` (-32603). Class added so non-dispatcher
+# code-paths can raise typed -32603 cross-module — see ``_build_agent_loop``
+# which runs outside any handler context yet needs to surface init crashes
+# through the factory closure consumed by ``_spawn_agent_loop_task``.
+class InternalError(RpcError):
+    CODE = -32603
+    MESSAGE = "internal_error"
+
+
+# JSON-RPC 2.0 pre-defined error codes.
+PARSE_ERROR = -32700
+INVALID_REQUEST = -32600
+METHOD_NOT_FOUND = -32601
+INVALID_PARAMS = -32602
+INTERNAL_ERROR = -32603
+
+
+# Reverse lookup: JSON-RPC code → exception class. Useful for client-side
+# reconstruction or test assertions.
+JSONRPC_ERROR_REGISTRY: dict[int, type[RpcError]] = {
+    cls.CODE: cls
+    for cls in (
+        SessionNotFoundError,
+        SessionLockedError,
+        TurnInProgressError,
+        McpServerNotConnectedError,
+        McpToolCallFailedError,
+        SkillNotFoundError,
+        SkillPinConflictError,
+        ModelNotAvailableError,
+        ConfigFieldReadonlyError,
+        ConfigValidationError,
+        NotSupportedError,
+        CliCommandFailedError,
+        CliCommandTimeoutError,
+        NotDispatchCompatibleError,
+        SubscriptionCapacityExceededError,
+        SubagentNotFoundError,
+        SessionTitleTooLongError,
+        SubagentNotReadyError,
+        TrajectoryDisabledError,
+        EntryNotFoundError,
+        CursorExpiredRpcError,
+        RevisionChangedRpcError,
+        InvalidParamsError,
+        InternalError,
+    )
+}
+
+
+__all__ = [
+    "RpcError",
+    "SessionNotFoundError",
+    "SessionLockedError",
+    "TurnInProgressError",
+    "McpServerNotConnectedError",
+    "McpToolCallFailedError",
+    "SkillNotFoundError",
+    "SkillPinConflictError",
+    "ModelNotAvailableError",
+    "ConfigFieldReadonlyError",
+    "ConfigValidationError",
+    "NotSupportedError",
+    "CliCommandFailedError",
+    "CliCommandTimeoutError",
+    "NotDispatchCompatibleError",
+    "SubscriptionCapacityExceededError",
+    "SubagentNotFoundError",
+    "SessionTitleTooLongError",
+    "SubagentNotReadyError",
+    "TrajectoryDisabledError",
+    "EntryNotFoundError",
+    "CursorExpiredRpcError",
+    "RevisionChangedRpcError",
+    "InvalidParamsError",
+    "InternalError",
+    "JSONRPC_ERROR_REGISTRY",
+    "PARSE_ERROR",
+    "INVALID_REQUEST",
+    "METHOD_NOT_FOUND",
+    "INVALID_PARAMS",
+    "INTERNAL_ERROR",
+]

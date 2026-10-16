@@ -1,0 +1,368 @@
+"""The platform's own rulings: what ships with the code and no config lifts.
+
+Two rulings, in the order the waterfall consumes them. The unconditional deny
+list holds catastrophe-class commands only -- disk devices, fork bombs, power
+control, and a recursive delete aimed at the filesystem root or the home tree;
+it outranks everything including a user allow rule, in every mode. The
+command families the running surface declared via
+``shell_policy.set_surface_approval_families`` (none by default; the runtime
+and the ACP editor both declare deletion and the external-effect families
+before building their loop) do not decide anything:
+they name the prompt -- "Publish or push work to a remote" rather than the bare
+command -- when the tiers land the call on one. Every mutation, deletes
+included, answers to the permission tiers.
+
+Both rulings read shell commands only. Classification is
+``ShellCommandPolicy``'s -- lexical segmentation, wrapper stripping, embedded
+shells, fail-closed on matcher errors -- reused in place rather than moved, so
+its tests and its surface-registration hook keep their one home.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections.abc import Callable
+from hashlib import sha256
+from typing import Any
+
+from loguru import logger
+
+from raven.contracts.permissions import DecisionSource, Deny, NeedsApproval
+from raven.permissions.shell_policy import CommandDecision, ShellCommandPolicy
+
+# Windows del/rmdir are absent here on purpose too: an ordinary del /f or
+# rmdir /s is daily cleanup and answers to the tiers, so only a recursive
+# Windows delete of a drive root or the user profile is refused, by the
+# target-sensitive matcher in shell_policy (the same stance as `rm -rf /` vs
+# `rm -rf build`). `rm` is absent here on purpose: the policy classifies it from tokens
+# (`_matches_recursive_delete` hard-denies a recursive one, everything else
+# goes to approval). A regexp here cannot tell `rm -rf /` from
+# `rm -f a.py b.json`, and denying both means the agent cannot clean up
+# after itself -- with no prompt offered, because hard deny outranks approval.
+BUILTIN_DENY_PATTERNS: tuple[str, ...] = (
+    r"\b(mkfs|diskpart)\b",  # disk operations
+    r"\bdd\s+if=",  # dd
+    r">\s*/dev/sd",  # write to disk
+    r":\(\)\s*\{.*\};\s*:",  # fork bomb
+)
+
+# Why a command was refused, in the words the reader needs. Each line names the
+# rule and where it lives, because these refusals are acted on: a deny pattern
+# is the operator's list to edit, a parse error is the command's own to fix.
+# Absent from this map, the generic text stands: a message that names the wrong
+# rule is worse than one that names none.
+_DENY_REASONS: dict[str, str] = {
+    "deny_pattern": "matches a denied pattern (tools.exec.extraDenyPatterns, plus the built-in list)",
+    "catastrophic_delete": "recursively deletes the filesystem root or the home directory",
+    "disk_format": "formats a disk using the format command",
+    "system_power": "powers the machine off or reboots it",
+    "shell_nesting_limit": "command nesting exceeds the safety inspection limit",
+    "parse_error": "could not be parsed as a shell command; an unbalanced quote is the usual cause",
+}
+
+# What the reader is being asked about, per family. An unlisted family falls
+# back to deliberately vague text rather than a guess, for the reason the map
+# above gives.
+_APPROVAL_DESCRIPTIONS: dict[str, str] = {
+    "delete_command": "Delete files using a shell command",
+    "publish_command": "Publish or push work to a remote",
+    "install_command": "Install software, which runs code from the network",
+    "remote_exec_command": "Run a command on, or copy files to, another machine",
+    "credential_command": "Read or change stored credentials",
+    "destructive_vcs_command": "Discard uncommitted work in this repository",
+    "fetch_side_effect": "Download to a file, upload data, or run what it downloads",
+}
+
+
+def _exec_machine(params: dict[str, Any]) -> str:
+    """The registered machine an exec call names, or "" for this computer.
+
+    Where a command runs changes what it puts at risk, so the machine is part
+    of the action: the human reads it on the prompt, and a refusal for one
+    machine does not pre-refuse the same command on another.
+    """
+    machine = params.get("machine")
+    return machine.strip() if isinstance(machine, str) else ""
+
+
+def action_digest(tool_name: str, params: dict[str, Any]) -> str:
+    """The per-turn dedup key for one exact call."""
+    if tool_name == "exec" and isinstance(params.get("command"), str):
+        material = params["command"]
+        if machine := _exec_machine(params):
+            material = f"{material}\x00on:{machine}"
+    else:
+        material = json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+    return sha256(f"{tool_name}\x00{material}".encode()).hexdigest()
+
+
+def session_keys(tool_name: str, params: dict[str, Any], ask_segments: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """What a "for this session" grant remembers, one key per part still asking.
+
+    For exec that is each segment no rule covers, keyed with the machine and
+    the directory it runs in -- the same command text in another directory is
+    another action, so a grant never travels; the directory is the one the
+    call named, else the turn's binding, else the construction-time default
+    (stable for a conversation, so leaving it empty still distinguishes). The
+    two builtin file writers are keyed by path and directory: the content
+    changes every call, the path is what the human looked at, and a relative
+    path names another file once the directory is rebound. The browser's acting
+    tools share one key per site: what the human approved was letting the agent
+    work on that site, and a click and the typing that follows it are one such
+    piece of work, not two. One that names no site -- the page it acts on has
+    none yet: a tab it is about to open, or one still blank -- keys the exact
+    call, so its grant is never presented by a call to a real site. Every other
+    tool keys the exact call -- a `path` field on an unknown tool says nothing
+    about what its other fields do.
+    """
+    if tool_name == "exec" and ask_segments:
+        working_dir = params.get("working_dir")
+        cwd = (working_dir.strip() if isinstance(working_dir, str) else "") or _bound_workdir()
+        machine = _exec_machine(params)
+        return tuple(
+            sha256(f"exec\x00{segment}\x00cwd:{cwd}\x00on:{machine}".encode()).hexdigest() for segment in ask_segments
+        )
+    path = params.get("path")
+    if tool_name in PATH_KEYED_TOOLS and isinstance(path, str) and path.strip():
+        material = f"{tool_name}\x00path:{os.path.normpath(path.strip())}\x00cwd:{_bound_workdir()}"
+        return (sha256(material.encode()).hexdigest(),)
+    site = params.get(BROWSER_SITE_PARAM)
+    if tool_name in BROWSER_SITE_KEYED_TOOLS and isinstance(site, str) and site.strip():
+        return (sha256(f"browser\x00site:{site.strip().lower()}".encode()).hexdigest(),)
+    return (action_digest(tool_name, params),)
+
+
+PATH_KEYED_TOOLS: frozenset[str] = frozenset({"edit_file", "write_file"})
+
+BROWSER_SITE_KEYED_TOOLS: frozenset[str] = frozenset({"browser_click", "browser_type", "browser_press"})
+# The parameter the browser tools write the site into before the gate reads
+# the call; spelled here as well as there so neither side can rename it alone.
+BROWSER_SITE_PARAM = "site"
+
+
+def _bound_workdir() -> str:
+    from raven.agent.workdir import current as current_workdir
+
+    return str(current_workdir() or "")
+
+
+#: How long a value may be before it is shortened rather than shown whole.
+_INLINE_ARG_LIMIT = 60
+
+#: How much of a shortened value survives, taken from both ends. Enough that a
+#: path, an id or a url is still recognisable as the one meant, and little
+#: enough that prose cannot push the other arguments off the line.
+_ELIDED_WIDTH = 32
+
+#: The whole line, after which the remaining arguments are counted rather than
+#: listed. A question a person cannot read to the end is one they answer out of
+#: habit.
+_ACTION_LINE_LIMIT = 160
+
+
+def _scalar_summary(text: str) -> str:
+    """One scalar, shortened from the middle so that both of its ends survive.
+
+    Length alone cannot tell a target from prose. A deeply nested workspace path
+    and a long generated id are as long as a paragraph and are the opposite kind
+    of thing: they say *what the call acts on*, and an approver who is handed a
+    character count instead cannot tell which file is about to be overwritten.
+    Naming every long value by its size hid exactly those.
+
+    Cutting from the middle keeps what identifies a value at both ends -- the
+    root and the filename of a path, the prefix and the suffix of an id -- and
+    bounds prose to a fixed window that cannot push the other arguments off the
+    line. The count is kept beside it, because how much material a call carries
+    is itself worth knowing, and because that is the part an elision hides.
+
+    The trade is deliberate and worth naming: a few dozen characters of a brief
+    now reach the prompt where none did a revision ago. That is a fingerprint
+    rather than the brief, it cannot crowd out the fields that decide the call,
+    and it buys back every long identifier -- including the ones with spaces in
+    them, which no shape test would have classified correctly.
+    """
+    if len(text) <= _INLINE_ARG_LIMIT:
+        return repr(text)
+    keep = _ELIDED_WIDTH // 2
+    elided = f"{text[:keep]}...{text[-keep:]}"
+    return f"{elided!r} ({len(text)} chars)"
+
+
+def _argument_summary(value: Any, budget: int) -> str:
+    """One argument, as short as it can be without hiding what it targets.
+
+    Two different things get shortened here and they need opposite treatment.
+    Prose -- a brief, a file body, a message -- is the material the call carries,
+    and pasting it into the question pushes out everything the reader needs, so a
+    long string is named by its size. A container is not prose: a list of paths,
+    a graph's nodes and the agents they name are what the call will *act on*, and
+    an approver who cannot see them cannot approve. So containers are opened
+    rather than counted, as far as the budget allows, and whatever did not fit is
+    counted beside what did -- a partial list plus a remainder still says what
+    kind of thing this call touches, where a bare count says nothing at all.
+
+    That the leaves stay short is what makes opening a container safe: a node
+    carrying an 800-character prompt renders as its id, its agent and a named
+    size, not as the prompt.
+    """
+    if isinstance(value, str):
+        return _scalar_summary(value)
+    if isinstance(value, (list, tuple)):
+        return _container_summary([_argument_summary(item, budget) for item in value], budget, "[", "]", "items")
+    if isinstance(value, dict):
+        pieces = [f"{k}={_argument_summary(v, budget)}" for k, v in value.items()]
+        return _container_summary(pieces, budget, "{", "}", "keys")
+    text = str(value)
+    # A number or a flag is its own spelling; only text is quoted, so a reader
+    # can tell `append=False` from a string that happens to read "False".
+    return text if len(text) <= _INLINE_ARG_LIMIT else _scalar_summary(text)
+
+
+def _container_summary(pieces: list[str], budget: int, open_: str, close: str, noun: str) -> str:
+    """As many rendered members as the budget holds, and a count of the rest."""
+    if not pieces:
+        return f"{open_}{close}"
+    shown: list[str] = []
+    room = budget - 2
+    for piece in pieces:
+        if room - len(piece) - 2 < 0:
+            break
+        shown.append(piece)
+        room -= len(piece) + 2
+    hidden = len(pieces) - len(shown)
+    if not shown:
+        # Nothing fit whole, so the first member is cut to what is left rather
+        # than the whole container being replaced by its size. A count alone is
+        # the one answer that tells an approver nothing about what is touched,
+        # and a container is reached only when something is.
+        head = pieces[0]
+        shown = [head if len(head) <= budget else head[: max(budget - 3, 8)] + "..."]
+        hidden = len(pieces) - 1
+    body = ", ".join(shown)
+    if hidden:
+        body += f", +{hidden} more"
+    return f"{open_}{body}{close}"
+
+
+def action_line(tool_name: str, params: dict[str, Any]) -> str:
+    """The action as a human should read it in an approval prompt.
+
+    A summary, not the payload. This used to serialise the arguments and cut the
+    JSON at a fixed width, which read as a log line rather than a question: for a
+    tool whose brief is one of its arguments -- a sub-agent dispatch is the plain
+    case -- the prompt asking whether to allow the call was mostly the prompt
+    being sent, truncated mid-sentence, and the fields that actually decide it
+    were past the cut.
+
+    ``exec`` keeps its own rendering, which was always this: the command is the
+    action, and there is nothing to summarise.
+    """
+    if tool_name == "exec" and isinstance(params.get("command"), str):
+        if machine := _exec_machine(params):
+            return f"{params['command']} (on {machine})"
+        return params["command"]
+    shown: list[str] = []
+    room = _ACTION_LINE_LIMIT - len(tool_name)
+    for key in sorted(params):
+        # The budget handed down is what is left *after* this argument's name,
+        # so a value rendered to fit actually fits. Getting that wrong drops the
+        # whole argument rather than shortening it, which is the one outcome
+        # worse than a bare count: a delete whose paths did not fit would say
+        # nothing about what it deletes.
+        piece = f"{key}={_argument_summary(params[key], max(room - len(key) - 1, _INLINE_ARG_LIMIT))}"
+        if shown and room - len(piece) - 1 < 0:
+            break
+        shown.append(piece)
+        room -= len(piece) + 1
+    hidden = len(params) - len(shown)
+    if hidden > 0:
+        shown.append(f"(+{hidden} more)")
+    return " ".join([tool_name, *shown]) if shown else tool_name
+
+
+class BuiltinRulings:
+    """Both platform rulings over one call, answered in one classification."""
+
+    def __init__(
+        self,
+        *,
+        extra_deny_patterns: list[str] | None = None,
+        extra_deny_source: Callable[[], list[str] | None] | None = None,
+    ) -> None:
+        self._extra_deny_current = list(extra_deny_patterns or [])
+        self._extra_deny_source = extra_deny_source
+        self._policy = ShellCommandPolicy(deny_patterns=list(BUILTIN_DENY_PATTERNS) + self._extra_deny_current)
+
+    def _refresh_deny_patterns(self) -> None:
+        """Track the operator's extra deny list as it stands on disk.
+
+        Runs before every classification, not once per turn: tightening a
+        permission must bind the tool call that is about to run, and loosening
+        works the same way -- the list is the operator's own choice in both
+        directions. A reader answering ``None`` means "no live answer" and
+        keeps the current extras; a pattern that does not compile rejects the
+        whole edit and keeps the current policy (``set_deny_patterns`` swaps
+        the deny set in place, so registered approval families survive).
+        """
+        if self._extra_deny_source is None:
+            return
+        try:
+            extras = self._extra_deny_source()
+        except Exception:
+            return
+        if extras is None:
+            return
+        extras = [str(pattern) for pattern in extras]
+        if extras == self._extra_deny_current:
+            return
+        try:
+            self._policy.set_deny_patterns(list(BUILTIN_DENY_PATTERNS) + extras)
+        except re.error as exc:
+            logger.warning("tools.exec extra deny patterns rejected ({}); keeping the current set", exc)
+            return
+        self._extra_deny_current = extras
+
+    def ruling(self, tool_name: str, params: dict[str, Any]) -> Deny | NeedsApproval | None:
+        """This call's builtin ruling, or None where the platform has no say.
+
+        A ``Deny`` is a verdict. A ``NeedsApproval`` from here is only the
+        declared family's description for the gate to carry -- the gate still
+        runs the tiers and the mode before deciding whether anyone is asked.
+        Only shell commands are classified today; every other tool answers
+        None and is governed by tiers alone.
+        """
+        if tool_name != "exec":
+            return None
+        command = params.get("command")
+        if not isinstance(command, str):
+            return None
+        self._refresh_deny_patterns()
+        outcome = self._policy.classify(command)
+        if outcome.decision is CommandDecision.HARD_DENY:
+            why = _DENY_REASONS.get(outcome.reason_code, "")
+            reason = f"Command blocked by safety guard: it {why}" if why else "Command blocked by safety guard"
+            if outcome.reason_code == "parse_error":
+                # Fail-closed but not protected: no rule refused this command,
+                # the parse did. Naming it apart is what lets the gate answer
+                # with "fix the quote and retry" instead of "abandon this".
+                return Deny(reason=reason, source=DecisionSource.BUILTIN_PARSE_ERROR)
+            return Deny(reason=reason, source=DecisionSource.BUILTIN_DENY)
+        if outcome.decision is CommandDecision.REQUIRE_APPROVAL:
+            description = _APPROVAL_DESCRIPTIONS.get(outcome.reason_code, "Run a command that needs your approval")
+            return NeedsApproval(
+                reason=f"Command requires user approval: {description.lower()}",
+                description=description,
+                digest=action_digest(tool_name, params),
+                family=outcome.reason_code,
+            )
+        return None
+
+
+__all__ = [
+    "BUILTIN_DENY_PATTERNS",
+    "BuiltinRulings",
+    "action_digest",
+    "action_line",
+]

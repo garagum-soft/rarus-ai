@@ -1,0 +1,475 @@
+/* The approval sheet.
+ *
+ * An approval request is the same kind of interruption as ask_user -- the turn
+ * is blocked on the reader -- so it wears the same clothes: the sheet above the
+ * composer, Esc or the close button means no. It is answered with the chords
+ * agent products answer a tool call with -- Cmd+Enter to allow, Shift added
+ * for the broader grant -- each drawn on its button. Digits were the answer
+ * keys once, and read backwards to anyone used to a terminal agent: deny was
+ * 1 here and yes is 1 there. A centred modal
+ * made the two read as different classes of event and put the answer somewhere
+ * the reader was not already looking.
+ *
+ * Beside the rack rather than in shell/, because it is a tenant of it: one sheet
+ * appended to #sheetRack, filed under the conversation that asked. That is also
+ * why its opener is the composer's rather than a domain of its own -- the
+ * rack's six names are already the composer's, and this is the seventh thing
+ * the page does to that rack.
+ *
+ * What is here is each sheet's own element and the answers it can give; the
+ * markup inside them is features/composer/AskApproveSheet.tsx (the preview variant) and
+ * features/composer/GateSheet.tsx. The element belongs to this module because the
+ * rack files it under a conversation and styles it as its flex item, and so does
+ * the key handler, which lives as long as the request rather than as long as its
+ * interior: a parked sheet is unmounted and still pending.
+ *
+ * "The conversation that asked" is a fact the caller has to carry in, not one
+ * this module can read: see `owner` on :func:`open`.
+ */
+
+import { createElement } from 'react'
+
+import { t } from '../../i18n/t'
+import { ESC_LABEL, chordLabel, sendChord } from '../../lib/platform'
+import { add as sheetAdd, dropClass, remove as sheetRemove, session } from '../../state/sheetRack'
+import { ds } from '../../state/sources'
+import { AskApproveSheet } from './AskApproveSheet'
+import { configRows, GateSheet, LandedSheet } from './GateSheet'
+import { composing } from './store'
+
+import type { SheetOptionRow } from '../../chrome/SheetRack'
+import type { ConfigAgentWords, Evidence, GateWords, LandedProps, LandedWords } from './GateSheet'
+
+/* The permission gate's approval, keyed so approval.closed can withdraw the
+   exact request it retires (a teardown, an answer from another surface)
+   without touching a newer one. */
+const openApprovals = new Map<string, () => void>()
+
+/* Marks the one question no clock will ever retire. A clarify ends on its own
+   after ten minutes (question_broker) and a confirm on its own hard limit, so
+   sweeping either away unanswered costs a wait. The permission gate's ask has
+   only a day-long floor under it, so swept away unanswered its call waits until
+   somebody presses stop -- the state this whole change exists to make
+   impossible. Set by `openApproval` alone: `.perm` and `data-asks` do not say
+   this, both being worn by the confirm sheet too. */
+const NO_DEADLINE = 'noDeadline'
+
+/* The sheets a sweep must leave standing. Exported because the sweeps that can
+   reach one are in two modules, and a second copy of this rule is how one of
+   them comes to disagree with the other. */
+export const sparePendingApproval = (el: HTMLElement): boolean =>
+  el.dataset[NO_DEADLINE] === '1'
+
+export interface Approval {
+  /* Takes the sheet down without answering. For a caller that has learned the
+     question is moot -- the turn was cancelled, the session closed. */
+  close(): void
+}
+
+export function open(
+  prompt: string, onAllow?: () => void, onDeny?: () => void, owner?: string,
+): Approval {
+  /* The conversation this request belongs to, read once and passed to all three
+     of the calls that are scoped by it. Reading it again later would be a way
+     for them to disagree -- the reader can switch conversations between any two
+     lines of an async page.
+
+     `owner` is the conversation the request was raised in, which the caller
+     learns from the frame that raised it (state/session/pipeline.ts). It is not always
+     the open one: a turn the reader stepped away from can block on an approval
+     at any moment, and filing that under whatever is on screen puts the question
+     over a conversation it does not belong to -- while the conversation that
+     asked shows nothing pending and stays paused on the server.
+
+     The fallback is for a caller with no conversation to name: the design canvas
+     preview, and a frame from a dispatch the server could not attribute. */
+  const key = owner || session()
+
+  /* One question at a time in THIS conversation: a new request replaces the
+     pending one rather than stacking a second sheet the reader has to answer
+     twice. One sweep does it: every sheet of this kind in this bucket goes --
+     and each goes down through the rack's teardown, so the one that was holding
+     a key handler unregisters it on the way out. A pending approval is the one
+     exception, for the reason `sparePendingApproval` gives. */
+  dropClass('csheet', key, sparePendingApproval)
+
+  const sheet = document.createElement('div')
+  sheet.className = 'csheet perm'
+  /* This one asks: the reader cannot get on until they answer it. The sweeps
+     read the mark to know what they may replace (state/sheetRack.ts). */
+  sheet.dataset.asks = '1'
+  sheet.setAttribute('role', 'dialog')
+  sheet.setAttribute('aria-modal', 'true')
+  sheet.setAttribute('aria-label', t('gui.confirm.title'))
+
+  let answered = false
+  const close = (fn?: () => void): void => {
+    if (answered) return
+    answered = true
+    document.removeEventListener('keydown', onKey, true)
+    sheetRemove(sheet)
+    if (fn) fn()
+  }
+  /* Answering nothing, which is what a withdrawal is: the question stopped
+     mattering, so neither side is told. */
+  const withdraw = (): void => close()
+
+  /* Deny first and focused, allow last, as on the permission gate's card: the
+     sheet arrives unasked, and a bare Enter pressed at that moment must not
+     grant. */
+  const opts: SheetOptionRow[] = [
+    { label: t('gui.confirm.deny'), run: () => close(onDeny), go: true, keys: ESC_LABEL },
+    { label: t('gui.confirm.allow'), run: () => close(onAllow), keys: chordLabel() },
+  ]
+
+  function onKey(e: KeyboardEvent): void {
+    /* A sheet parked with another conversation is still listening: the handler
+       is on the document, and the rack detaches the element rather than
+       destroying it so the reader comes back to the same question. Only the
+       mounted one may be answered from the keyboard, or a chord pressed here
+       would allow something another conversation asked. */
+    if (!sheet.isConnected || composing(e) || !topmost(sheet)) return
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(onDeny); return }
+    if (typing(e)) return
+    if (sendChord(e) === 'plain') { e.preventDefault(); close(onAllow) }
+  }
+  document.addEventListener('keydown', onKey, true)
+
+  /* The withdrawal handed to the rack, not kept here: the rack sees every exit
+     -- including the conversation being deleted, which never reaches this
+     module -- and a second copy of who-owns-what could only disagree with it. */
+  sheetAdd(sheet, key, withdraw, createElement(AskApproveSheet, {
+    title: t('gui.confirm.title'),
+    prompt: prompt || '',
+    opts,
+  }))
+  const first = sheet.querySelector<HTMLElement>('.opt')
+  if (first && sheet.isConnected) first.focus()
+  return { close: withdraw }
+}
+
+
+export interface ApprovalOrigin {
+  kind: string
+  name: string
+}
+
+/** raven/rpc/approval_broker.py's request, as the sheet reads it. */
+export interface ApprovalReq {
+  approvalId: string
+  command: string
+  description: string
+  /* The prefix rule the runtime found safe to offer for persisting; absent
+     when there is none, and then the sheet offers no such choice. */
+  suggestedPattern?: string
+  /* The prompt's view, as the engine sent it: the layout (`shell.exec`,
+     `file.write`, `mcp.call`, `config.change`, `unknown`), the shell command family that words
+     it, who is asking, and the tool's own account of the call. */
+  kind?: string
+  family?: string
+  origin?: ApprovalOrigin
+  evidence?: Evidence
+}
+
+export interface ApprovalHandlers {
+  /** The answer: allow, allow_always (with the rule to save), or deny. Resolving
+      false means the engine did not take it -- the request had gone, or the
+      connection dropped -- and the landed line says so. */
+  onChoice: (choice: string, feedback: string, pattern?: string) => void | Promise<boolean>
+  /* Takes back the rule THIS answer wrote. It names the answer, not the rule:
+     the engine decides what that answer put on disk, so an undo cannot reach a
+     rule the reader wrote themselves, and cannot race the write. Resolves false
+     when this answer wrote nothing of its own. */
+  onRevoke?: () => Promise<boolean>
+}
+
+/* How long a landed sheet stays: long enough to read, and for a saved rule
+   long enough to take back. */
+export const LANDED_MS = 4000
+export const LINGER_MS = 12000
+
+/* The timers taking landed sheets down, so a test can clear what it started. */
+const landings = new Set<ReturnType<typeof setTimeout>>()
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+/* The agents an add connects, each as the card says it: who, and whose key it
+   starts with when it borrows Raven's. */
+const agentsAdded = (row: Evidence): ConfigAgentWords[] =>
+  (Array.isArray(row.agents) ? (row.agents as Evidence[]) : []).map((agent) => {
+    const name = str(agent.title) || str(agent.name) || str(agent.preset)
+    const key = str(agent.lend_key)
+    return {
+      said: key ? t('gui.confirm.cfg.add_lend', { name, key }) : t('gui.confirm.cfg.add', { name }),
+      model: str(agent.model) ? t('gui.confirm.cfg.add_model', { model: str(agent.model) }) : '',
+    }
+  })
+
+/* A key pressed into a field is the field's, not an answer: the composer sits
+   under every sheet, and its own Cmd+Enter sends a message -- it must not allow
+   a command, or worse, save a rule. Escape is not guarded: leaving a field and
+   refusing the question is what it has always done. */
+const typing = (e: KeyboardEvent): boolean => {
+  const el = e.target as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+
+/* The newest sheet owns the keyboard: a question docked above this one takes
+   the keys until it is answered, or one chord would answer both. */
+const topmost = (sheet: HTMLElement): boolean =>
+  !sheet.parentElement || sheet.parentElement.firstElementChild === sheet
+
+const shortened = (p: string): string => {
+  try {
+    return ds('workspace').shortPath(p) || p
+  } catch {
+    /* Before the workspace domain is wired, and in a test that never wires it. */
+    return p
+  }
+}
+
+/* The rule sentence around its pattern. The catalogue places the pattern, so
+   the sentence is asked for with a mark in the pattern's place and cut there;
+   a sentence that lost its mark still shows, with the pattern after it. */
+function ruleWords(pattern: string | undefined): [string, string, string] | undefined {
+  if (!pattern) return undefined
+  const MARK = '\u0000'
+  const said = t('gui.confirm.always_rule', { pattern: MARK })
+  const at = said.indexOf(MARK)
+  return at < 0 ? [`${said} `, pattern, ''] : [said.slice(0, at), pattern, said.slice(at + MARK.length)]
+}
+
+/* The words a request is asked in. The family names the sentence when the
+   engine sent one; a bare shell command, a file write, an MCP call and a tool
+   the page has no layout for each have a sentence of their own. */
+function wordsFor(req: ApprovalReq): GateWords {
+  const kind = req.kind || 'unknown'
+  const ev = req.evidence || {}
+  const path = str(ev.path)
+  const vars = {
+    /* A name is a value, not copy: the catalogue translates the sentence around
+       it and leaves names, commands and paths alone (the same rule the
+       sub-agent's own name rides on), so the default agent's name is a literal
+       here rather than a key. */
+    who: req.origin?.kind === 'subagent' && req.origin.name ? req.origin.name : 'Raven',
+    cwd: str(ev.cwd) || str(ev.machine),
+    /* The sentence gets the short form and the evidence block keeps the whole
+       path: one absolute path is four lines of a small sheet, and printing it
+       twice says nothing the second time. The panel's own shortener, through
+       the seam, so the sheet spells a path the way the rest of the page does. */
+    path: shortened(path),
+    name: path.slice(path.lastIndexOf('/') + 1) || path,
+    server: str(ev.server),
+    tool: str(ev.tool),
+  }
+  const slot = kind === 'shell.exec' ? (req.family || 'shell')
+    : kind === 'file.write' ? 'file_write'
+      : kind === 'mcp.call' ? 'mcp_call'
+        : kind === 'config.change' ? 'config_change' : 'unknown'
+  const cfg = kind === 'config.change'
+    ? {
+      reset: t('gui.confirm.cfg.reset'),
+      reload: t('gui.confirm.cfg.reload'),
+      restart: t('gui.confirm.cfg.restart'),
+      keyField: t('gui.confirm.cfg.key_field'),
+      keyIsSet: t('gui.confirm.cfg.key_is_set'),
+      keyNoField: t('gui.confirm.cfg.key_no_field'),
+      rows: configRows(ev).map((row) => ({
+        effect: str(row.effect) ? t('gui.confirm.cfg.effect.' + str(row.effect), {}, '') : '',
+        sensitive: str(row.sensitive)
+          ? t('gui.confirm.cfg.sensitive', {
+            note: str(row.sensitive_key)
+              ? t('gui.confirm.cfg.why.' + str(row.sensitive_key), null, str(row.sensitive))
+              : str(row.sensitive),
+          })
+          : '',
+        unsetTo: str(row.unset_to) ? t('gui.confirm.cfg.unset_to.' + str(row.unset_to), {}, '') : '',
+        test: str(row.action) === 'test'
+          ? t('gui.confirm.cfg.test', { name: str(row.setting).replace(/^subagents\./, '') })
+          : '',
+        agents: agentsAdded(row),
+      })),
+    }
+    : undefined
+  return {
+    rule: ruleWords(req.suggestedPattern),
+    title: t('gui.confirm.title.' + slot, vars, t('gui.confirm.title.unknown', vars)),
+    why: t('gui.confirm.why.' + slot, vars, t('gui.confirm.why.unknown', vars)),
+    deny: t('gui.confirm.deny'),
+    created: t('gui.confirm.ev.created'),
+    nodiff: t('gui.confirm.ev.nodiff'),
+    cut: t('gui.confirm.ev.cut'),
+    cfg,
+  }
+}
+
+/* The permission gate's ask: deny (the agent reads the refusal and goes on),
+   the broader grant this request can carry (a saved rule when the runtime
+   suggested one, the conversation otherwise), or allow once. Deny is the
+   default and takes the focus, so an accidental Enter never grants. The answer
+   is sent the moment it is chosen, and the sheet goes with it: the only thing
+   that outlives an answer is a line the reader can act on -- a saved rule to
+   take back, or the news that the engine never took the answer at all. */
+export function openApproval(req: ApprovalReq, handlers: ApprovalHandlers, owner?: string): Approval {
+  /* One sheet per request: a replay after a reload may name a request that is
+     already on screen, and a second sheet for it would be answered twice. */
+  const already = openApprovals.get(req.approvalId)
+  if (already) return { close: already }
+  const key = owner || session()
+  /* This sweep takes a pending clarify question down, while clarify's spares a
+     pending approval. The asymmetry is the deadline: a question ends on its own
+     after ten minutes (raven/rpc/question_broker.py), an approval waits for the
+     person. Two of this conversation's own approvals cannot meet here -- the
+     broker sends the second only once the first is answered. */
+  dropClass('csheet', key)
+
+  const words = wordsFor(req)
+  const sheet = document.createElement('div')
+  sheet.className = 'csheet perm'
+  sheet.dataset.asks = '1'
+  sheet.dataset[NO_DEADLINE] = '1'
+  sheet.setAttribute('role', 'dialog')
+  sheet.setAttribute('aria-modal', 'true')
+  sheet.setAttribute('aria-label', words.title)
+
+  let answered = false
+  const leave = (): void => {
+    answered = true
+    openApprovals.delete(req.approvalId)
+    document.removeEventListener('keydown', onKey, true)
+    sheetRemove(sheet)
+  }
+  const withdraw = (): void => {
+    if (!answered) leave()
+  }
+  const answer = (choice: string, pattern?: string): void => {
+    if (answered) return
+    leave()
+    land(key, choice, pattern, handlers, handlers.onChoice(choice, '', pattern))
+  }
+  openApprovals.set(req.approvalId, withdraw)
+
+  /* A change to Raven's own configuration asks every time (the gate grants no
+     session key for it), so offering to stop asking would promise nothing. */
+  const once = req.kind === 'config.change'
+  /* The broader grant: a saved rule when the runtime suggested one, the
+     conversation otherwise. One of the two, and Shift+Cmd+Enter is it. */
+  const broader = once
+    ? null
+    : req.suggestedPattern
+      ? () => answer('allow_always', req.suggestedPattern)
+      : () => answer('allow_session')
+  const opts: SheetOptionRow[] = [
+    { label: t('gui.confirm.deny'), run: () => answer('deny'), go: true, keys: ESC_LABEL },
+    ...(!broader ? [] : req.suggestedPattern
+      ? [{
+        label: t('gui.confirm.always'),
+        run: broader,
+        keys: chordLabel(true),
+      }]
+      /* Nothing to save: a file write and an MCP call have no rule table to
+         land in (permissions.tools takes prefix patterns for exec alone), so
+         the only thing that stops the same question repeating through a task
+         is the grant that lasts as long as the conversation. Offered in the
+         saved rule's place, never beside it -- two "don't ask again" answers
+         side by side is a question about storage the reader did not come here
+         to answer. */
+      : [{ label: t('gui.confirm.allow_session'), run: broader, keys: chordLabel(true) }]),
+    { label: t('gui.confirm.allow'), run: () => answer('allow'), keys: chordLabel() },
+  ]
+
+  function onKey(e: KeyboardEvent): void {
+    if (!sheet.isConnected || composing(e) || !topmost(sheet)) return
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); answer('deny'); return }
+    if (typing(e)) return
+    const chord = sendChord(e)
+    if (!chord) return
+    e.preventDefault()
+    if (chord !== 'shift') answer('allow')
+    else if (broader) broader()
+  }
+  document.addEventListener('keydown', onKey, true)
+
+  sheetAdd(sheet, key, withdraw, createElement(GateSheet, {
+    kind: req.kind || 'unknown',
+    evidence: req.evidence || {},
+    command: req.command || '',
+    words,
+    opts,
+  }))
+  const first = sheet.querySelector<HTMLElement>('.opt')
+  if (first && sheet.isConnected) first.focus()
+  return { close: withdraw }
+}
+
+/* What an answer leaves behind, when it leaves anything. An answer that simply
+   landed says nothing: the reader pressed the button, the sheet going is the
+   receipt, and a line that only repeats the press is one more thing to read.
+   Two answers do leave a line, because both leave something to do -- a saved
+   rule, which nothing else in the product can take back, and an answer the
+   engine never took, which means the turn is still waiting. Docked as a sheet
+   of its own rather than the asking one re-dressed, so the rack's count of who
+   is asking drops the moment the answer is given. */
+function land(
+  key: string, choice: string, pattern: string | undefined, handlers: ApprovalHandlers,
+  sent: void | Promise<boolean>,
+): void {
+  const el = document.createElement('div')
+  el.className = 'csheet perm'
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const drop = (): void => {
+    if (timer) {
+      clearTimeout(timer)
+      landings.delete(timer)
+    }
+    timer = null
+  }
+  const gone = (): void => {
+    drop()
+    sheetRemove(el)
+  }
+  const stay = (ms: number): void => {
+    drop()
+    timer = setTimeout(gone, ms)
+    landings.add(timer)
+  }
+  const show = (words: LandedWords, more: Omit<LandedProps, 'words'> = {}): void =>
+    sheetAdd(el, key, drop, createElement(LandedSheet, { words, ...more }))
+  /* Landed on the reader's click, corrected if the engine never took the
+     answer: the request had gone, or the socket dropped mid-call. The turn is
+     then still waiting, which the line has to say rather than "allowed". */
+  const undelivered = (): void => {
+    show({ text: t('gui.confirm.land.unsent') })
+    stay(LINGER_MS)
+  }
+  void Promise.resolve(sent).then((ok) => { if (ok === false) undelivered() }, undelivered)
+
+  if (choice === 'allow_always' && pattern) {
+    const onUndo = handlers.onRevoke
+      ? (): void => {
+        void handlers.onRevoke!().then((ok) => {
+          /* The failure names the rule: it is still on disk, and the line is
+             the reader's only pointer to what to delete by hand. */
+          show({ text: t(ok ? 'gui.confirm.land.revoked' : 'gui.confirm.land.revoke_failed', { pattern }) })
+          stay(LANDED_MS)
+        })
+      }
+      : undefined
+    show({ text: t('gui.confirm.land.always', { pattern }), undo: t('gui.confirm.land.revoke') }, { onUndo })
+    stay(LINGER_MS)
+  }
+}
+
+/* approval.closed: the server retired this request (a teardown, or an answer
+   from another surface). Nothing is sent back -- the question is over. A
+   request already answered here has left this map, so its landed sheet stays. */
+export function closeApproval(approvalId: string): void {
+  openApprovals.get(approvalId)?.()
+}
+
+/* Test seam only: the landing timers outlive a test file's DOM. */
+export function _resetForTests(): void {
+  landings.forEach((timer) => clearTimeout(timer))
+  landings.clear()
+  openApprovals.clear()
+}

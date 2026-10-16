@@ -1,0 +1,880 @@
+"""A minimal ACP server, run as a subprocess by ``tests/test_subagent_acp.py``.
+
+Not a test module (pytest collects ``test_*``): this is the executable under
+test's other end. It is a real child process talking real newline-delimited
+JSON-RPC over stdio, so the tests exercise launch, the read loop, request
+correlation and teardown rather than a mocked client.
+
+Behaviour is chosen by ``ACP_STUB_MODE``:
+
+- ``ok``           - full handshake, one text chunk plus a tool call, then end_turn.
+- ``reject_init``  - answers ``initialize`` with a JSON-RPC error.
+- ``no_session``   - handshake fine, ``session/new`` errors (an auth-shaped message).
+- ``no_session_sdk`` - like ``no_session``, but refused the way both ACP SDKs wrap
+                     an unhandled exception: the placeholder ``Internal error`` as
+                     the message and the reason in ``data.details``.
+- ``no_session_other`` - like ``no_session``, but the refusal is about anything
+                     else. The handshake still advertises an auth method, which is
+                     the point: an advertisement is not evidence that THIS refusal
+                     was about a credential.
+- ``empty_turn``   - handshake and session fine, but the prompt produces no content
+                     and still reports ``stopReason: end_turn``, with the real
+                     reason on stderr. This is the shape measured on a live
+                     ``hermes acp`` whose provider rejected the credential.
+- ``failed_call``  - like ``ok``, but the tool call answers ``status: "failed"``
+                     and the turn goes on to say something after it. A run that
+                     failed a call and still finished, which is the shape a
+                     record could not tell from one that worked.
+- ``noisy``        - like ``ok``, but writes non-JSON diagnostics to stdout and a
+                     large volume to stderr before answering.
+- ``flood``        - like ``ok``, but writes one stderr line past the reader's limit,
+                     followed by an ordinary one, before answering.
+- ``npm_fetch_fails`` - dies before speaking with what npm 10 printed for an
+                     unreachable registry, stack trace and all: the shape ``npx``
+                     takes when it cannot fetch the adapter it was asked to run.
+- ``asks``         - requests something raven does not implement (``fs/read_text_file``,
+                     declared unsupported in ``CLIENT_CAPABILITIES``) and, having been
+                     refused, ends the turn with no content and nothing on stderr. This
+                     is the shape an adapter takes when raven answers "method not found".
+- ``asks_late``    - holds prompts until two are in flight, then makes that same
+                     unsupported request on the *second* session only and ends both
+                     turns empty. For the cross-talk case: one shared connection, two
+                     sessions, and only one of them asked for anything.
+- ``permission``   - asks ``session/request_permission`` with a real option list and
+                     answers the prompt with the ``optionId`` raven chose, so a test can
+                     assert *which* option it picked rather than only that it answered.
+- ``malformed_ids`` - sends a request id and a retraction id that no dict can
+  hold, while an earlier answer is still in flight.
+- ``elicits_then_retracts`` - asks ``elicitation/create``, then retracts it with
+  ``$/cancel_request`` and ends the turn without ever reading an answer.
+- ``elicits_then_streams`` - asks ``elicitation/create`` and does not wait for an
+                     answer, then streams three chunks and ends the turn. Proves a
+                     handler that blocks on a human does not stall delivery on the
+                     same connection.
+- ``elicits_then_dies`` - asks ``elicitation/create``, then exits: the connection
+                     ends while raven is still answering. For the read-loop death
+                     path, where a pending answer task must not outlive the loop.
+- ``elicits_and_waits`` - asks ``elicitation/create`` and holds the prompt open
+                     until raven answers it, then reports what was chosen. For the
+                     end-to-end path: an agent's question reaching a real human and
+                     the answer coming back into the same turn.
+- ``elicits_first_then_serves`` - the first session's prompt asks
+                     ``elicitation/create`` and holds; every later session streams
+                     and ends the turn. The two-session case of the pooled
+                     connection: one session's pending question must not stall
+                     another's whole round trip.
+- ``no_session_delete`` - like ``ok`` but ``sessionCapabilities`` does not
+                     advertise ``delete``, so a gated client must skip the call.
+- ``delete_fails``   - advertises ``delete`` and answers ``session/delete`` with
+                     method-not-found, for the failure-log path.
+- ``asks_user_and_waits`` - notifies an ``ask_user_request`` session update and holds
+                     the prompt until raven sends ``_raven/clarify_respond``, then reports
+                     the answer. Raven-X's extension route, end to end: a notification out
+                     and a request back, rather than one request answered by its result.
+- ``asks_user_then_streams`` - notifies the same question, does not wait, and streams
+                     three chunks. Notifications are dispatched inline on raven's read
+                     loop, so this is what fails if answering one blocks it.
+- ``two_messages`` - a preamble, the tool calls it announced, then the answer, in the
+                     order measured on codex-acp. One turn, two messages, and no
+                     boundary in the chunks themselves.
+- ``cancelled``    - streams one chunk, then reports ``stopReason: "cancelled"``. The
+                     shape measured on codex-acp when a turn is torn down part-way: a
+                     reply that reads finished and is not.
+- ``cancel_aware``  - holds the prompt open and answers it with
+                      ``stopReason: "cancelled"`` only after a ``session/cancel``
+                      notification arrives. Proves raven both sends the
+                      notification and waits for the turn to settle.
+- ``cancel_deaf``   - holds the prompt open and ignores ``session/cancel``
+                      entirely, so the settle budget expires. Proves the timeout
+                      path, which unbinds the session rather than reusing it.
+- ``meta``          - answers like ``ok`` and attaches an agent-authored ``_meta``
+                      table to the prompt response, the field ACP reserves for
+                      it. Proves the host keeps it on the run record verbatim.
+- ``silent``       - reads and never answers, for the timeout path.
+- ``wedged``       - answers the first ``initialize`` and swallows everything
+                     after it, pipes open, process alive: the shape where only
+                     a probe round trip can tell nobody is home.
+- ``mute``         - answers ``initialize``, then closes stdout and sleeps with
+                     the process alive: the connection is dead, the pid is not.
+
+Requests before ``initialize`` are refused, deliberately. A permissive stub is
+what let a real bug through once already: two of the three live servers answer a
+``session/new`` sent without a handshake, so the missing ``initialize`` in the
+connection pool only surfaced against ``codex-acp``, which rejects it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+
+MODE = os.environ.get("ACP_STUB_MODE", "ok")
+
+_INITIALIZED = False
+
+# npm 10.9.8, `npx -y @agentclientprotocol/claude-agent-acp@0.79.0` against
+# `npm_config_registry=http://127.0.0.1:9/`, 2026-09-23 -- verbatim but for the
+# node install prefix and the log path. The code line comes first and the
+# stack trace after it, which is why a reader of the last 400 characters never
+# sees the code.
+_NPM_ECONNREFUSED = """npm error code ECONNREFUSED
+npm error syscall connect
+npm error errno ECONNREFUSED
+npm error FetchError: request to http://127.0.0.1:9/@agentclientprotocol%2fclaude-agent-acp failed, reason: connect ECONNREFUSED 127.0.0.1:9
+npm error     at ClientRequest.<anonymous> (/opt/node/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+npm error     at ClientRequest.emit (node:events:519:28)
+npm error     at emitErrorEvent (node:_http_client:108:11)
+npm error     at _destroy (node:_http_client:967:9)
+npm error     at onSocketNT (node:_http_client:987:5)
+npm error     at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+npm error   code: 'ECONNREFUSED',
+npm error   errno: 'ECONNREFUSED',
+npm error   syscall: 'connect',
+npm error   address: '127.0.0.1',
+npm error   port: 9,
+npm error   type: 'system'
+npm error }
+npm error
+npm error If you are behind a proxy, please make sure that the
+npm error 'proxy' config is set properly.  See: 'npm help config'
+npm error A complete log of this run can be found in: /home/someone/.npm/_logs/2026-09-23T14_16_44_007Z-debug-0.log
+"""
+
+# A real server mints a distinct id per session; the counter keeps the stub from
+# making concurrent sessions collide in a way no real agent would.
+_SESSIONS = 0
+# What each session is currently answering with, so a resumed one can report it.
+_SESSION_MODELS: dict[str, str] = {}
+
+_SESSION_CAPS = {"fork": {}, "list": {}, "resume": {}}
+if MODE != "no_session_delete":
+    _SESSION_CAPS["delete"] = {}
+
+CAPABILITIES = {
+    "protocolVersion": 1,
+    "agentInfo": {"name": "stub-agent", "version": "9.9.9"},
+    "agentCapabilities": {
+        "loadSession": True,
+        "promptCapabilities": {"image": True},
+        "sessionCapabilities": _SESSION_CAPS,
+        # raven's own extension, the way a raven-as-agent announces it. Served
+        # only in the ``steerable`` mode; declaring it everywhere keeps the
+        # capability read under test in every other mode too.
+        "_meta": {"raven.steer": {}},
+        "mcpCapabilities": {"http": True, "sse": False},
+    },
+    "authMethods": [{"id": "stub-auth", "name": "Stub auth"}],
+}
+# An agent that never learned the extension, for the test that a client must
+# not call what was not declared.
+if os.environ.get("ACP_STUB_NO_STEER"):
+    del CAPABILITIES["agentCapabilities"]["_meta"]
+
+
+def send(frame: dict) -> None:
+    sys.stdout.write(json.dumps(frame) + "\n")
+    sys.stdout.flush()
+
+
+def ok(request_id, result) -> None:
+    send({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+
+def err(request_id, code, message, data=None) -> None:
+    error = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    send({"jsonrpc": "2.0", "id": request_id, "error": error})
+
+
+def notify(method: str, params: dict) -> None:
+    send({"jsonrpc": "2.0", "method": method, "params": params})
+
+
+def update(session_id: str, payload: dict) -> None:
+    notify("session/update", {"sessionId": session_id, "update": payload})
+
+
+_PENDING: list = []
+
+# Prompts held open until raven answers the permission request they triggered.
+_AWAITING_PERMISSION: list = []
+
+# Elicitations held open until raven answers (elicits_and_waits).
+_AWAITING_ELICITATION: list = []
+
+# Prompts held open until the client cancels them (cancel_aware / cancel_deaf).
+_AWAITING_CANCEL: list = []
+
+# A request id no dict can hold, and the prompt waiting on its answer
+# (malformed_ids). The schema says a RequestId is null, an integer or a
+# string; this is what a peer that does not read the schema can still send.
+_UNHASHABLE_ID = [7]
+_AWAITING_MALFORMED: list = []
+# Prompts held open until raven answers an ask_user_request (asks_user_and_waits).
+_AWAITING_ASK_USER: list = []
+
+
+def ask_user(session_id: str, request_id: str, question: str, choices: list) -> None:
+    """Raven-X's extension: a question as a session update, not as a request."""
+    update(
+        session_id,
+        {
+            "sessionUpdate": "ask_user_request",
+            "requestId": request_id,
+            "question": question,
+            "choices": choices,
+        },
+    )
+
+
+def handle_clarify_respond(request_id, params) -> None:
+    """Answer the extension method, then finish whatever prompt was waiting on it."""
+    ok(request_id, {"delivered": bool(_AWAITING_ASK_USER)})
+    if not _AWAITING_ASK_USER:
+        return
+    answer = params.get("answer")
+    answer = answer if isinstance(answer, str) else ""
+    held_request, session_id = _AWAITING_ASK_USER.pop(0)
+    update(
+        session_id,
+        {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"answered:{answer or 'none'}"}},
+    )
+    ok(held_request, {"stopReason": "end_turn"})
+
+
+# Prompts held open until a steer arrives (steerable): the turn then answers the
+# steered text, so a test can tell a merged steer from a dropped one.
+_AWAITING_STEER: list = []
+
+
+def handle_steer(request_id, params) -> None:
+    text = params.get("text") or ""
+    if MODE != "steerable" or not _AWAITING_STEER:
+        ok(request_id, {"status": "no_turn"})
+        return
+    prompt_id, session_id = _AWAITING_STEER.pop(0)
+    # What a raven agent does on an accepted steer: announce the person's words
+    # on the session stream, then answer them, then the turn ends.
+    update(session_id, {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": text}})
+    ok(request_id, {"status": "injected"})
+    update(
+        session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"steered: {text}"}}
+    )
+    ok(prompt_id, {"stopReason": "end_turn"})
+
+
+def handle_response(frame) -> None:
+    """Finish a held prompt once raven has answered the permission or elicitation request."""
+    if MODE == "malformed_ids":
+        # The turn ends only when raven answers the request whose id no dict
+        # can hold, so a read loop that died on the retraction before it shows
+        # up as a failed prompt rather than as a quiet difference.
+        if frame.get("id") != _UNHASHABLE_ID or not _AWAITING_MALFORMED:
+            return
+        request_id, session_id = _AWAITING_MALFORMED.pop(0)
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if _AWAITING_ELICITATION:
+        content = ((frame.get("result") or {}).get("content")) or {}
+        picked = content.get("backend") or "no-answer"
+        request_id, session_id = _AWAITING_ELICITATION.pop(0)
+        update(
+            session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"using:{picked}"}}
+        )
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if not _AWAITING_PERMISSION:
+        return
+    outcome = ((frame.get("result") or {}).get("outcome")) or {}
+    chosen = outcome.get("optionId") or outcome.get("outcome") or "no-answer"
+    request_id, session_id = _AWAITING_PERMISSION.pop(0)
+    update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"chose:{chosen}"}})
+    ok(request_id, {"stopReason": "end_turn"})
+
+
+def _permission_input() -> dict:
+    """The command a ``permission`` request names, when the test set one."""
+    command = os.environ.get("ACP_STUB_COMMAND")
+    return {"rawInput": {"command": command}} if command else {}
+
+
+def handle_prompt(request_id, params) -> None:
+    session_id = params.get("sessionId") or "stub-session-1"
+    if MODE == "echo_blocks":
+        # Answer with what the prompt carried, block by block, so a test can see
+        # the attachments the client put beside the text.
+        seen = [
+            {k: v for k, v in block.items() if k in ("type", "name", "uri", "text")}
+            for block in (params.get("prompt") or [])
+            if isinstance(block, dict)
+        ]
+        update(
+            session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": json.dumps(seen)}}
+        )
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "asks_late":
+        _PENDING.append((request_id, session_id))
+        if len(_PENDING) < 2:
+            return
+        asker = _PENDING[-1][1]
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9002,
+                "method": "fs/read_text_file",
+                "params": {"sessionId": asker, "path": "/etc/hostname"},
+            }
+        )
+        for rid, _sid in _PENDING:
+            ok(rid, {"stopReason": "end_turn"})
+        _PENDING.clear()
+        return
+    if MODE == "stray_session":
+        # An update for a session nobody is listening to. Real adapters produce
+        # these as late frames after a turn settles; emitting one mid-turn is the
+        # only way to make the case reproducible.
+        update("no-such-session", {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "??"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}})
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "meta":
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}})
+        ok(
+            request_id,
+            {
+                "stopReason": "end_turn",
+                "_meta": {"vendor.report": {"status": "ready", "count": 2}, "vendor.flag": True},
+            },
+        )
+        return
+    if MODE == "output_limit":
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}})
+        ok(request_id, {"stopReason": "max_tokens"})
+        return
+    if MODE == "asks":
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9001,
+                "method": "fs/read_text_file",
+                "params": {"sessionId": session_id, "path": "/etc/hostname"},
+            }
+        )
+        # A real adapter gives up on the tool it could not run; the turn ends
+        # with nothing, and stderr stays empty.
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "permission":
+        # Reversed relative to how an adapter lists them, so a client that
+        # answered with "the first option" instead of choosing by kind fails
+        # this rather than passing by luck.
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9003,
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": session_id,
+                    "toolCall": {"toolCallId": "t1", "kind": "execute", **_permission_input()},
+                    "options": [
+                        {"optionId": "no", "name": "Reject", "kind": "reject_once"},
+                        {"optionId": "once", "name": "Allow Once", "kind": "allow_once"},
+                        {"optionId": "always", "name": "Allow for Session", "kind": "allow_always"},
+                    ],
+                },
+            }
+        )
+        _AWAITING_PERMISSION.append((request_id, session_id))
+        return
+    if MODE == "elicits_and_waits":
+        _AWAITING_ELICITATION.append((request_id, session_id))
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9002,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "which backend?",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {"backend": {"type": "string", "enum": ["redis", "memcached"]}},
+                    },
+                },
+            }
+        )
+        return
+    if MODE == "elicits_first_then_serves":
+        if session_id == "stub-session-1":
+            _AWAITING_ELICITATION.append((request_id, session_id))
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9002,
+                    "method": "elicitation/create",
+                    "params": {
+                        "sessionId": session_id,
+                        "mode": "form",
+                        "message": "which backend?",
+                        "requestedSchema": {
+                            "type": "object",
+                            "properties": {"backend": {"type": "string", "enum": ["redis", "memcached"]}},
+                        },
+                    },
+                }
+            )
+            return
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}})
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "asks_user_and_waits":
+        _AWAITING_ASK_USER.append((request_id, session_id))
+        ask_user(session_id, "q-1", "which market?", ["EU", "US"])
+        return
+    if MODE == "asks_user_then_streams":
+        ask_user(session_id, "q-1", "which market?", ["EU", "US"])
+        for i in range(3):
+            update(
+                session_id,
+                {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"chunk{i}"}},
+            )
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "elicits_then_streams":
+        # Asks and does NOT wait: the test asserts the client's read loop is
+        # still delivering updates while the question is unanswered.
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9001,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "which one?",
+                    "requestedSchema": {"type": "object", "properties": {"pick": {"type": "string"}}},
+                },
+            }
+        )
+        for i in range(3):
+            update(
+                session_id,
+                {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"chunk{i}"}},
+            )
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "elicits_then_dies":
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9001,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "which one?",
+                    "requestedSchema": {"type": "object", "properties": {"pick": {"type": "string"}}},
+                },
+            }
+        )
+        sys.exit(0)
+    if MODE == "elicits_then_retracts":
+        # Asks, then takes it back the way the reference SDK does when a request's
+        # cancellation signal fires, and ends the turn without reading an answer.
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9003,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "which one?",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {"first": {"type": "string"}, "second": {"type": "string"}},
+                    },
+                },
+            }
+        )
+        # Long enough that the client has certainly started answering: the point
+        # of the mode is a retraction that lands mid-form, not before it.
+        time.sleep(0.3)
+        notify("$/cancel_request", {"requestId": 9003})
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "malformed_ids":
+        # Both places raven indexes a peer's id: a retraction's `requestId`, and
+        # an inbound request's own `id`. The retraction goes second, while the
+        # first request is still unanswered, because an empty index never hashes
+        # the key it is asked for and so hides the whole thing.
+        _AWAITING_MALFORMED.append((request_id, session_id))
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 9004,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "park",
+                    "requestedSchema": {"type": "object", "properties": {"a": {"type": "string"}}},
+                },
+            }
+        )
+        time.sleep(0.3)
+        notify("$/cancel_request", {"requestId": [1]})
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": _UNHASHABLE_ID,
+                "method": "elicitation/create",
+                "params": {
+                    "sessionId": session_id,
+                    "mode": "form",
+                    "message": "answer",
+                    "requestedSchema": {"type": "object", "properties": {"a": {"type": "string"}}},
+                },
+            }
+        )
+        return
+    if MODE == "two_messages":
+        # The order measured on codex-acp: a preamble in several chunks, the
+        # tool calls it announced, then the answer itself.
+        # The thought and the usage update sit *inside* a message, which is what
+        # makes this stub able to tell a tool-call boundary from any-other-update:
+        # breaking on those would split both messages in half.
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "let me "}})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "planning"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "look."}})
+        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "ls", "status": "pending"})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "it is "}})
+        update(session_id, {"sessionUpdate": "usage_update", "size": 1000, "used": 7})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "a repo."}})
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE == "ends_on_a_step":
+        # Two messages, each followed by the call it announced, and nothing said
+        # after the second call: the turn's last frame is a step.
+        first = {"type": "text", "text": "first, the files."}
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": first})
+        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "ls", "status": "pending"})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+        second = {"type": "text", "text": "saving it to notes.md."}
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": second})
+        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "t2", "title": "write", "status": "pending"})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "completed"})
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    if MODE in ("cancel_aware", "cancel_deaf"):
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "working"}})
+        _AWAITING_CANCEL.append((request_id, session_id))
+        return
+    if MODE == "steerable":
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "starting"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "on it"}})
+        _AWAITING_STEER.append((request_id, session_id))
+        return
+    if MODE == "cancelled":
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "I will "}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "start by"}})
+        ok(request_id, {"stopReason": "cancelled"})
+        return
+    if MODE == "kimi_refuses":
+        # Kimi Code 2.1.0's shape for a provider refusing the credential: the
+        # provider's status and words behind its own "Authentication required".
+        err(request_id, -32000, os.environ.get("ACP_STUB_MESSAGE", "Authentication required"))
+        return
+    if MODE == "prompt_hangs":
+        # Kimi Code waiting on a provider that never answers: the prompt is
+        # taken and never finished.
+        return
+    if MODE == "empty_turn":
+        print("provider rejected the credential: HTTP 401", file=sys.stderr, flush=True)
+        ok(request_id, {"stopReason": "end_turn"})
+        return
+    update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}})
+    # The shape measured on claude-agent-acp and opencode alike: the opening
+    # frame announces the call with an empty rawInput, the arguments follow on a
+    # later update, and the result arrives wrapped as ToolCallContent rather
+    # than as a bare content block. `kind` rides on both, as it does on the wire
+    # -- it is what names the tool, and a stub that omitted it would only ever
+    # exercise the unclassified fallback.
+    update(
+        session_id,
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "t1",
+            "title": "read_file src/a.py",
+            "kind": "read",
+            "status": "pending",
+            "rawInput": {},
+        },
+    )
+    update(
+        session_id,
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t1",
+            "kind": "read",
+            "status": "in_progress",
+            "rawInput": {"path": "src/a.py"},
+        },
+    )
+    update(
+        session_id,
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t1",
+            # Saying something after it matters: a turn that ends ON a failed
+            # call is already refused upstream, and the case this mode is for is
+            # the one that goes on and finishes.
+            "status": "failed" if MODE == "failed_call" else "completed",
+            "content": [{"type": "content", "content": {"type": "text", "text": "the file says hello"}}],
+        },
+    )
+    update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}})
+    update(session_id, {"sessionUpdate": "usage_update", "size": 1000, "used": 42})
+    ok(request_id, {"stopReason": "end_turn"})
+
+
+def handle_cancel(params) -> None:
+    """Settle a held prompt on ``session/cancel``, unless this mode ignores it."""
+    if MODE != "cancel_aware":
+        return
+    session_id = params.get("sessionId")
+    for held in list(_AWAITING_CANCEL):
+        if held[1] != session_id:
+            continue
+        _AWAITING_CANCEL.remove(held)
+        ok(held[0], {"stopReason": "cancelled"})
+
+
+def main() -> None:
+    global _INITIALIZED
+    if MODE == "abort":
+        # Dies before speaking, with the reason on stderr only -- the npx shape
+        # where the adapter's install/startup fails.
+        print("stub: cannot start, the registry is unreachable", file=sys.stderr, flush=True)
+        sys.exit(3)
+    if MODE == "npm_fetch_fails":
+        sys.stderr.write(_NPM_ECONNREFUSED)
+        sys.stderr.flush()
+        sys.exit(1)
+    if MODE == "noisy":
+        sys.stdout.write("[plugins] stub diagnostics on stdout\n")
+        sys.stdout.flush()
+        sys.stderr.write("x" * 50_000 + "\n")
+        sys.stderr.flush()
+    if MODE == "flood":
+        # One line past the reader's limit, then an ordinary one. Sized against
+        # `client._READER_LIMIT` rather than against the litellm dump that found
+        # this (146 KiB, which the raised limit now carries), because the case
+        # under test is what the reader does when a line does not fit at all. The
+        # line after it is how a test tells "survived the raise" apart from "went
+        # on draining".
+        sys.stderr.write("x" * (9 * 1024 * 1024) + "\n")
+        sys.stderr.write("stub: still talking after the flood\n")
+        sys.stderr.flush()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            frame = json.loads(line)
+        except ValueError:
+            continue
+        if MODE == "silent":
+            continue
+        if MODE == "wedged" and _INITIALIZED:
+            # The other real outage shape: the handshake worked, then the frame
+            # loop stopped answering while the process and both pipes live on.
+            # Everything after the first initialize is read and swallowed --
+            # the repeat-initialize probe included, which is the point.
+            continue
+        method = frame.get("method")
+        request_id = frame.get("id")
+        params = frame.get("params") or {}
+        # A frame with no method is raven answering something this stub asked.
+        # Without this branch it fell through to the unknown-method arm below
+        # and the stub replied to a reply.
+        if method is None:
+            handle_response(frame)
+            continue
+        if method == "initialize":
+            if MODE == "reject_init":
+                err(request_id, -32602, "Invalid params")
+            else:
+                _INITIALIZED = True
+                ok(request_id, CAPABILITIES)
+                if MODE == "mute":
+                    # The pathological shape behind one real outage: the server
+                    # stops speaking (stdout closes) while the PROCESS lives on
+                    # -- an npx wrapper waiting on a dead child looks exactly
+                    # like this. The stderr line is the only account of why.
+                    # os.close(1), not sys.stdout.close(): only the raw close
+                    # actually drops the pipe's write end.
+                    print("stub: worker died after the handshake", file=sys.stderr, flush=True)
+                    sys.stdout.flush()
+                    os.close(1)
+                    import time
+
+                    time.sleep(60)
+                    return
+        elif method == "session/cancel":
+            handle_cancel(params)
+            continue
+        elif not _INITIALIZED:
+            err(request_id, -32603, "Internal error: no initialize was received on this connection")
+        elif method == "session/new":
+            if MODE == "no_session":
+                err(request_id, -32000, "no api key configured for this agent")
+            elif MODE == "no_session_other":
+                err(request_id, -32000, "selected model is unavailable")
+            elif MODE == "kimi_not_ready":
+                # Kimi Code 2.1.0 refuses every session it cannot start this way,
+                # signed out, keyless or with a config it cannot parse alike.
+                err(request_id, -32000, "Authentication required")
+            elif MODE == "no_session_sdk":
+                err(
+                    request_id,
+                    -32603,
+                    "Internal error",
+                    {"details": "Stub is not connected to any AI provider yet. Add an API key to pick one."},
+                )
+            else:
+                global _SESSIONS
+                _SESSIONS += 1
+                _SESSION_MODELS[f"stub-session-{_SESSIONS}"] = "stub:model-a"
+                ok(
+                    request_id,
+                    {
+                        "sessionId": f"stub-session-{_SESSIONS}",
+                        "models": {
+                            "availableModels": [
+                                {"modelId": "stub:model-a", "name": "model-a"},
+                                {"modelId": "stub:model-b", "name": "model-b"},
+                                {"name": "no-id-so-skipped"},
+                            ]
+                        },
+                        "modes": {
+                            "currentModeId": "fast",
+                            "availableModes": [
+                                {"id": "fast", "name": "Fast", "description": "converges early"},
+                                {"id": "deep", "name": "Deep", "description": "searches longer"},
+                                {"name": "no-id-so-skipped"},
+                            ],
+                        },
+                        # The stable model surface, as raven's own ACP server
+                        # serves it and as every agent this host drives answers:
+                        # one configOptions entry with category "model", grouped
+                        # choices under it. `models.availableModels` above is the
+                        # older key, kept because the reader for it is still
+                        # there and a stub that dropped it would stop covering
+                        # the agents that do send it.
+                        "configOptions": [
+                            {
+                                "id": "mode",
+                                "category": "mode",
+                                "type": "select",
+                                "options": [{"value": "ignored", "name": "not a model"}],
+                            },
+                            {
+                                "id": "model",
+                                "name": "Model",
+                                "category": "model",
+                                "type": "select",
+                                "currentValue": _SESSION_MODELS[f"stub-session-{_SESSIONS}"],
+                                "options": [
+                                    {
+                                        "group": "stub",
+                                        "name": "Stub",
+                                        "options": [
+                                            {"value": "stub:model-a", "name": "model-a"},
+                                            {"value": "stub:model-b", "name": "model-b"},
+                                            {"name": "no-value-so-skipped"},
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                )
+        elif method == "session/set_config_option":
+            # Logged on entry, not on success: a test asserting that NO frame was
+            # sent has to see every frame, and a print behind the refusals below
+            # leaves an unrequested call looking identical to no call at all.
+            print(
+                f"stub: session/set_config_option {params.get('configId')}={params.get('value')}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if MODE == "refuse_restore" and params.get("value") == "stub:model-a":
+                # Takes a switch and refuses the way back, which is the shape a
+                # host has to survive: it moved the session and cannot unmove it.
+                err(request_id, -32011, "will not switch back to 'stub:model-a'")
+            elif MODE == "no_models":
+                err(request_id, -32602, "unknown configuration option 'model'")
+            elif params.get("configId") != "model":
+                err(request_id, -32602, f"unknown configuration option {params.get('configId')!r}")
+            elif params.get("value") not in ("stub:model-a", "stub:model-b"):
+                # The runtime's own refusal, with its own code: a value it will
+                # not write is not an internal error.
+                err(request_id, -32011, f"will not switch to {params.get('value')!r}")
+            else:
+                _SESSION_MODELS[str(params.get("sessionId"))] = str(params.get("value"))
+                ok(request_id, {"configOptions": []})
+        elif method == "session/set_mode":
+            if MODE == "no_modes":
+                err(request_id, -32601, "session/set_mode is not implemented")
+            elif params.get("modeId") not in ("fast", "deep"):
+                err(request_id, -32602, f"unknown mode {params.get('modeId')!r}")
+            else:
+                print(f"stub: session/set_mode {params.get('modeId')}", file=sys.stderr, flush=True)
+                ok(request_id, {})
+        elif method == "session/load":
+            if params.get("sessionId") == "pruned-session":
+                err(request_id, -32001, "Session not found")
+            else:
+                # A resumed session reports the model it is actually on, which is
+                # whatever it was last switched to. A host that read this as the
+                # session's original would restore the override it meant to undo.
+                sid = str(params.get("sessionId"))
+                ok(
+                    request_id,
+                    {
+                        "configOptions": [
+                            {
+                                "id": "model",
+                                "category": "model",
+                                "type": "select",
+                                "currentValue": _SESSION_MODELS.get(sid, "stub:model-a"),
+                                "options": [],
+                            }
+                        ]
+                    },
+                )
+        elif method == "session/delete":
+            if MODE == "delete_fails":
+                err(request_id, -32601, "session/delete is not implemented")
+            else:
+                print(f"stub: session/delete for {params.get('sessionId')}", file=sys.stderr, flush=True)
+                ok(request_id, {})
+        elif method == "_raven/clarify_respond":
+            handle_clarify_respond(request_id, params)
+        elif method == "session/prompt":
+            handle_prompt(request_id, params)
+        elif method == "_raven/session/steer":
+            handle_steer(request_id, params)
+        elif request_id is not None:
+            err(request_id, -32601, f"unknown method {method}")
+
+
+if __name__ == "__main__":
+    main()

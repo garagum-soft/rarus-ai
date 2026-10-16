@@ -1,0 +1,1432 @@
+"""The agents/ ppt launcher: rendering, refusals, the trunk exec, the pinned face.
+
+The exec target is installed raven's own ``raven acp``; the deck capability
+reaches it as the ppt-engine wheel through the entry-point group, never by
+directory. The launch contract is still the fork launcher's ACP half: an own
+key reaches every provider block, PPT_MODEL/PPT_API_BASE apply on the own-key
+branch only, the context window recalibrates from the host's model catalog,
+secrets merge into a rendered 0600 config whose parent decides the data dir.
+Three renders are this hosting's own trunk seats: the agent home pinned under
+the state root (a pooled loop must not share the host's), the engine skill
+directory mounted through skillForge.localDirs, and the retired tools.ppt
+block dropped from a carried config with the successor named (D4's floor).
+
+The hermetic tool-face pin is live now (the code family's w96 shape): the
+loop built from this render advertises the fork's config intent respelled to
+plugin admission -- ten deck tools plus the fork's base face -- with every
+trunk-new tool the fork never registered held out by config, not by luck.
+The key-gated pair (web_search, ppt_image_search) joins only with a Serper
+key, the fork's own registration refusal.
+
+The fork's identity trio (SOUL.md/AGENTS.md/TOOLS.md) is carried
+byte-for-byte at the engine wheel's prompts home; the engine plugin's hook
+seeds it into the pinned home at first turn (tests in the plugin family),
+so this launcher still seeds none of them.
+"""
+
+import importlib.util
+import json
+import stat
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+RUN_PY = REPO / "agents" / "raven-ppt" / "run.py"
+FORK = REPO / "tests" / "fixtures" / "vendored_fork" / "raven-ppt"
+ENGINE_HOME = REPO / "plugins-dist" / "ppt-engine"
+CARRIED_PROMPTS = ("SOUL.md", "AGENTS.md")
+
+
+@pytest.fixture()
+def launcher():
+    spec = importlib.util.spec_from_file_location("agents_ppt_run", RUN_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture()
+def grounded(launcher, tmp_path, monkeypatch):
+    """A launcher pointed at a scratch home and state root, secrets set."""
+    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("PPT_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.delenv("PPT_ACP_HOME", raising=False)
+    monkeypatch.setenv("PPT_API_KEY", "sk-own")
+    for name in ("PPT_MODEL", "PPT_API_BASE", "PPT_SERPER_API_KEY", "PPT_JINA_API_KEY", "PPT_IMAGE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    # The launcher reads the host's proxy out of the environment; a developer box
+    # that exports one would otherwise decide what "no proxy configured" renders.
+    for name in ("PPT_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    # The window is sized by asking the serving endpoint and LiteLLM's table;
+    # neither is a thing a unit test reaches, so both answer nothing here and
+    # the tests that are about the window install their own answers.
+    monkeypatch.delenv("PPT_CONTEXT_WINDOW", raising=False)
+    monkeypatch.setattr(launcher, "_get_json", lambda url, api_key: None)
+    monkeypatch.setattr(launcher, "litellm_context_window", lambda model, api_base: None)
+    return launcher
+
+
+# --- byte parity: the carried assets and the roster identity -----------------
+
+
+#: The model each side recommends and defaults to, in the roster row, in
+#: agents.defaults and as the provider's one listed model. The sealed fork names
+#: the model it shipped with; this product names the one the recent hosted deck
+#: runs were measured on. The fork is the frozen A side of the comparison, so the
+#: swap is ledgered here rather than written into its config.
+FORK_MODEL = "anthropic/claude-sonnet-5"
+TRUNK_MODEL = "z-ai/glm-5.3-flash"
+
+
+def test_the_roster_row_is_the_vendored_twins_modulo_the_ledgered_deltas():
+    """The whole row, not a field list, with exactly four ledgered deltas. The
+    ``engine`` declaration product discovery probes readiness with (the fork
+    twin's venv gate has no counterpart here, so the wheel probe is what keeps
+    an engineless install listed-but-disabled instead of failing at dispatch);
+    the model this product recommends; and the briefing sentence in the
+    description. The fork told the delegating agent to "give detailed
+    requirements of the deck", and on the host that reads as an order to fill in
+    the audience, the length, the style and an outline the user never stated --
+    measured on a live instance: "make a deck about Shanghai's city plan" became
+    a 13-point brief, the deck agent had nothing left to ask, and the user was
+    never asked anything. This row carries no briefing sentence at all. It once
+    carried the opposite instruction, to hand over the user's own words; making
+    the row ``hidden`` then put it out of the delegating agent's reach, and the
+    instruction has been inert since. Raven-Design's row is the one that agent
+    reads and carries the same instruction, so the behaviour is delivered there
+    and repeating it here only lengthens the one prompt this text does reach.
+
+    The fourth is the routing half of that same description. This row is hidden
+    and reached only through Raven-Design's ``routes``, so the one reader of its
+    text is the host's route classifier, and the fork opens by inviting source
+    paths -- "name existing absolute paths in the task text when you have source
+    documents" -- which that classifier reads as a deck request whenever a task
+    merely cites a .pptx. Measured over 40 bilingual tasks at 5 repeats on two
+    models: the fork's opening sent "design a brand style guide from
+    /data/keynote.pptx" to the deck agent 10 times out of 10, while naming the
+    deliverable, denying the source case and covering deck-template wording
+    scored 400/400 on the same set. Everything the host router reads stays the twin's:
+    ownsWatchedWork stays absent on both sides, and recommendedLlm.provider
+    keeps the load-bearing name ``ppt`` (C2: gateway detection and prompt
+    caching key on it)."""
+    ours = json.loads((RUN_PY.parent / "subagent.json").read_text(encoding="utf-8"))
+    theirs = json.loads((FORK / "subagent.json").read_text(encoding="utf-8"))
+    assert ours.pop("engine") == {"package": "raven_ppt", "wheel": "ppt-engine"}
+    # Reached only through Raven-Design's routes; the dispatching model never sees this row.
+    assert ours.pop("hidden") is True
+    # One product, one memory: the deck half remembers the user under the
+    # design product's identity, so a preference stated over a deck reaches the
+    # next design turn (Hongda, MR 605). The fork's own id is the A side's.
+    assert ours.pop("everos") == {"userId": "raven-design", "agentId": "raven-design"}
+    assert theirs.pop("everos") == {"userId": "raven-ppt", "agentId": "raven-ppt"}
+    assert ours["recommendedLlm"].pop("model") == TRUNK_MODEL
+    assert theirs["recommendedLlm"].pop("model") == FORK_MODEL
+    told = ours.pop("description")
+    fork_told = theirs.pop("description")
+    assert "give detailed requirements" in fork_told
+    assert "IMPORTANT:" not in told
+    assert "name existing absolute paths" in fork_told
+    assert "name existing absolute paths" not in told
+    assert "named only as source material is not such a request" in told
+    # The other half of the same delta, and the one with no negative form to
+    # lean on: naming the shapes a deck request takes is what stopped template
+    # decks being classified away from this agent.
+    for shape in ("a presentation", "slides", "a keynote", "a deck template"):
+        assert shape in told, shape
+    assert ours == theirs
+    assert "ownsWatchedWork" not in ours
+    assert ours["recommendedLlm"]["provider"] == "ppt"
+
+
+#: Trunk tools the fork loop never registered under this product's config;
+#: every one is held out of the face by a config row, not by luck (the code
+#: family's ledger discipline). The meta-pair left this set: raven reserves
+#: tool_call/tool_search from tools.disabledTools, so the rows that used to
+#: hold them out are gone and tool_call joins the face (see TRUNK_RESERVED).
+TRUNK_HELD_OUT = {
+    "browser_click",
+    "browser_navigate",
+    "browser_press",
+    "browser_screenshot",
+    "browser_scroll",
+    "browser_snapshot",
+    "browser_tabs",
+    "browser_type",
+    "create_playbook",
+    "cron",
+    "deliver_files",
+    "find_skill",
+    "hub",
+    # The host's picture search; this lane searches through `ppt_image_search`,
+    # which feeds the figure catalogue, and two doors to one vendor is one too many.
+    "image_search",
+    "load_playbook",
+    "plugin",
+    "raven_config",
+    "read_skill",
+    "run_subagent_dag",
+    "spawn",
+}
+
+
+#: agents.defaults rows the sealed fork's config does not carry: the retry of a
+#: streamed call that failed after output, for a measured run that died on a
+#: mid-stream disconnect after two hours, and the second retry ladder, in
+#: minutes, that waits out a gateway serving error pages (one measured build had
+#: 62 minutes behind it when a 40-second outage ended its turn).
+TRUNK_ONLY_DEFAULTS = {
+    "llmRetryAfterOutput": True,
+    "llmErrorRetryDelays": [30, 60, 120, 240, 300, 300, 300, 300],
+    # Stated rather than inherited: the host default is 0.1, which nobody chose for
+    # a deck -- the two coding agents raised theirs to 1.0 and the author writing
+    # the copy and picking the layouts was left at the host's number by omission.
+    "temperature": 0.95,
+    # The fork ran with compaction off and a 20-page deck reached 450k tokens a call
+    # (62M input tokens over 137 turns). The host's own compaction, at the host's
+    # own thresholds but for the trigger ratio; the deck-specific part is the
+    # plugin's ledger under the summary, not a different threshold.
+    "compaction": {"enabled": True, "triggerRatio": 0.85},
+}
+
+#: agents.defaults rows both sides carry with different values, as (fork, trunk).
+#: The call timeout is applied per streamed chunk, and a reasoning model that
+#: thinks silently for longer than the fork's 600s is what a hosted run met: one
+#: iteration failed six times in a row at exactly 600s while a standalone run of
+#: the same deck survived a 20-minute call under 1800.
+#: The routing rows are the fork's grok pin plus the trunk model's own: glm-5.3-flash
+#: is fenced to Z.AI, DeepInfra and Novita (an order with fallbacks off), so the
+#: window the launcher sizes is theirs (1,048,576) and OpenRouter never hands a
+#: deck call to one of the other twenty-odd hosts it lists (an fp8 host at 262,144
+#: that would compact the run at a quarter of what the intended providers serve).
+#: The trade-off is that a call finding all three unavailable fails over the
+#: runtime's retry ladder instead of falling back to a smaller-window provider.
+GROK_ROUTING = {"grok": {"extra_body": {"provider": {"only": ["xAI"], "allow_fallbacks": False}}}}
+GLM_ROUTING = {
+    "glm-5.3-flash": {"extra_body": {"provider": {"order": ["Z.AI", "DeepInfra", "Novita"], "allow_fallbacks": False}}}
+}
+TRUNK_OVERRIDDEN_DEFAULTS = {
+    "llmCallTimeout": (600, 1800),
+    "modelOverrides": (GROK_ROUTING, {**GROK_ROUTING, **GLM_ROUTING}),
+    # The baseline tier is the source config, so this row is also what the max tier
+    # asks for -- it declares no effort of its own and inherits this one.
+    "reasoningEffort": ("medium", "high"),
+}
+
+
+# Engine-slice keys the fork's tools.ppt schema never had. The second reader's own
+# reasoning effort: the fork read every page at the author's setting, which litellm
+# dropped for this model anyway, so a GLM thought at its default for 100 to 350 seconds
+# a page; the gateway's own low effort reads one in 13 to 29.
+TRUNK_ONLY_SLICE = {"readerEffort": "low"}
+
+# Fork slice keys the product deliberately stops spelling. renderConcurrency: the
+# fork's fixed 2 is now the engine's floor rather than its answer -- the number of
+# LibreOffice conversions a box runs at once is a fact about the box (measured: 32
+# cores convert seven templates in 50.3s at seven-wide against 67.8s at two-wide,
+# with the slowest single conversion unchanged), so an absent key follows the box
+# and only an operator's own setting overrides it.
+TRUNK_DROPPED_SLICE = {"renderConcurrency": 2}
+
+
+def test_the_config_is_the_forks_modulo_the_swap_ledger():
+    """Every delta against the sealed fork wrapper's config is a ledgered row:
+    the engine slice carries the retired tools.ppt knobs verbatim (D4),
+    tools.ppt itself is gone (the slice is the only reading), disabledTools
+    grows exactly the trunk-new hold-out set, agents.defaults grows the
+    trunk-only rows and re-values the overridden ones, and the model is the
+    trunk's wherever the fork names its own. Every other byte of shipped intent
+    is the fork's."""
+    ours = json.loads((RUN_PY.parent / "config.json").read_text())
+    theirs = json.loads((FORK / "config.json").read_text())
+    slice_ = ours["plugins"]["config"].pop("ppt-engine")
+    for key, value in TRUNK_ONLY_SLICE.items():
+        assert slice_.pop(key) == value
+    fork_slice = dict(theirs["tools"]["ppt"])
+    for key, value in TRUNK_DROPPED_SLICE.items():
+        assert fork_slice.pop(key) == value, key
+        assert key not in slice_, f"{key} is spelled again; the ledger row is stale"
+    assert slice_ == fork_slice
+    fork_tools = dict(theirs["tools"])
+    retired = fork_tools.pop("ppt")
+    assert retired == {**slice_, **TRUNK_DROPPED_SLICE}
+    ours_disabled = set(ours["tools"].pop("disabledTools"))
+    fork_disabled = set(fork_tools.pop("disabledTools"))
+    assert ours_disabled - fork_disabled == TRUNK_HELD_OUT
+    assert fork_disabled <= ours_disabled, "no fork disable row may be quietly re-enabled"
+    assert ours["tools"] == fork_tools
+    ours.pop("tools")
+    theirs.pop("tools")
+    for key, value in TRUNK_ONLY_DEFAULTS.items():
+        assert ours["agents"]["defaults"].pop(key) == value, key
+        assert key not in theirs["agents"]["defaults"], f"{key} is no longer trunk-only"
+    for key, (fork_value, trunk_value) in TRUNK_OVERRIDDEN_DEFAULTS.items():
+        assert ours["agents"]["defaults"].pop(key) == trunk_value, key
+        assert theirs["agents"]["defaults"].pop(key) == fork_value, key
+    assert ours["agents"]["defaults"].pop("model") == TRUNK_MODEL
+    assert theirs["agents"]["defaults"].pop("model") == FORK_MODEL
+    assert ours["providers"]["ppt"].pop("models") == [TRUNK_MODEL]
+    assert theirs["providers"]["ppt"].pop("models") == [FORK_MODEL]
+    # The merged product's one identity; see the manifest test above.
+    assert ours["memory"].pop("userId") == ours["memory"].pop("agentId") == "raven-design"
+    assert theirs["memory"].pop("userId") == theirs["memory"].pop("agentId") == "raven-ppt"
+    assert ours == theirs
+
+
+def test_the_everos_identity_agrees_in_all_its_places():
+    """ppt's shape: the memory block and the roster row carry the identity
+    (the everos-memory slice holds only the endpoint), and the factory
+    posture is everos ON -- the fork ships backend "everos" with no plugin
+    opt-out, unlike code's double-off. The identity is the design product's:
+    one merged product keeps one memory of the user."""
+    config = json.loads((RUN_PY.parent / "config.json").read_text())
+    row = json.loads((RUN_PY.parent / "subagent.json").read_text())
+    ids = {
+        config["memory"]["userId"],
+        config["memory"]["agentId"],
+        row["everos"]["userId"],
+        row["everos"]["agentId"],
+    }
+    assert ids == {"raven-design"}
+    assert config["memory"]["backend"] == "everos"
+    assert "disabled" not in config["plugins"]
+    assert config["plugins"]["config"]["everos-memory"] == {"base_url": "http://localhost:18791"}
+
+
+def test_the_carried_identity_prompts_are_the_forks_byte_for_byte():
+    """The fork genuinely drifted all three workspace templates (a deck
+    identity, a deck workflow, a build-script guide) and its ACP engine
+    seeds them per session; the product carries the bytes at the engine
+    wheel's prompts home, unconsumed on this lane, delivery decided at the
+    engine wave."""
+    for name in CARRIED_PROMPTS:
+        ours = (ENGINE_HOME / "raven_ppt" / "prompts" / name).read_bytes()
+        theirs = (FORK / "Raven-PPT" / "raven" / "templates" / name).read_bytes()
+        assert ours == theirs, name
+
+
+def test_the_build_script_guide_names_the_route_the_engine_offers():
+    """`TOOLS.md` is the one carried prompt this product has deliberately
+    diverged on, so the claim held here is what the divergence was for rather
+    than byte equality with the fork.
+
+    It is a live prompt, not parked bytes: `seed_identity` writes it to the
+    agent home's `TOOLS.md`, which is one of the three seats the host's
+    context builder reads. The fork's copy lists the template helpers as
+    "`prototype` and `adapt` to clone a page and fill it", and `adapt` is gone
+    (D41), so carrying those bytes forward would seed every session an import
+    that raises."""
+    ours = (ENGINE_HOME / "raven_ppt" / "prompts" / "TOOLS.md").read_text(encoding="utf-8")
+    theirs = (FORK / "Raven-PPT" / "raven" / "templates" / "TOOLS.md").read_text(encoding="utf-8")
+
+    assert "adapt" in theirs, "the fork's copy is the baseline this diverged from"
+    assert "adapt" not in ours, "the seeded guide names a call the engine no longer offers (D41)"
+    assert "clone_page" in ours and "replace_text" in ours
+
+
+def test_the_install_shim_is_the_house_family_byte_for_byte():
+    ours = (RUN_PY.parent / "install.py").read_bytes()
+    assert ours == (REPO / "agents" / "raven-oncall" / "install.py").read_bytes()
+    assert ours == (REPO / "agents" / "raven-code" / "install.py").read_bytes()
+
+
+# --- the render: keys, overrides, the window, the two loaders ----------------
+
+
+def test_an_own_key_reaches_every_provider_block(grounded, tmp_path):
+    """The fork writes the key to every keyless provider block rather than to
+    one slot path; pinned over a two-provider config so the loop shape (not
+    just the shipped single block) is what passes."""
+    config = {
+        "providers": {
+            "ppt": {"apiBase": "https://a.example/v1", "models": ["m1"]},
+            "other": {"apiBase": "https://b.example/v1", "models": ["m2"]},
+        },
+        "agents": {"defaults": {"model": "m1", "provider": "ppt"}},
+    }
+    source = tmp_path / "two.json"
+    source.write_text(json.dumps(config))
+    data = json.loads(grounded.render_config(source).read_text())
+    assert data["providers"]["ppt"]["apiKey"] == "sk-own"
+    assert data["providers"]["other"]["apiKey"] == "sk-own"
+
+
+def test_own_key_model_and_base_overrides_apply(grounded, monkeypatch):
+    monkeypatch.setenv("PPT_MODEL", "vendor/other-model")
+    monkeypatch.setenv("PPT_API_BASE", "https://gateway.example/v1")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["agents"]["defaults"]["model"] == "vendor/other-model"
+    assert data["providers"]["ppt"]["models"] == ["vendor/other-model"]
+    assert data["providers"]["ppt"]["apiBase"] == "https://gateway.example/v1"
+
+
+def test_the_own_key_also_pays_for_the_image_generator_on_openrouter(grounded, monkeypatch):
+    """The picture generator is an OpenRouter model whichever id is default: on the
+    own-key branch against OpenRouter the same key lands in tools.media.image.apiKey,
+    so a deck can generate its backdrops with nothing else set. A different gateway
+    gets nothing written there, and an explicit PPT_IMAGE_API_KEY wins."""
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["media"]["image"]["apiKey"] == "sk-own"
+    assert "selectionConfig" not in data["tools"]["media"]["image"]
+
+    monkeypatch.setenv("PPT_API_BASE", "https://gateway.example/v1")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert not data.get("tools", {}).get("media", {}).get("image", {}).get("apiKey")
+
+    monkeypatch.setenv("PPT_IMAGE_API_KEY", "sk-pictures")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["media"]["image"]["apiKey"] == "sk-pictures"
+
+
+def _inheriting_host(tmp_path, image: dict | None = None) -> None:
+    """A host on OpenRouter for chat, with no apiBase -- the registry supplies it.
+
+    That null is the shape the launcher used to read as "not OpenRouter", which is
+    why every inherit-branch case below writes the block this way rather than
+    spelling the address out.
+    """
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    host: dict = {
+        "providers": {"openrouter": {"apiKey": "sk-or-chat", "models": ["vendor/model"]}},
+        "agents": {"defaults": {"provider": "openrouter", "model": "openrouter/vendor/model"}},
+    }
+    if image is not None:
+        host["tools"] = {"media": {"image": image}}
+    (home / "config.json").write_text(json.dumps(host))
+
+
+def test_the_inherit_branch_takes_the_hosts_image_section(grounded, tmp_path, monkeypatch):
+    """The operator's model and quality choice reach the deck, and selectionConfig
+    keeps a later Settings edit live rather than frozen at launch. The engine gets
+    no copy: it reads the section through the locator's media_config grant."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    _inheriting_host(tmp_path, {"apiKey": "sk-pictures", "model": "openai/gpt-image-2.5-sunburst"})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+
+    image = data["tools"]["media"]["image"]
+    assert image["apiKey"] == "sk-pictures"
+    assert image["model"] == "openai/gpt-image-2.5-sunburst"
+    assert image["selectionConfig"] == str(tmp_path / "home" / "config.json")
+    assert "image" not in data["plugins"]["config"]["ppt-engine"]
+
+
+def test_the_inherit_branch_borrows_the_chat_key_for_pictures(grounded, tmp_path, monkeypatch):
+    """The branch has no PPT_API_KEY to lend, and a host that configured its
+    OpenRouter key for chat alone surfaces no media tool of its own -- so before
+    this, an inheriting deck asked for a key nobody had written and drew nothing."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    _inheriting_host(tmp_path, {"apiBase": "", "apiKey": "", "model": ""})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+
+    assert data["tools"]["media"]["image"]["apiKey"] == "sk-or-chat"
+    assert "image" not in data["plugins"]["config"]["ppt-engine"]
+
+
+def test_a_borrowed_key_is_never_lent_to_another_gateway(grounded, tmp_path, monkeypatch):
+    """An image section naming another endpoint with no key of its own is a state
+    the host's own borrow declines to fill, because a section holding neither key
+    nor model is not configured. The chat credential must not travel to an address
+    its owner never nominated for pictures, so nothing is written and the deck keeps
+    only the pictures it can find."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    _inheriting_host(tmp_path, {"apiBase": "https://pictures.example/v1", "apiKey": "", "model": ""})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+
+    assert not data["tools"]["media"]["image"].get("apiKey")
+    assert "image" not in data.get("plugins", {}).get("config", {}).get("ppt-engine", {})
+
+
+def test_selection_config_is_written_only_where_the_host_file_answers(grounded, tmp_path, monkeypatch):
+    """The generator re-resolves this per call, so it is a hand-back to the host
+    file rather than a note. Written beside a borrowed key it would erase the
+    borrow every call -- an empty key in a present section is a revocation -- and
+    over an explicit PPT_IMAGE_API_KEY it would let a later Settings edit
+    override this deployment's own choice."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    expected = str(tmp_path / "home" / "config.json")
+
+    _inheriting_host(tmp_path, {"apiKey": "sk-host-img", "model": "vendor/pictures"})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["media"]["image"]["selectionConfig"] == expected
+
+    _inheriting_host(tmp_path, {"apiBase": "", "apiKey": "", "model": ""})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiKey"] == "sk-or-chat" and "selectionConfig" not in image
+
+    monkeypatch.setenv("PPT_IMAGE_API_KEY", "sk-pictures")
+    _inheriting_host(tmp_path, {"apiKey": "sk-host-img", "model": "vendor/pictures"})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiKey"] == "sk-pictures" and "selectionConfig" not in image
+
+
+def test_the_inherit_branch_ignores_the_own_key_overrides(grounded, tmp_path, monkeypatch):
+    """PPT_MODEL/PPT_API_BASE on top of an inherited block would point the
+    host's gateway at a model it may not serve; the fork ignores them there
+    and so does the product."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    monkeypatch.setenv("PPT_MODEL", "vendor/other-model")
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "host": {"apiKey": "sk-host", "apiBase": "https://host.example/v1", "models": ["host/model"]}
+                },
+                "agents": {"defaults": {"provider": "host", "model": "host/model"}},
+            }
+        )
+    )
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["agents"]["defaults"]["model"] == "host/model"
+    assert data["providers"]["host"]["apiKey"] == "sk-host"
+    assert "ppt" not in data["providers"]
+
+
+def test_no_llm_key_anywhere_refuses_before_serving(grounded, monkeypatch):
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        grounded.render_config(RUN_PY.parent / "config.json")
+
+
+def _rendered_window(grounded) -> int:
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    return data["agents"]["defaults"]["contextWindowTokens"]
+
+
+def _openrouter_endpoints(*rows):
+    def answer(url, api_key):
+        assert api_key == "sk-own", "the probe asks with the run's own credential"
+        if url.endswith("/models/z-ai/glm-5.3-flash/endpoints"):
+            return {"data": {"endpoints": [dict(r) for r in rows]}}
+        return None
+
+    return answer
+
+
+def test_the_window_is_the_smallest_the_reachable_providers_carry(grounded, monkeypatch):
+    """OpenRouter routes a model to many providers, each with its own window, often
+    below the model's card (glm-5.3-flash: 1,310,720 on the card, 1,048,576 at Z.AI,
+    262,144 at one fp8 host). The shipped row fences the request to Z.AI, DeepInfra
+    and Novita (fallbacks off), so the fp8 host is never reached and does not size
+    the run: the smallest serving endpoint among the fenced three is the one number
+    a run can count on, and it replaces the shipped 1,000,000 outright."""
+    monkeypatch.setattr(
+        grounded,
+        "_get_json",
+        _openrouter_endpoints(
+            {"provider_name": "Z.AI", "context_length": 1048576, "status": 0},
+            {"provider_name": "DeepInfra", "context_length": 1024000, "status": 0},
+            {"provider_name": "Novita", "context_length": 8000, "status": -1},
+            {"provider_name": "Io Net", "context_length": 262144, "status": 0},
+        ),
+    )
+    assert _rendered_window(grounded) == 1024000, (
+        "the smallest serving fenced provider; Novita is down, Io Net is outside"
+    )
+
+
+def test_a_provider_routing_narrows_the_window_only_where_it_fences_the_request(grounded, tmp_path, monkeypatch):
+    """A modelOverrides row is the same row the runtime sends. `only` fences the
+    request to those providers, and so does `order` with fallbacks off; `order` with
+    fallbacks on is a priority OpenRouter abandons when the ordered providers are
+    unavailable, so the window stays the smallest of everyone who may serve, and an
+    `ignore` list removes those it names."""
+    monkeypatch.setattr(
+        grounded,
+        "_get_json",
+        _openrouter_endpoints(
+            {"provider_name": "Z.AI", "context_length": 1048576, "status": 0},
+            {"provider_name": "StreamLake", "context_length": 1024000, "status": 0},
+        ),
+    )
+    source = tmp_path / "pinned.json"
+    config = json.loads((RUN_PY.parent / "config.json").read_text())
+    row = config["agents"]["defaults"]["modelOverrides"]["glm-5.3-flash"]
+
+    row["extra_body"]["provider"] = {"order": ["Z.AI"], "allow_fallbacks": True}
+    source.write_text(json.dumps(config))
+    assert (
+        json.loads(grounded.render_config(source).read_text())["agents"]["defaults"]["contextWindowTokens"] == 1024000
+    )
+    assert grounded.served_providers(config["agents"]["defaults"], "z-ai/glm-5.3-flash") == set()
+
+    row["extra_body"]["provider"] = {"order": ["Z.AI"], "allow_fallbacks": False}
+    source.write_text(json.dumps(config))
+    assert (
+        json.loads(grounded.render_config(source).read_text())["agents"]["defaults"]["contextWindowTokens"] == 1048576
+    )
+    assert grounded.served_providers(config["agents"]["defaults"], "z-ai/glm-5.3-flash") == {"z.ai"}
+
+    row["extra_body"]["provider"] = {"order": ["Z.AI"], "allow_fallbacks": True, "ignore": ["StreamLake"]}
+    source.write_text(json.dumps(config))
+    assert (
+        json.loads(grounded.render_config(source).read_text())["agents"]["defaults"]["contextWindowTokens"] == 1048576
+    )
+    assert grounded.ignored_providers(config["agents"]["defaults"], "z-ai/glm-5.3-flash") == {"streamlake"}
+
+    shipped = json.loads((RUN_PY.parent / "config.json").read_text())["agents"]["defaults"]
+    assert grounded.served_providers(shipped, "z-ai/glm-5.3-flash") == {"z.ai", "deepinfra", "novita"}, (
+        "the shipped row is a fence: an order with fallbacks off"
+    )
+    assert grounded.served_providers(shipped, "x-ai/grok-5") == {"xai"}
+    assert grounded.served_providers(shipped, "vendor/other") == set()
+
+
+def test_a_vllm_style_endpoint_answers_with_its_max_model_len(grounded, monkeypatch):
+    monkeypatch.setenv("PPT_API_BASE", "https://gateway.example/v1")
+    monkeypatch.setenv("PPT_MODEL", "qwen3.6-27B")
+
+    def answer(url, api_key):
+        assert url == "https://gateway.example/v1/models"
+        return {"data": [{"id": "qwen3.6-27B", "max_model_len": 262144, "context_length": None}]}
+
+    monkeypatch.setattr(grounded, "_get_json", answer)
+    assert _rendered_window(grounded) == 262144
+
+
+def test_litellms_table_answers_when_the_endpoint_does_not_but_only_downward(grounded, monkeypatch):
+    """A table knows what a model is sold with, not what the endpoint serves. With
+    the probe unanswered (a timeout, an HTTP error), a smaller table number is taken
+    and a larger one is not: the configured 1,000,000 stands rather than the card's
+    1,310,720, which the endpoints that serve glm-5.3-flash do not take."""
+    monkeypatch.setattr(grounded, "litellm_context_window", lambda model, api_base: (900000, "litellm's table"))
+    assert _rendered_window(grounded) == 900000
+    monkeypatch.setattr(grounded, "litellm_context_window", lambda model, api_base: (1310720, "litellm's table"))
+    shipped = json.loads((RUN_PY.parent / "config.json").read_text())["agents"]["defaults"]["contextWindowTokens"]
+    assert _rendered_window(grounded) == shipped
+
+
+def test_a_failed_openrouter_endpoints_call_does_not_fall_back_to_the_model_card(grounded, monkeypatch):
+    """OpenRouter's generic `/models` row carries `top_provider.context_length`, the
+    model card's number, not a serving endpoint's. When `/models/{id}/endpoints`
+    does not answer, the probe answers None rather than reading that row, so the
+    configured number stands instead of being raised to the card's 1,310,720."""
+    seen = []
+
+    def answer(url, api_key):
+        seen.append(url)
+        if url.endswith("/models"):
+            return {"data": [{"id": "z-ai/glm-5.3-flash", "top_provider": {"context_length": 1310720}}]}
+        return None
+
+    monkeypatch.setattr(grounded, "_get_json", answer)
+    shipped = json.loads((RUN_PY.parent / "config.json").read_text())["agents"]["defaults"]["contextWindowTokens"]
+    assert _rendered_window(grounded) == shipped
+    assert not any(url.endswith("/models") for url in seen), "the card row is not an endpoint answer"
+
+
+def test_the_endpoints_own_answer_may_raise_the_configured_number(grounded, monkeypatch):
+    """Only a catalog is held under the configured number; the serving endpoint's
+    figure is exact for these providers and replaces it in either direction."""
+    monkeypatch.setattr(
+        grounded, "_get_json", _openrouter_endpoints({"provider_name": "Z.AI", "context_length": 1048576, "status": 0})
+    )
+    assert _rendered_window(grounded) == 1048576
+
+
+def test_litellm_is_asked_by_the_routed_id_on_openrouter(monkeypatch, launcher):
+    import sys
+    import types
+
+    asked = []
+
+    def get_model_info(candidate):
+        asked.append(candidate)
+        if candidate == "openrouter/z-ai/glm-5.3-flash":
+            return {"max_input_tokens": 1310720}
+        raise Exception("This model isn't mapped yet")
+
+    monkeypatch.setitem(sys.modules, "litellm", types.SimpleNamespace(get_model_info=get_model_info))
+    assert launcher.litellm_context_window("z-ai/glm-5.3-flash", "https://openrouter.ai/api/v1") == (
+        1310720,
+        "litellm's table for openrouter/z-ai/glm-5.3-flash",
+    )
+    assert asked == ["openrouter/z-ai/glm-5.3-flash"]
+    assert launcher.litellm_context_window("nowhere/model", "https://gateway.example/v1") is None
+
+
+def test_the_host_catalog_answers_when_neither_endpoint_nor_table_does(grounded, tmp_path):
+    cache = tmp_path / "home" / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "model-catalog.json").write_text(
+        json.dumps({"models": {"z-ai/glm-5.3-flash": {"context_length": 200000}}})
+    )
+    assert _rendered_window(grounded) == 200000
+    (cache / "model-catalog.json").write_text(
+        json.dumps({"models": {"z-ai/glm-5.3-flash": {"context_length": 2000000}}})
+    )
+    shipped = json.loads((RUN_PY.parent / "config.json").read_text())["agents"]["defaults"]["contextWindowTokens"]
+    assert _rendered_window(grounded) == shipped, "a catalog may lower the configured number, never raise it"
+
+
+def test_the_window_keeps_the_shipped_number_when_nobody_answers(grounded):
+    shipped = json.loads((RUN_PY.parent / "config.json").read_text())["agents"]["defaults"]["contextWindowTokens"]
+    assert _rendered_window(grounded) == shipped
+
+
+def test_ppt_context_window_pins_the_number_by_hand(grounded, monkeypatch):
+    monkeypatch.setattr(
+        grounded, "_get_json", _openrouter_endpoints({"provider_name": "Z.AI", "context_length": 1048576})
+    )
+    monkeypatch.setenv("PPT_CONTEXT_WINDOW", "400000")
+    assert _rendered_window(grounded) == 400000
+    monkeypatch.setenv("PPT_CONTEXT_WINDOW", "lots")
+    assert _rendered_window(grounded) == 1048576, "a number that is not one is ignored, not obeyed"
+
+
+def test_optional_keys_fall_back_per_slot_to_the_host_config(grounded, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps({"tools": {"web": {"search": {"apiKey": "host-serper"}}}}))
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["search"]["apiKey"] == "host-serper"
+
+
+def test_the_rendered_file_is_owner_only_under_the_state_root(grounded, tmp_path):
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
+    assert rendered.parent == tmp_path / "state"
+
+
+def test_the_render_pins_the_home_mounts_the_skill_and_declares_no_plugin_dirs(grounded, tmp_path):
+    """Three renders of the swap, one absence kept. The agent home is pinned
+    in the raven DATA directory, outside the host Agent home the surfaces
+    hand over as a session cwd (w109) -- a pooled loop reads identity,
+    sessions and skills from ONE home, and unpinned it would share the
+    host's. The engine's skill directory is mounted through
+    skillForge.localDirs with always-on semantics (the verdict's feature-14
+    collapse). plugins.dirs stays absent: the wheel arrives by entry point."""
+    import raven_ppt
+
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["agents"]["defaults"]["workspace"] == str(tmp_path / "home" / "subagent_sessions" / "raven-ppt" / "acp")
+    mounts = data["skillForge"]["localDirs"]
+    assert mounts == [
+        {"path": str(Path(raven_ppt.__file__).parent / "skill"), "name": "ppt-engine", "alwaysEnabled": True}
+    ]
+    assert "dirs" not in data["plugins"]
+
+
+def test_the_engine_home_is_never_inside_the_configured_host_home(grounded, tmp_path):
+    """The w109 containment pin, both ways: the rendered engine home is outside
+    the host Agent home, and the runtime's own guard accepts the host home as a
+    session working directory against that engine home -- the exact dispatch
+    the web surface performs, which used to refuse."""
+    from raven.agent.workdir import validate_override
+
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    engine_home = Path(data["agents"]["defaults"]["workspace"]).resolve()
+    host_home = (tmp_path / "home" / "workspace").resolve()
+    assert engine_home != host_home
+    assert host_home not in engine_home.parents
+    host_home.mkdir(parents=True, exist_ok=True)
+    assert validate_override(str(host_home), agent_home=engine_home) == host_home
+    # And the other half of the fork's concern stays refused: the raven data
+    # directory (config.json, oauth tokens) now CONTAINS the engine home, and
+    # the engine home itself is nobody's working directory.
+    with pytest.raises(ValueError):
+        validate_override(str(tmp_path / "home"), agent_home=engine_home)
+    with pytest.raises(ValueError):
+        validate_override(str(engine_home), agent_home=engine_home)
+
+
+def test_ppt_acp_home_override_wins_outright(grounded, tmp_path, monkeypatch):
+    monkeypatch.setenv("PPT_ACP_HOME", str(tmp_path / "elsewhere" / "acp"))
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["agents"]["defaults"]["workspace"] == str(tmp_path / "elsewhere" / "acp")
+
+
+def test_an_operators_own_workspace_and_skill_mounts_survive_the_render(grounded, tmp_path):
+    """The home pin is a default, never an override; the skill mount is a
+    per-entry merge, never a whole-list default -- an operator who mounts a
+    directory of their own keeps it AND keeps the deck skill, whose
+    site-packages path is nothing they could re-spell by hand."""
+    import raven_ppt
+
+    source = json.loads((RUN_PY.parent / "config.json").read_text())
+    source.setdefault("agents", {}).setdefault("defaults", {})["workspace"] = str(tmp_path / "mine")
+    source["skillForge"] = {"localDirs": [{"path": str(tmp_path / "skills")}]}
+    custom = tmp_path / "custom.json"
+    custom.write_text(json.dumps(source))
+    data = json.loads(grounded.render_config(custom).read_text())
+    assert data["agents"]["defaults"]["workspace"] == str(tmp_path / "mine")
+    engine_row = {"path": str(Path(raven_ppt.__file__).parent / "skill"), "name": "ppt-engine", "alwaysEnabled": True}
+    assert data["skillForge"]["localDirs"] == [{"path": str(tmp_path / "skills")}, engine_row]
+
+    # And a render of an already-rendered config stacks no duplicate row.
+    again = tmp_path / "again.json"
+    again.write_text(json.dumps(data))
+    twice = json.loads(grounded.render_config(again).read_text())
+    assert twice["skillForge"]["localDirs"].count(engine_row) == 1
+
+
+def test_a_carried_tools_ppt_block_is_dropped_with_the_successor_named(grounded, tmp_path, capsys):
+    """D4's migration floor: the trunk loader would ignore the retired fork
+    key without a word -- the knobs would look honoured and be dead. The
+    render drops it and says where the same knobs live now."""
+    source = json.loads((RUN_PY.parent / "config.json").read_text())
+    source["tools"]["ppt"] = {"enabled": True, "renderDpi": 300}
+    custom = tmp_path / "custom.json"
+    custom.write_text(json.dumps(source))
+    data = json.loads(grounded.render_config(custom).read_text())
+    assert "ppt" not in data["tools"]
+    assert 'plugins.config["ppt-engine"]' in capsys.readouterr().err
+
+
+def test_the_three_tiers_are_declared_from_the_modes_directory(grounded):
+    """medium: low effort and the caps; high (the default): the caps; max: the source
+    config as shipped, no overlay. The plugin's knobs travel in the overlay the hook
+    reads, the effort on the entry the host dispenses."""
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    modes = data["acp"]["modes"]
+    assert sorted(modes) == ["high", "max", "medium"] and data["acp"]["defaultMode"] == "high"
+    assert modes["medium"]["reasoningEffort"] == "low" and modes["high"]["reasoningEffort"] == "high"
+    # max declares none, which is how it inherits the source config's -- the same
+    # absence that leaves its caps unset. A max.json would not be read at all: the
+    # catalogue skips the baseline's overlay file by construction.
+    assert "reasoningEffort" not in modes["max"]
+    assert modes["medium"]["overlay"] == modes["high"]["overlay"] == {"buildCap": 10, "readingCap": 3}
+    assert modes["max"]["overlay"] == {} and "reasoningEffort" not in modes["max"]
+
+
+def test_the_host_image_section_is_inherited_whole_and_followed_live(grounded, tmp_path, monkeypatch):
+    """A deck's pictures are configured once, on the host: key, base, model and quality
+    come across together, `selectionConfig` points back at the host file so a model
+    switched in Settings reaches the next deck, and the host's media proxy rides along.
+    Before this the render carried the key alone, and the engine read none of it."""
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "media": {
+                        "image": {
+                            "apiKey": "sk-host-images",
+                            "apiBase": "https://images.example/v1",
+                            "model": "qwen/qwen-image-3",
+                            "quality": "low",
+                        },
+                        "proxy": "http://media-proxy.example:3128",
+                    }
+                }
+            }
+        )
+    )
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["apiKey"], image["apiBase"], image["model"], image["quality"]) == (
+        "sk-host-images",
+        "https://images.example/v1",
+        "qwen/qwen-image-3",
+        "low",
+    )
+    assert image["selectionConfig"] == str(home / "config.json")
+    assert data["tools"]["media"]["proxy"] == "http://media-proxy.example:3128"
+
+    # The product's own settings pin a deck account or endpoint over the inherited one.
+    monkeypatch.setenv("PPT_IMAGE_API_KEY", "sk-deck")
+    monkeypatch.setenv("PPT_IMAGE_API_BASE", "https://deck-images.example/v1")
+    monkeypatch.setenv("PPT_IMAGE_MODEL", "gpt-image-2")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["apiKey"], image["apiBase"], image["model"]) == (
+        "sk-deck",
+        "https://deck-images.example/v1",
+        "gpt-image-2",
+    )
+    assert image["quality"] == "low", "what the product did not pin is still the host's, as a snapshot"
+    assert "selectionConfig" not in image, "a pinned section is not replaced by the host's live one"
+
+
+def test_a_host_without_an_image_section_renders_an_empty_one(grounded, tmp_path, monkeypatch):
+    """No key, no model: exactly the shape on which the engine withholds the generator
+    instead of offering a tool whose every call would fail. Against a gateway that is
+    not OpenRouter the LLM key does not pay for pictures either, and a host that
+    selected nothing has no file worth following."""
+    monkeypatch.setenv("PPT_API_BASE", "https://gateway.example/v1")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert not image.get("model") and not image.get("apiBase") and not image.get("apiKey")
+    assert "selectionConfig" not in image
+
+
+def test_a_host_image_section_on_a_named_provider_carries_that_provider(grounded, tmp_path, monkeypatch):
+    """A host that runs its pictures on a provider other than OpenRouter hands the deck
+    that provider, address and key together. A deck endpoint pinned over it is then
+    that endpoint: the provider would otherwise put its own address and key back."""
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "media": {
+                        "image": {"model": "openai/gpt-image-2", "provider": "openai", "apiKey": "sk-host-dormant"}
+                    }
+                },
+                "providers": {
+                    "openai": {
+                        "apiKey": "sk-host-openai",
+                        "apiBase": "https://compat.example/v1",
+                        "extraHeaders": {"X-Tenant": "t1"},
+                    },
+                    "openrouter": {"apiKey": "sk-or-host"},
+                },
+            }
+        )
+    )
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["provider"], image["apiKey"], image["apiBase"]) == (
+        "openai",
+        "sk-host-openai",
+        "https://compat.example/v1",
+    )
+    assert image["extraHeaders"] == {"X-Tenant": "t1"}
+    assert image["selectionConfig"] == str(home / "config.json")
+
+    # A pin makes the section a snapshot the deck reads as written, so it carries
+    # the provider's pair and the bare id that pair serves, and no provider to
+    # resolve against a config that may not hold one.
+    monkeypatch.setenv("PPT_IMAGE_MODEL", "gpt-image-2-mini")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["model"], image["apiKey"], image["apiBase"]) == (
+        "gpt-image-2-mini",
+        "sk-host-openai",
+        "https://compat.example/v1",
+    )
+    assert "provider" not in image and "selectionConfig" not in image
+    assert image["extraHeaders"] == {"X-Tenant": "t1"}, "the address is still the provider's"
+    monkeypatch.delenv("PPT_IMAGE_MODEL")
+
+    # A pinned base without a pinned key does not take the provider's key or headers along.
+    monkeypatch.setenv("PPT_IMAGE_API_BASE", "https://deck-images.example/v1")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiBase"] == "https://deck-images.example/v1" and image.get("apiKey") != "sk-host-openai"
+    assert image["model"] == "gpt-image-2" and "provider" not in image and "extraHeaders" not in image
+
+    monkeypatch.setenv("PPT_IMAGE_API_KEY", "sk-deck")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["apiKey"], image["apiBase"]) == ("sk-deck", "https://deck-images.example/v1")
+    assert "provider" not in image and "extraHeaders" not in image
+
+
+def _host_image(tmp_path: Path, image: dict, providers: dict | None = None) -> None:
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps({"tools": {"media": {"image": image}}, "providers": providers or {}}))
+
+
+_AUTH_HEADERS = {"Authorization": "Bearer sk-host-header", "X-Tenant": "t1"}
+
+
+@pytest.mark.parametrize(
+    ("image", "providers"),
+    [
+        (
+            {"model": "gpt-image-2", "provider": "custom"},
+            {"custom": {"apiKey": "sk-host", "apiBase": "https://host-relay.test/v1", "extraHeaders": _AUTH_HEADERS}},
+        ),
+        (
+            {
+                "model": "gpt-image-2",
+                "apiKey": "sk-host",
+                "apiBase": "https://host-relay.test/v1",
+                "extraHeaders": _AUTH_HEADERS,
+            },
+            {},
+        ),
+    ],
+    ids=["named-provider", "own-section"],
+)
+def test_a_pinned_deck_key_is_the_key_on_the_wire(grounded, tmp_path, monkeypatch, image, providers):
+    """The inherited headers complete the inherited key. Left beside a pinned one, an
+    Authorization among them outranked it on the wire while the log named the pin as
+    the payer; the address is still the host's, so only the headers stay behind."""
+    from raven.agent.tools.media_gen import ImageGenerateTool
+    from raven.config.schema import MediaToolConfig
+
+    _host_image(tmp_path, image, providers)
+    monkeypatch.setenv("PPT_IMAGE_API_KEY", "sk-deck")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    section = data["tools"]["media"]["image"]
+    assert (section["apiKey"], section["apiBase"]) == ("sk-deck", "https://host-relay.test/v1")
+    assert "extraHeaders" not in section
+    tool = ImageGenerateTool(MediaToolConfig.model_validate(section), workspace=tmp_path / "ws")
+    assert tool._headers() == {"Authorization": "Bearer sk-deck"}
+
+
+def test_a_provider_without_a_key_does_not_draw_on_the_section_s_own(grounded, tmp_path, monkeypatch):
+    """The host's tool sends no key to a provider that holds none -- the section's own
+    stood aside for the provider's -- and neither may the deck, whose key slot reads
+    that same section key."""
+    image = {"model": "gpt-image-2", "provider": "custom", "apiKey": "sk-host-section"}
+    _host_image(tmp_path, image, {"custom": {"apiBase": "https://host-relay.test/v1"}})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiBase"] == "https://host-relay.test/v1" and not image.get("apiKey")
+
+    monkeypatch.setenv("PPT_IMAGE_MODEL", "gpt-image-2-mini")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiBase"] == "https://host-relay.test/v1" and not image.get("apiKey")
+
+
+def test_a_pinned_deck_base_gets_no_key_borrowed_for_the_host_s_address(grounded, tmp_path, monkeypatch):
+    """The host borrows the OpenRouter key only while it calls OpenRouter, and a deck
+    endpoint pinned in its place is another address: it gets the deck's own key or
+    the host section's own, not the one borrowed for OpenRouter."""
+    _host_image(tmp_path, {"model": "m"}, {"openrouter": {"apiKey": "sk-or-host"}})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["media"]["image"]["apiKey"] == "sk-or-host"
+
+    monkeypatch.setenv("PPT_IMAGE_API_BASE", "https://deck-images.example/v1")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert image["apiBase"] == "https://deck-images.example/v1" and not image.get("apiKey")
+
+
+@pytest.mark.parametrize(
+    "pins",
+    [{"PPT_IMAGE_MODEL": "gpt-image-2-mini"}, {"PPT_IMAGE_API_BASE": "https://deck-images.example/v1"}],
+    ids=["model-pinned", "base-pinned"],
+)
+def test_a_section_naming_openrouter_renders_as_the_default(grounded, tmp_path, monkeypatch, capsys, pins):
+    """Every other reader folds ``provider: "openrouter"`` back into the default; read
+    as a named provider here, the same intent rendered a different section and named
+    a different payer."""
+    for name, value in pins.items():
+        monkeypatch.setenv(name, value)
+    rendered = []
+    for image in ({"model": "m"}, {"model": "m", "provider": "openrouter"}):
+        _host_image(tmp_path, image, {"openrouter": {"apiKey": "sk-or-host"}})
+        capsys.readouterr()
+        data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+        said = [line for line in capsys.readouterr().err.splitlines() if line.startswith("[run] images:")]
+        rendered.append(({k: v for k, v in data["tools"]["media"]["image"].items() if k != "provider"}, said))
+    assert rendered[0] == rendered[1]
+
+
+def test_the_launcher_still_renders_under_the_releases_it_can_outlive(grounded, tmp_path, monkeypatch):
+    """A stamped home tree outranks a checkout's own agents/, so this file can run
+    under any 0.2 raven. Those have no ``media_provider`` and read the image section
+    as ``live_media_tool_config(section, openrouter_section)``, whose sections cannot
+    name a provider: the launcher has to render there rather than raise."""
+    from raven.config import schema
+
+    _host_image(tmp_path, {"model": "m", "apiKey": "sk-host-images"})
+    monkeypatch.delattr(schema, "media_provider")
+    monkeypatch.setattr(
+        schema,
+        "live_media_tool_config",
+        lambda section, openrouter_section: schema.MediaToolConfig.model_validate(section or {}),
+    )
+    monkeypatch.setenv("PPT_IMAGE_MODEL", "gpt-image-2-mini")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    image = data["tools"]["media"]["image"]
+    assert (image["apiKey"], image["model"]) == ("sk-host-images", "gpt-image-2-mini")
+
+
+def test_the_serper_key_reaches_both_search_consumers(grounded, tmp_path, monkeypatch):
+    """One key, two readers, ONE source of truth: the slice key is copied from
+    the tools.web slot after the secret merge, so every admission source --
+    the product env var here, the host config's own key below -- reaches
+    trunk's web_search and the engine's ppt_image_search together. The
+    hosting never exports $SERPER_API_KEY to the child."""
+    monkeypatch.setenv("PPT_SERPER_API_KEY", "sk-serper")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["search"]["apiKey"] == "sk-serper"
+    assert data["plugins"]["config"]["ppt-engine"]["imageSearch"]["apiKey"] == "sk-serper"
+
+
+def test_a_web_proxy_reaches_both_tool_families(grounded, tmp_path):
+    """The fork's one tools.web.proxy fed the web tools AND every deck tool;
+    landed, the deck tools read the slice's webProxy, so the render bridges
+    the config's own proxy value across (G3, the Serper bridge's shape).
+    ppt_fetch is trust_env=False on purpose -- an environment proxy cannot
+    stand in, so an unbridged render would proxy web_search while the deck
+    tools dialled bare, without a sound. setdefault: a slice that shipped
+    its own webProxy keeps it."""
+    source = json.loads((RUN_PY.parent / "config.json").read_text())
+    source["tools"]["web"]["proxy"] = "http://proxy.example:3128"
+    custom = tmp_path / "custom.json"
+    custom.write_text(json.dumps(source))
+    data = json.loads(grounded.render_config(custom).read_text())
+    assert data["tools"]["web"]["proxy"] == "http://proxy.example:3128"
+    assert data["plugins"]["config"]["ppt-engine"]["webProxy"] == "http://proxy.example:3128"
+
+    shipped = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert "webProxy" not in shipped["plugins"]["config"]["ppt-engine"], "no proxy configured renders no row"
+
+
+def test_an_environment_proxy_is_written_into_the_config_once(grounded, monkeypatch):
+    """The engine's fetch is trust_env=False on purpose, so an exported HTTPS_PROXY
+    reached nothing and every download on a proxied host failed as unreachable. The
+    launcher translates it into tools.web.proxy -- once, in the open -- and the
+    bridge below carries it to the deck tools; a proxy the config states itself wins."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://corp.example:15002")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["proxy"] == "http://corp.example:15002"
+    assert data["plugins"]["config"]["ppt-engine"]["webProxy"] == "http://corp.example:15002"
+
+    monkeypatch.setenv("PPT_PROXY", "http://own.example:8080")
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["proxy"] == "http://own.example:8080", "PPT_PROXY outranks the generic names"
+
+
+def test_a_host_config_serper_key_reaches_both_search_consumers(grounded, tmp_path, monkeypatch):
+    """The per-slot host fallback is a supported admission source (pinned
+    above for the slot); rendered from the env var alone, a host-keyed deploy
+    would register web_search while the deck's own image search silently
+    declined -- the fork on that same deploy had working image search."""
+    monkeypatch.delenv("PPT_SERPER_API_KEY", raising=False)
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps({"tools": {"web": {"search": {"apiKey": "host-serper"}}}}))
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["search"]["apiKey"] == "host-serper"
+    assert data["plugins"]["config"]["ppt-engine"]["imageSearch"]["apiKey"] == "host-serper"
+
+
+def _host(tmp_path: Path, web: dict) -> None:
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps({"tools": {"web": web}}))
+
+
+def test_a_host_on_the_vendor_table_hands_its_web_keys_down(grounded, tmp_path, monkeypatch):
+    """A host set up on a current raven keeps its keys under tools.web.providers,
+    not in the two pre-vendor leaves the secret slots read. Rendered from the
+    leaves alone, this lane launched keyless on such a host: web_search withheld
+    and ppt_image_search declined, while the host's own tools searched fine."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    _host(tmp_path, {"providers": {"serper": {"apiKey": "host-serper"}, "jina": {"apiKey": "host-jina"}}})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    providers = data["tools"]["web"]["providers"]
+    assert providers["serper"]["apiKey"] == "host-serper"
+    assert providers["jina"]["apiKey"] == "host-jina"
+    assert data["plugins"]["config"]["ppt-engine"]["imageSearch"]["apiKey"] == "host-serper"
+    assert data["tools"]["web"]["search"]["maxResults"] == 10, "the product's own search knobs stay"
+
+
+def test_an_own_web_key_outranks_the_hosts_vendor_slot(grounded, tmp_path, monkeypatch):
+    """PPT_SERPER_API_KEY lands in the pre-vendor leaf, which trunk reads only
+    after an empty vendor slot; inheriting the host's slot beside it would have
+    the host's key silently answer for the one this product set."""
+    monkeypatch.setenv("PPT_SERPER_API_KEY", "sk-own-serper")
+    _host(tmp_path, {"providers": {"serper": {"apiKey": "host-serper"}}})
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    assert data["tools"]["web"]["search"]["apiKey"] == "sk-own-serper"
+    assert "serper" not in data["tools"]["web"].get("providers", {})
+    assert data["plugins"]["config"]["ppt-engine"]["imageSearch"]["apiKey"] == "sk-own-serper"
+
+
+def test_the_hosts_vendor_choice_travels_with_its_key(grounded, tmp_path, monkeypatch):
+    """A host that searches through another vendor hands down the choice and the
+    key together; the key alone would sit unread beside a Serper default."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    _host(
+        tmp_path,
+        {
+            "providers": {"tavily": {"apiKey": "host-tavily"}},
+            "search": {"provider": "tavily"},
+            "fetch": {"provider": "tavily"},
+        },
+    )
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+    web = data["tools"]["web"]
+    assert web["providers"]["tavily"]["apiKey"] == "host-tavily"
+    assert web["search"]["provider"] == "tavily" and web["fetch"]["provider"] == "tavily"
+    assert "imageSearch" not in data["plugins"]["config"]["ppt-engine"], "the picture search is Serper's alone"
+
+
+def test_the_render_loads_through_trunks_own_loader(grounded):
+    from raven.config.loader import load_config
+    from raven.config.raven import load_raven_config
+
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    config = load_config(rendered)
+    assert config.agents.defaults.model == "z-ai/glm-5.3-flash"
+    # tools.ppt is retired from the shipped config; the loader must see none.
+    assert getattr(config.tools, "ppt", None) is None
+    extensions = load_raven_config(rendered)
+    assert extensions.plugins.config["ppt-engine"]["profile"] == "script_author"
+    assert extensions.plugins.disabled == []
+    mounts = extensions.skill_forge.local_dirs
+    assert len(mounts) == 1 and mounts[0].always_enabled and mounts[0].path.endswith("skill")
+
+
+# --- the exec lane: installed raven, by entry point ---------------------------
+
+
+def test_a_missing_engine_wheel_refuses_before_rendering(grounded, tmp_path, monkeypatch):
+    """The fork launcher's order, kept: the engine precheck answers first,
+    names what to install, and no file holding merged secrets exists for a
+    run that cannot start."""
+    monkeypatch.setattr(grounded.importlib.util, "find_spec", lambda name: None)
+    args = SimpleNamespace(config=str(RUN_PY.parent / "config.json"))
+    with pytest.raises(SystemExit) as excinfo:
+        grounded.serve(args)
+    assert "ppt-engine" in str(excinfo.value)
+    assert not (tmp_path / "state").exists()
+
+
+def test_the_exec_lane_is_installed_ravens_acp_with_no_chdir(grounded, tmp_path, monkeypatch):
+    """The served argv is this interpreter's ``python -m raven acp`` (the
+    roster row's {PYTHON} resolves at install to one that imports raven), the
+    rendered file exists when the exec takes over, and nothing chdirs: the
+    fork engine resolved assets from its checkout, the wheel resolves them
+    from its own package -- execv replaces the image, so the pid sweep is
+    the only cleaner."""
+    calls = {}
+
+    def fake_chdir(path):
+        calls["cwd"] = str(path)
+
+    def fake_execv(binary, argv):
+        calls["binary"] = binary
+        calls["argv"] = list(argv)
+        calls["rendered_alive"] = Path(argv[5]).is_file()
+        raise RuntimeError("execv reached")
+
+    monkeypatch.setattr(grounded.os, "chdir", fake_chdir)
+    monkeypatch.setattr(grounded.os, "execv", fake_execv)
+    with pytest.raises(RuntimeError, match="execv reached"):
+        grounded.serve(SimpleNamespace(config=str(RUN_PY.parent / "config.json")))
+
+    assert calls["binary"] == sys.executable
+    assert calls["argv"][:5] == [sys.executable, "-m", "raven", "acp", "--config"]
+    assert Path(calls["argv"][5]).parent == tmp_path / "state"
+    assert calls["rendered_alive"]
+    assert "cwd" not in calls
+
+
+def test_the_state_root_override_wins_and_the_default_sits_under_the_home(grounded, tmp_path, monkeypatch):
+    assert grounded.state_root() == tmp_path / "state"
+    monkeypatch.delenv("PPT_STATE_ROOT", raising=False)
+    assert grounded.state_root() == tmp_path / "home" / "workspace" / "subagent_sessions" / "raven-ppt"
+
+
+# --- the pinned tool face: fork config intent, said as plugin admission -------
+
+#: The fork engine's config-intent face, measured: its AgentLoop built under
+#: this product's published config (the four media/deep-research disable rows
+#: applied, no Serper key, everos on) registers exactly these -- the six
+#: filesystem tools and exec, the two web tools (search key-gated, so absent
+#: hermetically), message/ask_user (the question rides the ACP
+#: `ask_user_request` update to whoever is driving the host), use_skill (registry reachable;
+#: read_skill needs a Hub endpoint the config never names), everos's
+#: understand_media, and the ten deck tools. Its tool_search meta-pair
+#: registers only under tools.toolSearch.enabled, default False and never
+#: set by this config.
+FORK_CONFIG_INTENT = {
+    "ask_user",
+    "edit_file",
+    "exec",
+    "find",
+    "grep",
+    "list_dir",
+    "message",
+    "read_file",
+    "understand_media",
+    "use_skill",
+    "web_fetch",
+    "write_file",
+}
+
+DECK_TOOLS = {
+    "ppt_prepare",
+    "ppt_brief",
+    "ppt_fetch",
+    "ppt_generate_image",
+    "ppt_ingest",
+    "ppt_figure_inspect",
+    "ppt_outline",
+    "ppt_template",
+    "ppt_build",
+    "ppt_review",
+}
+
+#: Two names this product's config no longer decides. ``tool_call`` is reserved
+#: from ``tools.disabledTools``: its absence from an array is how the fold reads
+#: "this request has no search route", so an off switch there would unfold the
+#: array rather than slim it. ``tool_search`` registers with the shipped default
+#: -- the fold is on, and this face sits far below the threshold, so the strategy
+#: drops it from every request; it is in the registry the fixture reads and in no
+#: request the model sees. Neither is pinned off here on purpose: an operator or
+#: a dispatcher can attach MCP servers to this product at runtime, and pinning
+#: the fold off would hold it open at exactly the size it exists for.
+TRUNK_RESERVED = {"tool_call", "tool_search"}
+VENDORED_TOOL_FACE = FORK_CONFIG_INTENT | DECK_TOOLS | TRUNK_RESERVED
+KEY_GATED = {"web_search", "ppt_image_search"}
+
+
+def _hermetic_build(rendered, tmp_path, monkeypatch):
+    """Build the runtime from a rendered config: user/project plugin dirs
+    pinched to nothing, the entry-point group kept live (that is this
+    product's delivery lane), a stub provider, the config path pinned.
+    Returns the visible tool names."""
+    from raven.config.loader import load_config
+    from raven.config.raven import load_raven_config
+    from raven.contracts.llm_provider import LLMResponse
+    from raven.core import plugin_stack, runtime
+    from raven.providers.base import LLMProvider
+
+    class _StubProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__(api_key="test")
+
+        async def chat(
+            self,
+            messages,
+            tools=None,
+            model=None,
+            max_tokens=4096,
+            temperature=0.7,
+            reasoning_effort=None,
+            tool_choice=None,
+            **kwargs,
+        ):
+            return LLMResponse(content="", tool_calls=[])
+
+        def get_default_model(self):
+            return "test-model"
+
+    monkeypatch.setattr(
+        plugin_stack,
+        "plugin_discovery_sources",
+        lambda: {
+            "bundled_dir": tmp_path / "none",
+            "user_dir": tmp_path / "none",
+            "project_dir": tmp_path / "none",
+            "entry_points_group": "raven.plugins",
+        },
+    )
+    import raven.home as home
+
+    monkeypatch.setattr(home, "_current_config_path", rendered)
+    config = load_config(rendered)
+    ec_config = load_raven_config(rendered)
+    rt = runtime.build_runtime(config, ec_config, provider=_StubProvider())
+    try:
+        visible = {d["function"]["name"] for d in rt.loop.tools.get_definitions()}
+    finally:
+        rt.discard()
+    return visible
+
+
+def test_the_products_tool_face_is_the_forks_config_intent_plus_the_deck(grounded, tmp_path, monkeypatch):
+    """Build the loop from the rendered config; the model-visible tool set is
+    the ledgered face and nothing more -- the ppt-engine plugin is discovered
+    through the live entry point, its eleven rows admitted by the rendered
+    slice, and every trunk-new name stays out through the config rows."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    visible = _hermetic_build(rendered, tmp_path, monkeypatch)
+    assert visible == VENDORED_TOOL_FACE
+    disabled = set(json.loads((RUN_PY.parent / "config.json").read_text())["tools"]["disabledTools"])
+    assert TRUNK_HELD_OUT <= disabled, "the trunk-new names stay disabled by config, not by luck"
+    assert not (KEY_GATED | DECK_TOOLS) & disabled
+
+
+def test_neither_deck_lane_can_hand_its_work_to_a_helper_it_starts() -> None:
+    """The two lanes that build a deck disable the same dispatch tools.
+
+    They did not. Design held `spawn` out and the deck lane did not, so the same
+    request answered at the top tier could start a research sub-agent while the
+    same request one tier down could not. The one recorded use shows why the
+    answer is neither lane: the deck lane spawned a fact-check, `spawn` returned
+    "I'll notify you when it completes", and the next tool call went out in the
+    same millisecond -- the deck was built without the answer, the helper ran
+    outside the turn's tier ("offers no tier from medium/high/max"), and its late
+    report arrived after delivery as a turn nobody asked for. Facts a deck needs
+    are fetched in the turn that needs them, with web_search and web_fetch.
+    """
+    import json
+    from pathlib import Path
+
+    agents = Path(__file__).resolve().parents[1] / "agents"
+    held = {"spawn", "run_subagent_dag", "deep_research", "hub"}
+    for lane in ("raven-design", "raven-ppt"):
+        disabled = set(
+            json.loads((agents / lane / "config.json").read_text(encoding="utf-8"))["tools"]["disabledTools"]
+        )
+        assert held <= disabled, f"{lane} can still hand a deck to a helper it starts: {sorted(held - disabled)}"
+
+
+def test_a_serper_key_admits_exactly_the_gated_pair(grounded, tmp_path, monkeypatch):
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    monkeypatch.setenv("PPT_SERPER_API_KEY", "sk-serper")
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    visible = _hermetic_build(rendered, tmp_path, monkeypatch)
+    assert visible == VENDORED_TOOL_FACE | KEY_GATED
+
+
+def test_a_host_config_serper_key_admits_the_same_pair(grounded, tmp_path, monkeypatch):
+    """The pair joins and leaves together on EVERY admission source: a key
+    that arrives by the host-config fallback must not split the face the way
+    an env-only slice render would have."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    monkeypatch.delenv("PPT_SERPER_API_KEY", raising=False)
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps({"tools": {"web": {"search": {"apiKey": "host-serper"}}}}))
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    visible = _hermetic_build(rendered, tmp_path, monkeypatch)
+    assert visible == VENDORED_TOOL_FACE | KEY_GATED
+
+
+def test_a_host_vendor_table_serper_key_admits_the_same_pair(grounded, tmp_path, monkeypatch):
+    """The symptom itself: on a host keyed through tools.web.providers the lane's
+    face lacked both searches, so the author paged a wiki API for picture names."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    monkeypatch.delenv("PPT_SERPER_API_KEY", raising=False)
+    _host(tmp_path, {"providers": {"serper": {"apiKey": "host-serper"}}})
+    rendered = grounded.render_config(RUN_PY.parent / "config.json")
+    visible = _hermetic_build(rendered, tmp_path, monkeypatch)
+    assert visible == VENDORED_TOOL_FACE | KEY_GATED
+
+
+def test_copying_a_published_deck_is_not_denied():
+    """A deny rule on `cp ... .pptx` once stopped a model that copied an unpublished build
+    into out/ and called it delivered. It also stopped the one copy a delegating agent
+    legitimately asks for -- "save the file to the working directory" -- and the run ended
+    with the refusal as its answer. What defends delivery now is the publish record:
+    the hook announces only decks whose sha256 the publish step wrote (see
+    test_ppt_engine_plugin), so a copy is harmless and the exec policy is the trunk's own."""
+    from raven.permissions.shell_policy import CommandDecision, ShellCommandPolicy
+
+    config = json.loads((RUN_PY.parent / "config.json").read_text())
+    assert "extraDenyPatterns" not in config["tools"]["exec"]
+    policy = ShellCommandPolicy(deny_patterns=config["tools"]["exec"].get("extraDenyPatterns", []))
+    assert (
+        policy.evaluate('cp out/deck.pptx "/work/community elderly care operations plan.pptx"')
+        is not CommandDecision.HARD_DENY
+    )
+
+
+def test_the_hosts_plugin_opt_outs_reach_the_render_but_not_the_engine(grounded, tmp_path):
+    """The child scans the host's plugin roots, so a plugin the host switched
+    off has to be off in the render too; the deck engine is this product and
+    stays on even when the host turned it off for its own agent."""
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(
+        json.dumps({"plugins": {"disabled": ["everme-memory", "ppt-engine"]}}), encoding="utf-8"
+    )
+
+    data = json.loads(grounded.render_config(RUN_PY.parent / "config.json").read_text())
+
+    assert data["plugins"]["disabled"] == ["everme-memory"]
+    assert "ppt-engine" in data["plugins"]["config"]

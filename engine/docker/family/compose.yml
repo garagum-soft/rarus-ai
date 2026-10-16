@@ -1,0 +1,53 @@
+# One household member's Raven. Not run by hand: family.sh runs it once per
+# member, as Compose project raven-<member>, with that member's port, env file
+# and data directory filled in below.
+#
+# One Raven has no accounts -- everyone signed in to it sees every
+# conversation, file and key -- so a household runs one per person. The image
+# is built once (family.sh build) and shared by all of them.
+
+services:
+  raven:
+    image: ${RAVEN_IMAGE:-raven:family}
+    restart: unless-stopped
+
+    # On the home network, not loopback: the point is that the family's phones
+    # and laptops reach it. Never auto-login here (see environment below).
+    ports:
+      - "${FAMILY_BIND:-0.0.0.0}:${RAVEN_WEB_PORT:?family.sh sets the member's port}:80"
+
+    env_file:
+      # The shared defaults beside the single-user compose file.
+      - path: ../.env
+        required: true
+      # This member's own settings and keys; nobody else's instance reads it.
+      - path: ${FAMILY_MEMBER_ENV:?family.sh sets the member's env file}
+        required: true
+
+    # Wins over both env files.
+    environment:
+      # A port on the home network hands a session to whoever loads it when
+      # auto-login is on; every member signs in with their own one-time link.
+      RAVEN_AUTO_LOGIN: "0"
+      RAVEN_WEB_PORT: ${RAVEN_WEB_PORT}
+      # The engine's port inside the container names the session cookie
+      # (raven_session_<port>). A browser keeps one cookie jar per host, not per
+      # port, so two members signed in on one tablet would overwrite each
+      # other's sign-in under a shared name. Each member's own port keeps them apart.
+      RAVEN_PAGE_PORT: ${RAVEN_WEB_PORT}
+      # A Claude subscription sign-in lives with the member's data, so it
+      # survives the container being replaced.
+      CLAUDE_CONFIG_DIR: /data/.claude
+
+    volumes:
+      # Everything this member keeps: config, conversations, memory, files.
+      - ${FAMILY_DATA:?family.sh sets the member's data directory}:/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -m 3 http://127.0.0.1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+
+    stop_grace_period: 30s

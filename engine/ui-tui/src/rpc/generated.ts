@@ -1,0 +1,8265 @@
+// AUTO-GENERATED — DO NOT EDIT — run `npm run gen:rpc`
+//
+// Source of truth: rpc-schema/openrpc.json (OpenRPC 1.2.6).
+// Regenerate via: cd ui-tui && npm run gen:rpc
+// Lint (drift check) via: cd ui-tui && npm run lint:rpc
+//
+// 74 method-scoped types (37 RPC methods × {Params, Result}) + all
+// components/schemas + JSON-RPC 2.0 envelope types.
+
+/* eslint-disable */
+/* tslint:disable */
+
+/**
+ * Recursive JSON value type. Implemented as an unconstrained object in JSON Schema; downstream Pydantic uses typing.Any.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "JsonValue".
+ */
+export type JsonValue = string | number | boolean | null | unknown[] | {};
+/**
+ * Per-node status reported by the DAG runner. 'interrupted' never comes off the wire -- it is what a client infers for a node still called running when the run stopped reporting. 'exception' is a node that finished without accomplishing its task and is waiting on a decision; it is not terminal.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeStatus".
+ */
+export type DagNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'cancelled' | 'exception';
+/**
+ * Per-node status in a run read back off disk. Unlike the event vocabulary this includes 'interrupted', which the server infers for a node the registry still calls running on a run nothing is executing. 'exception' is a node that finished without accomplishing its task and is waiting on a decision; it is not terminal.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagSnapshotNodeStatus".
+ */
+export type DagSnapshotNodeStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled'
+  | 'interrupted'
+  | 'exception';
+/**
+ * Discriminated union of turn streaming events. The 'type' field is the discriminator.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnEvent".
+ */
+export type TurnEvent =
+  | MessageStartEvent
+  | MessageInjectedEvent
+  | TurnStartedEvent
+  | EpisodeStartEvent
+  | NoticeEvent
+  | PermissionReviewEvent
+  | TokenDeltaEvent
+  | ThinkingDeltaEvent
+  | ToolStartEvent
+  | ToolProgressEvent
+  | ToolCompleteEvent
+  | MessageCompleteEvent
+  | ErrorEvent
+  | CronDeliveredEvent
+  | SubagentDeliveredEvent
+  | SubagentStatusEvent
+  | DagRunStartedEvent
+  | DagNodeUpdatedEvent
+  | DagRunReplannedEvent
+  | DagNodeStalledEvent
+  | DagRunCompletedEvent
+  | CronMissedEvent
+  | MediaEvent
+  | SessionTitledEvent
+  | SessionNamingEndedEvent;
+/**
+ * Which delegation path made a task: a spawn call, or a run_subagent_dag run (a playbook run is one).
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskKind".
+ */
+export type TaskKind = 'spawn' | 'dag';
+/**
+ * A task's state, derived from its nodes' recorded states, first rule that matches: a run superseded by a replan that started is cancelled (one that did not start is failed); any failed node -> failed; any interrupted -> interrupted; any pending/running/exception -> running; any cancelled or skipped -> cancelled; else completed. A spawn is its one node's state.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskStatus".
+ */
+export type TaskStatus = 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled';
+
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserTab".
+ */
+export interface BrowserTab {
+  index: number;
+  url: string;
+  title: string;
+  active: boolean;
+  loading?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserConsoleLine".
+ */
+export interface BrowserConsoleLine {
+  type: string;
+  text: string;
+}
+/**
+ * One actionable element, with the id a click can be aimed at.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserRef".
+ */
+export interface BrowserRef {
+  ref: string;
+  role: string;
+  name: string;
+  x: number;
+  y: number;
+  href?: string;
+  /**
+   * Never present for a password field.
+   */
+  value?: string;
+  disabled?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCompressSummary".
+ */
+export interface SessionCompressSummary {
+  headline: string;
+  /**
+   * True when nothing moved, including when the context engine owns compaction.
+   */
+  noop: boolean;
+  note?: string;
+  token_line?: string;
+}
+/**
+ * The banner bundle: which model, which tools and skills, how full.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionInitInfo".
+ */
+export interface SessionInitInfo {
+  model: string;
+  model_id: string;
+  provider: string;
+  context_window: number;
+  /**
+   * True when no agent loop was running, so tools/skills are empty.
+   */
+  lazy: boolean;
+  /**
+   * Skill names grouped by source.
+   */
+  skills: {
+    [k: string]: string[];
+  };
+  /**
+   * Tool names in a single 'builtin' bucket.
+   */
+  tools: {
+    [k: string]: string[];
+  };
+  usage: SessionUsage;
+  version: string;
+  cwd: string;
+  /**
+   * Ids of the knowledge bases this session's turns may search, as it was left. Beside `cwd` and for the same reason: a reader reopening a conversation has to see what it is pointed at, or the picker draws it as pointed at nothing.
+   */
+  knowledge_bases?: string[];
+  mcp_servers: JsonValue[];
+  /**
+   * The Harness this session is bound to, if any.
+   */
+  harness?: string | null;
+  update_available?: boolean;
+  /**
+   * The command that would install the newer release.
+   */
+  update_command?: string;
+  /**
+   * What a config migration changed on the user's behalf during this boot. Drained, so only the first session of a launch carries them.
+   */
+  config_notices?: string[];
+  /**
+   * Which of a multi-endpoint provider's endpoints this session is on; null for single-endpoint ones.
+   */
+  endpoint?: string;
+  /**
+   * The resumed session's name, when it has one. Absent on a fresh session, which has nothing to name yet. Carried on the bundle rather than fetched separately because a client resuming a session is already being told what it is resuming.
+   */
+  title?: string;
+  /**
+   * A turn is in flight on this session right now.
+   */
+  running?: boolean;
+  /**
+   * How long the turn in flight has been running, in milliseconds, measured on the server; null when nothing is running or the question carries no readable stamp. The elapsed rather than the stamp it was measured from: that stamp is a server wall clock, and a client in another timezone reading it against its own clock gets the offset between the two back as the turn's age.
+   */
+  running_ms?: number | null;
+}
+/**
+ * ``info.usage`` — the boot baseline, refreshed by each turn's completion.
+ *
+ * Distinct from :class:`TurnUsage`, which is the per-turn event payload:
+ * this one carries the context-window fill a banner draws, and its counters
+ * are named for the session rather than for one LLM call.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionUsage".
+ */
+export interface SessionUsage {
+  input: number;
+  output: number;
+  cost_usd: number;
+  calls: number;
+  context_max: number;
+  context_used: number;
+  context_percent: number;
+  /**
+   * True when context_used is a tiktoken estimate of a resumed transcript, not a measurement.
+   */
+  context_estimated?: boolean;
+}
+/**
+ * One stored message in wire form: ``content`` renamed to ``text``.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptMessage".
+ */
+export interface TranscriptMessage {
+  role: string;
+  text?: string;
+  context?: JsonValue;
+  name?: string;
+  tool_call_id?: string;
+  /**
+   * The run a run_subagent_dag call started, so a resumed transcript can fetch its graph through dag.get. Absent on every other tool, and on a graph that was rejected before it ran.
+   */
+  dag_run_id?: string;
+  /**
+   * The task id a spawn call's result names, so a resumed transcript can find the run's record through subagent.list. Absent on every other tool, and on a spawn that was refused before it ran.
+   */
+  spawn_task_id?: string;
+  timestamp?: string;
+  reasoning_content?: string;
+  /**
+   * How long the thought on this assistant entry took, measured server-side from the first reasoning delta to the first answer token or tool call. Absent means unknown (an unstreamed call, or a session written before it was recorded) -- render the bare header, never a zero.
+   */
+  reasoning_ms?: number;
+  tool_calls?: TranscriptToolCall[];
+  /**
+   * How long the call this role='tool' entry answers ran, dispatch to result. Absent means unknown, same rule as reasoning_ms.
+   */
+  duration_ms?: number;
+  /**
+   * A file tool's unified diff of the change it made, on its role='tool' entry.
+   */
+  diff?: string;
+  /**
+   * The files that call made vanish, on its role='tool' entry. Absent when it removed none.
+   */
+  file_removed?: TranscriptFileRemoval[];
+  /**
+   * The files a stored command left behind, on its role='tool' entry. The same shape the live event carried: a size and a line count are what a reloaded page needs, so unlike a removal there is nothing to reduce.
+   */
+  file_written?: FileWritten[];
+  turn_ended?: TranscriptTurnEnded;
+  notice?: TranscriptNotice;
+  /**
+   * Present on the user entry of a turn the runtime opened, naming what opened it (`subagent`, `cron`, `sentinel`, `heartbeat`). Absent means a person typed it. Same rule as `notice`, one role over: the model reads `text`, a reader must not -- a sub-agent's announce carries an untrusted fence, an instance handle and an instruction not to repeat either to the user, and a cron reminder carries how to word the reply.
+   */
+  origin?: string;
+  delegated?: TranscriptDelegated;
+  /**
+   * Set on a user entry merged into a turn already running, not the prompt that opened one. A reader draws it INSIDE the turn: no new turn number, no fold closed over the narration above it, and the text before it is still that turn's narration rather than its answer.
+   */
+  mid_turn?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptToolCall".
+ */
+export interface TranscriptToolCall {
+  id: string;
+  name: string;
+  /**
+   * JSON-encoded arguments; re-serialized when stored as an object.
+   */
+  arguments: string;
+}
+/**
+ * One file a stored tool call made vanish, on its role='tool' entry. The line count and not the body: the text of a removed file is what the live event carries, while a reloaded page needs to know the file went and how big the hole is.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptFileRemoval".
+ */
+export interface TranscriptFileRemoval {
+  path: string;
+  /**
+   * Lines the file held when it went; 0 when unknown.
+   */
+  del: number;
+}
+/**
+ * One file a command left behind, found by listing its working directory. Neither a FileChange nor a FileRemoval: a command reports its output and nothing else, so what is known of the file is that it is there, how big it is, and whether it was there before. What it changed from is known only when the working directory's shadow repo held a copy from just before the command; then the change rides along as counts and a unified diff. A file's text goes out only when the shadow repo's rules would store it: never for a file its excludes or the user's .gitignore keep out, even one the repo held a copy of before the rule named it. Such a created file carries its counts only, and such a rewrite neither.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FileWritten".
+ */
+export interface FileWritten {
+  /**
+   * Absolute path of the file the command wrote.
+   */
+  path: string;
+  /**
+   * Whether the file was new. False means it was there before the command and is different after, which a client draws as a rewrite rather than an addition.
+   */
+  created: boolean;
+  /**
+   * The file's size in bytes after the command.
+   */
+  size: number;
+  /**
+   * Lines in a created file, when it could be counted. Null, not absent: the key is always sent, and null says the count is unknown. Too large to read, not text, or a file that already existed, whose change therefore has no number.
+   */
+  lines?: number | null;
+  /**
+   * Lines the command added to the file. Absent when the change could not be measured: not text, too large, or a rewrite whose previous contents were never captured.
+   */
+  added?: number | null;
+  /**
+   * Lines the command removed from the file. Absent exactly when added is.
+   */
+  removed?: number | null;
+  /**
+   * Unified diff of the change, when it was measured and small enough to carry. Absent past the event's budget even when the counts are present: a partial diff reads as a smaller change than the one that happened.
+   */
+  diff?: string | null;
+}
+/**
+ * Why a turn's transcript stops where it does.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptTurnEnded".
+ */
+export interface TranscriptTurnEnded {
+  /**
+   * 'cancelled' (a person stopped it) or 'failed'.
+   */
+  status: string;
+  reason?: string;
+}
+/**
+ * Marks an assistant entry the runtime wrote rather than the model.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptNotice".
+ */
+export interface TranscriptNotice {
+  /**
+   * Which runtime decision this reports; `action_blocked` today.
+   */
+  kind: string;
+  detail?: string;
+}
+/**
+ * Which delegated run re-entered the conversation at this entry. The same identity `subagent.delivered` carries, so a replayed transcript and a live stream draw the same row from the same fields.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TranscriptDelegated".
+ */
+export interface TranscriptDelegated {
+  kind: 'spawn' | 'dag';
+  label: string;
+  status: 'ok' | 'error' | 'exception' | 'notice' | 'cancelled';
+  /**
+   * Set for kind=dag, so a client can open the run.
+   */
+  run_id?: string;
+  /**
+   * Set for a dag node's own message, so a client can place it against that row.
+   */
+  node_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ExtPluginRow".
+ */
+export interface ExtPluginRow {
+  id: string;
+  display_name: string;
+  version: string;
+  enabled: boolean;
+  bundled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ExtSkillRow".
+ */
+export interface ExtSkillRow {
+  name: string;
+  description: string;
+  source: string;
+  always: boolean;
+  /**
+   * Installed from the skill hub, so skillhub.remove can uninstall it.
+   */
+  hub: boolean;
+  hub_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ExtToolRow".
+ */
+export interface ExtToolRow {
+  name: string;
+  description: string;
+  enabled: boolean;
+  /**
+   * Owning MCP server, or null for a built-in tool.
+   */
+  mcp_server?: string;
+  needs?: ToolSetupNeed;
+  /**
+   * True for a tool whose off switch the loop would not honour: the two tool-search meta-tools, and the MCP resource and prompt meta-tools the loop registers and withdraws on its own. The page draws these without a switch.
+   */
+  builtin?: boolean;
+}
+/**
+ * Set when the tool exists but is withheld for want of a key. The model cannot call it; the row is here so the page can offer the field instead of the tool simply being absent.
+ */
+export interface ToolSetupNeed {
+  /**
+   * Dotted config key that unlocks the tool.
+   */
+  setting: string;
+  /**
+   * Environment variable accepted instead.
+   */
+  env?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolSetupNeed".
+ */
+export interface ToolSetupNeed1 {
+  /**
+   * Dotted config key that unlocks the tool.
+   */
+  setting: string;
+  /**
+   * Environment variable accepted instead.
+   */
+  env?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronJobInfo".
+ */
+export interface CronJobInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+  kind: 'at' | 'every' | 'cron';
+  expr?: string;
+  every_ms?: number;
+  at_ms?: number;
+  tz?: string;
+  message: string;
+  next_run_at_ms?: number;
+  last_run_at_ms?: number;
+  last_status?: 'ok' | 'error' | 'skipped';
+  last_error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronRun".
+ */
+export interface CronRun {
+  at_ms?: number;
+  ok: boolean;
+  preview: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApiUsageModel".
+ */
+export interface ApiUsageModel {
+  calls: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cost_usd?: number | null;
+  model: string;
+  cache_write_tokens?: number | null;
+  cost_missing_calls: number;
+  cache_read_missing_calls: number;
+  cache_write_missing_calls: number;
+  legacy_cost_calls: number;
+  input_missing_calls?: number;
+  output_missing_calls?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApiUsageTotals".
+ */
+export interface ApiUsageTotals {
+  calls: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cost_usd?: number | null;
+  cache_write_tokens?: number | null;
+  cost_missing_calls: number;
+  cache_read_missing_calls: number;
+  cache_write_missing_calls: number;
+  legacy_cost_calls: number;
+  input_missing_calls?: number;
+  output_missing_calls?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DailyUsage".
+ */
+export interface DailyUsage {
+  date: string;
+  calls: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cost_usd?: number | null;
+  cache_write_tokens?: number | null;
+  cost_missing_calls: number;
+  cache_read_missing_calls: number;
+  cache_write_missing_calls: number;
+  legacy_cost_calls: number;
+  input_missing_calls?: number;
+  output_missing_calls?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "LlmUsage".
+ */
+export interface LlmUsage {
+  total: ApiUsageTotals;
+  /**
+   * Most expensive first.
+   */
+  models: ApiUsageModel[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolUsage".
+ */
+export interface ToolUsage {
+  total: number;
+  /**
+   * Most called first.
+   */
+  counts: ToolUsageCount[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolUsageCount".
+ */
+export interface ToolUsageCount {
+  name: string;
+  count: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EverosSection".
+ */
+export interface EverosSection {
+  /**
+   * Empty when nothing is pinned for this role.
+   */
+  model: string;
+  /**
+   * The vendor serving `model`. Empty when nothing is pinned.
+   */
+  provider: string;
+  /**
+   * Whether that provider has a usable credential -- the same question the memory gate answers, so the card and the gate cannot disagree. No key ever goes on the wire.
+   */
+  api_key_set: boolean;
+  /**
+   * The endpoint came from exported EVEROS_<ROLE>__* variables, which outrank raven. The slot is read-only: raven cannot edit a shell.
+   */
+  env_managed?: boolean;
+  /**
+   * Nothing is pinned and the role runs on the main chat model, which it follows when that changes. Only the memory LLM does this.
+   */
+  follows_main?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelField".
+ */
+export interface ChannelField {
+  key: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+  /**
+   * Whether a value is stored; the value itself never rides the wire.
+   */
+  set: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelStatusRow".
+ */
+export interface ChannelStatusRow {
+  name: string;
+  enabled: boolean;
+  configured: boolean;
+  /**
+   * Required fields still empty.
+   */
+  missing: string[];
+  /**
+   * Every field the channel takes, so a client can render its configure form.
+   */
+  fields?: ChannelField[];
+  /**
+   * Whether the adapter is up, read from the live gateway. Null when no gateway answered.
+   */
+  running?: boolean;
+  /**
+   * Whether the account is paired. Only the QR-login channels report this; null means the channel does not report a pairing and must not be drawn as disconnected.
+   */
+  connected?: boolean;
+  /**
+   * Whether this channel signs in by scanning a code.
+   */
+  qr_login?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplateRow".
+ */
+export interface DeckTemplateRow {
+  /**
+   * The template's stem, which deck.templates.pick takes.
+   */
+  name: string;
+  /**
+   * The stem as words, for the picker's caption.
+   */
+  label: string;
+  size: number;
+  /**
+   * The first page as a JPEG data URL, or null where this host cannot render one.
+   */
+  cover?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsEntry".
+ */
+export interface FsEntry {
+  name: string;
+  dir: boolean;
+  /**
+   * Zero for a directory.
+   */
+  size: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsDirEntry".
+ */
+export interface FsDirEntry {
+  name: string;
+  /**
+   * Absolute.
+   */
+  path: string;
+  /**
+   * True when a session may be pinned here; false inside the agent's own data (see raven.agent.workdir).
+   */
+  ok: boolean;
+}
+/**
+ * One row, projected card-sized. ``kind`` decides which optional fields
+ * carry a value: the four memory types share only ``id`` and ``kind``.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MemoryItem".
+ */
+export interface MemoryItem {
+  id: string;
+  kind: 'episode' | 'profile' | 'agent_case' | 'agent_skill';
+  /**
+   * Present on search hits only.
+   */
+  score?: number;
+  session_id?: string;
+  timestamp?: string;
+  subject?: string;
+  summary?: string;
+  body?: string;
+  profile_data?: {
+    [k: string]: JsonValue;
+  };
+  key_insight?: string;
+  quality_score?: number;
+  confidence?: number;
+  maturity_score?: number;
+}
+/**
+ * The card-sized projection of a catalogue entry.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlughubCatalogItem".
+ */
+export interface PlughubCatalogItem {
+  id: string;
+  version?: string;
+  name: string;
+  summary: string;
+  category: string;
+  verified: boolean;
+  publisher: string;
+  risk_tier: number;
+  auth_mode: 'none' | 'apikey' | 'oauth';
+  /**
+   * None when the entry contributes no MCP server.
+   */
+  transport?: string;
+  tool_preview_count: number;
+  skill_count: number;
+  /**
+   * Which contribution kinds the entry carries: mcp, skill, python.
+   */
+  kinds: string[];
+  installed: boolean;
+}
+/**
+ * One server's live connection state, as `MCPConnectionManager` reports it.
+ *
+ * Every mutating `plug.*` call answers with this, and the gateway broadcasts the
+ * same shape as an `mcp.status` notification, so a client renders one state
+ * machine rather than two.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpSnapshot".
+ */
+export interface McpSnapshot {
+  name: string;
+  /**
+   * stdio | sse | streamableHttp, or 'unknown'.
+   */
+  transport: string;
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_required' | 'error';
+  connected: boolean;
+  tool_count: number;
+  error?: string;
+  enabled: boolean;
+  /**
+   * The authorization URL this server is parked on, when it is. Carried on the pull because the `oauth.pending` notification that also carries it is dropped when no client is attached, which is every connect started at assembly time.
+   */
+  auth_url?: string;
+  /**
+   * How the server authenticates (ext.list rows only).
+   */
+  auth?: ('none' | 'apikey' | 'oauth') | null;
+  /**
+   * Whether it holds the credential that mode needs (ext.list rows only).
+   */
+  credentialed?: boolean | null;
+}
+/**
+ * What the install actually landed, which is what uninstall replays.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugLedger".
+ */
+export interface PlugLedger {
+  catalog_id: string;
+  /**
+   * One entry per landed piece: {kind: 'mcp', server} or {kind: 'skill', name, skillhub_id}.
+   */
+  pieces: {
+    [k: string]: JsonValue;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubItem".
+ */
+export interface SkillhubItem {
+  id: string;
+  skill_id: string;
+  name: string;
+  description: string;
+  source: string;
+  source_url: string;
+  category: string;
+  quality_score: number;
+  install_count: number;
+  github_star: number;
+  license: string;
+  tags: string[];
+  installed: boolean;
+  /**
+   * The local directory name when installed, else empty.
+   */
+  installed_name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubSubscores".
+ */
+export interface SkillhubSubscores {
+  utility: number;
+  robustness: number;
+  safety: number;
+  flags: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionInfo".
+ */
+export interface SessionInfo {
+  /**
+   * <channel>:<chat_id> composite key.
+   */
+  session_key: string;
+  channel: string;
+  chat_id: string;
+  /**
+   * ISO-8601 timestamp.
+   */
+  created_at: string;
+  /**
+   * ISO-8601 timestamp.
+   */
+  updated_at: string;
+  message_count: number;
+  metadata: {
+    [k: string]: JsonValue;
+  };
+  has_pending_clarification: boolean;
+}
+/**
+ * One row in the TUI session picker (gatewayTypes.ts SessionListItem).
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionListItem".
+ */
+export interface SessionListItem {
+  /**
+   * Full session_key: <channel>:<chat_id>.
+   */
+  id: string;
+  message_count: number;
+  /**
+   * First user message, used as the untitled-session identity fallback.
+   */
+  preview: string;
+  /**
+   * Latest non-empty user or assistant message text.
+   */
+  last_message_preview: string;
+  source?: string;
+  /**
+   * Unix timestamp derived from created_at.
+   */
+  started_at: number;
+  /**
+   * Unix timestamp of the latest user or assistant message.
+   */
+  updated_at: number;
+  title: string;
+  /**
+   * User pinned this session to the top of the picker.
+   */
+  pinned?: boolean;
+  /**
+   * A turn is in flight on this session right now.
+   */
+  running?: boolean;
+  /**
+   * The directory this session was pinned to when it was created, absolute; absent for a session that runs where the policy default puts it. What the rail groups by.
+   */
+  workdir?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionMessage".
+ */
+export interface SessionMessage {
+  /**
+   * 0-based position within session.messages.
+   */
+  index: number;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  /**
+   * ISO-8601 timestamp.
+   */
+  timestamp: string;
+  metadata?: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpServerInfo".
+ */
+export interface McpServerInfo {
+  name: string;
+  transport: 'stdio' | 'sse' | 'streamableHttp';
+  connected: boolean;
+  tool_count: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpToolInfo".
+ */
+export interface McpToolInfo {
+  /**
+   * Raw tool name (without mcp_<server>_ prefix).
+   */
+  name: string;
+  description: string;
+  /**
+   * JSON Schema for the tool's input arguments.
+   */
+  parameters: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillInfo".
+ */
+export interface SkillInfo {
+  name: string;
+  source: 'local' | 'remote';
+  pinned: boolean;
+  description: string;
+  tags: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentCall".
+ */
+export interface SubagentCall {
+  /**
+   * A spawn's call id, or '<run_id>/<node>' for a graph node. Opaque to a client: a spawn row opens through subagent.context and a dag row through dag.node, which is what kind is for.
+   */
+  id: string;
+  /**
+   * spawn | dag. Which delegation path made this, and so how it is opened.
+   */
+  kind?: string;
+  /**
+   * dag rows only: the graph run this node belongs to.
+   */
+  run_id?: string;
+  /**
+   * dag rows only: the node's id inside that run.
+   */
+  node?: string;
+  /**
+   * What it was asked, in short.
+   */
+  label: string;
+  /**
+   * run | ok | error | cancelled | queued | skipped. The last two only occur for graph nodes.
+   */
+  status: string;
+  /**
+   * The external agent that ran it, or null for a raven subagent.
+   */
+  agent?: string;
+  /**
+   * The handle sharing one stateful agent session, if any.
+   */
+  instance?: string;
+  /**
+   * ISO 8601; the record stores epoch millis.
+   */
+  started_at?: string;
+  /**
+   * Absent while it is still running.
+   */
+  ended_at?: string;
+  /**
+   * What was asked, plus the answer once there is one.
+   */
+  message_count: number;
+  /**
+   * Input plus output tokens this run spent. Null, not zero, when the transport that ran it cannot report usage -- the cli lane never can.
+   */
+  tokens?: number;
+  /**
+   * How many tools it called. Null where the transport has no per-step visibility.
+   */
+  tool_call_count?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentRow".
+ */
+export interface SubagentRow {
+  name: string;
+  preset?: string;
+  kind: 'builtin' | 'cli' | 'openai' | 'acp';
+  description: string;
+  enabled: boolean;
+  configured: boolean;
+  /**
+   * Discovered under the `agents/` product tree rather than written into config: one of the agent products that ship with this raven, materialized as a row on every table build. Like `builtin` it leaves `configured` false -- there is no config entry to delete, and removing it means removing its folder -- but unlike `builtin` it is a real subprocess with a command, so it is probed and it can be unready (a missing engine wheel leaves it listed and disabled). The wire name predates the tree's rename. Absent from a server that predates discovery.
+   */
+  vendored?: boolean;
+  /**
+   * Always false from this server: the fork-era venv build is gone with the venvs, and `subagents.build` answers that there is nothing to build. Kept for wire compatibility with clients that predate the product tree. Absent from a server that predates discovery.
+   */
+  building?: boolean;
+  /**
+   * Reusing a handle continues this agent's conversation rather than starting a fresh one (`agent_meta`). What makes a row direct-chattable at all: `chat` refuses a stateless agent, so a picker that offers one is offering a refusal. Absent from a server that predates this, which reads as 'not offered' rather than as an error.
+   */
+  stateful?: boolean;
+  /**
+   * A built-in agent: raven's own in-process loop, on the agent table whether or not config mentions it. Distinct from `configured`, which stays false for one -- not writing a row is how 'use the package's default' is spelled, so there is nothing to delete and no transport to connect. It takes no action at all: `subagents.toggle` answers `config_field_readonly` for it, because an unnamed spawn and a dag node with no sub-agent both dispatch to this row, so it cannot leave the roster. A client must not offer a switch, a test or a delete for it.
+   */
+  builtin?: boolean;
+  /**
+   * One of raven's own agents, whichever way this install registered it: the built-in row, a product discovered under `agents/`, or a config row whose acp handshake named raven (the shipped installer writes a product as a plain config row). The row a client draws with raven's own mark, and whose unset model reads as following the main Raven. Absent from a server that predates it, which reads as 'not raven's'.
+   */
+  own?: boolean;
+  /**
+   * The transport this entry's preset has since moved to, or null when it is current. A configured entry is never rewritten underneath the user, so the mismatch is shown instead.
+   */
+  upgrade_to?: string;
+  group: 'builtin' | 'installed' | 'uninstalled';
+  probe_status: 'ready' | 'attention' | 'missing' | 'unknown';
+  probe_detail: string;
+  /**
+   * The executable the availability probe looked for and did not find, on a `missing` row: what to install. For a preset launched through npx it is `npx`, which Node.js brings -- not the agent's own installer. Null on every other row, and on a server that predates the field.
+   */
+  probe_missing?: string;
+  has_api_key: boolean;
+  /**
+   * The agent answered the handshake and then refused to open a session without a credential. Measured by the capability snapshot, not inferred from probe_status, which reads `attention` both for this and for an installed agent nothing has verified -- two rows that need opposite things from the reader. Always false for a kind with no handshake to be refused in.
+   */
+  needs_auth?: boolean;
+  mcps: string[];
+  allow_mcp_secrets: boolean;
+  last_test_ok?: boolean;
+  last_test_detail?: string;
+  /**
+   * What the reader has to do before the last failed test can pass, as data a page renders in its own language. Absent when no fix is known -- a credential, a provider, a key or a download; last_test_detail stays the English record either way.
+   */
+  last_test_remedy?: {
+    /**
+     * sign_in: sign in through a browser from a terminal. setup: run the agent's own interactive setup from a terminal. api_key: the row is an endpoint and a key, fixed in the page. download: npx could not fetch the agent -- fixed in the network, the npm registry or the proxy; `command` is the preset's launch command, which fetches it from a terminal with no time limit, sent only when the row's command is the preset's word for word. model: the agent's model provider does not serve the model it is set to use (HTTP 404 -- withdrawn from a free tier, or not found), or the account's plan does not include it. billing: the provider refused for want of credit (402). quota: the provider is rate-limiting it or its quota is spent (429, or a plan's usage limit). For these three `command` opens the agent and `then` is what to type in it to switch model, when known. network: the provider could not be reached; `command`, when sent, prints the cause in a terminal. silent: the agent outlasted the wait without a word, which is how it retries a provider that keeps refusing it; `command` prints the reason in a terminal. upgrade: the agent is too old to know the flag that starts it in ACP mode, or never finishes its handshake; `command` upgrades it. exited: the agent quit on starting, and what it said is in the detail. runtime: the agent quit on starting because the Node.js it was launched with is older than its package declares; `needs` is that floor, `found` the version launched, and `command` upgrades that Node.js when its installer is recognisable. plan: the agent is signed in, but the account's plan does not include it or its membership cannot be verified; `command`, when sent, is the page that sells one. config: the agent cannot read its own config file; `command` says where it is wrong.
+     */
+    kind:
+      | 'sign_in'
+      | 'setup'
+      | 'api_key'
+      | 'download'
+      | 'model'
+      | 'billing'
+      | 'quota'
+      | 'network'
+      | 'silent'
+      | 'upgrade'
+      | 'exited'
+      | 'runtime'
+      | 'plan'
+      | 'config';
+    /**
+     * The command that makes the fix on this machine, when one is known.
+     */
+    command?: string;
+    /**
+     * What to type once `command` is running, for an agent whose fix is a step inside it rather than the command itself. Sent only beside `command`.
+     */
+    then?: string;
+    /**
+     * For runtime: the Node.js version the agent's package declares it needs, e.g. 22.
+     */
+    needs?: string;
+    /**
+     * For runtime: the Node.js version the agent was launched with, e.g. 18.20.8.
+     */
+    found?: string;
+  };
+  last_test_at_ms?: number;
+  test_running: boolean;
+  /**
+   * The model this row sends, or null to use the agent's own default.
+   */
+  model?: string | null;
+  /**
+   * The models this row's agent advertised, empty when it advertised none.
+   */
+  model_choices?: {
+    /**
+     * The id the agent takes back.
+     */
+    value: string;
+    /**
+     * What the agent asked to be shown, usually far shorter than the value.
+     */
+    name?: string;
+    /**
+     * The agent's own bucketing, a provider typically. Empty when it offered none.
+     */
+    group?: string;
+  }[];
+  /**
+   * What subagents.update accepts for model on this row, by rule rather than by kind, and not ownership, which is own: raven for the built-in row and for one of raven's own acp rows whose handshake advertised no menu -- both pick from raven's own provider catalogue; agent for an acp row picking from the choices its handshake advertised (model_choices); fixed for an openai row, whose model is a plain config value, and for a cli row, which has no menu at all. The menu, not the whole vocabulary: one of raven's own acp rows also accepts a host-qualified id under either rule, since it runs on raven's providers whatever it advertised.
+   */
+  model_source?: 'raven' | 'agent' | 'fixed';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOptionProvider".
+ */
+export interface ModelOptionProvider {
+  slug: string;
+  name: string;
+  homepage?: string;
+  /**
+   * Where the vendor hands out API keys; null when the registry has no console link.
+   */
+  key_url?: string | null;
+  /**
+   * The vendor's own model index. Distinct from `homepage`: the question a settings page asks is which model to put here, and a marketing front page does not answer it.
+   */
+  docs?: string;
+  authenticated: boolean;
+  is_current: boolean;
+  auth_type: string;
+  key_env?: string;
+  api_base?: string;
+  default_api_base?: string;
+  models: string[];
+  /**
+   * Only what the provider's config section lists. `models` is the picker's offer -- config plus a curated shortlist plus a catalogue -- so a page managing the list reads this one or it shows models nobody added.
+   */
+  configured_models?: string[];
+  /**
+   * Whether to draw a key field. False for an OAuth flow and for a local deployment reached by address alone; true for the local servers that can be put behind a token, which the registry declares rather than each surface matching on the slug.
+   */
+  accepts_api_key?: boolean;
+  /**
+   * Effective API protocol keyed by model id.
+   */
+  protocols?: {
+    [k: string]: string;
+  };
+  /**
+   * Explicit user protocol overrides keyed by model id.
+   */
+  protocol_overrides?: {
+    [k: string]: string;
+  };
+  /**
+   * Custom request headers by name, each value redacted.
+   */
+  extra_headers?: {
+    [k: string]: string;
+  };
+  total_models: number;
+  needs_api_base: boolean;
+  /**
+   * The registry's is_gateway: resells other vendors' models under vendor/model ids. The catalogue's gateway filter reads this; absent means false.
+   */
+  gateway?: boolean;
+  /**
+   * The registry's image_api: the image tool can run on this provider's address and key. The roles card offers the image role these providers; absent means false.
+   */
+  image_api?: boolean;
+  /**
+   * Every model-id prefix that names this provider: its own name plus the ones it used to answer to (ProviderSpec.route_names). A client comparing two spellings of one model strips any of them, the way providers/wire.py's merge_key does. Absent means the provider's own name alone.
+   */
+  route_names?: string[];
+  platforms?: {
+    label: string;
+    api_base: string;
+    signup_url: string;
+  }[];
+  warning: string;
+  /**
+   * Keyed by the model id as it appears in `models`.
+   */
+  model_labels?: {
+    [k: string]: ModelLabel;
+  };
+}
+/**
+ * How a model reads to a person, and what it can do. Absent for a model the registry knows nothing about -- one released since the bundled files, or served by a local deployment -- in which case the id is all there is to show. An empty tag list means nothing is published, not that the model cannot: a surface renders absence as no icon, never as a denial.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelLabel".
+ */
+export interface ModelLabel {
+  label: string;
+  description?: string;
+  /**
+   * Closed vocabulary, drawn as icons: function-call, reasoning, structured-output, image-recognition, audio-recognition, video-recognition, file-input, image-generation, audio-generation, video-generation, embedding, rerank, computer-use.
+   */
+  capabilities?: string[];
+  /**
+   * What the model reads: text, image, video, audio, vector.
+   */
+  input_modalities?: string[];
+  /**
+   * What the model writes: text, image, video, audio, vector.
+   */
+  output_modalities?: string[];
+  /**
+   * The bucket a model list files this model under, from what it writes (registry_data.kind_of): a model that reads images is still text. A model with no label entry is text.
+   */
+  kind: 'text' | 'image' | 'audio' | 'video' | 'embedding' | 'reranker';
+  /**
+   * Tokens the model reads in one request, from the tables that also route rather than from the display registry -- the number shown has to be the number a request is sized with. Absent where no such table names the model.
+   */
+  context_window?: number;
+}
+/**
+ * One model a provider reports. `added` is about this provider's configured list, not about the vendor: the same model offered by two gateways is added to each separately.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelCandidate".
+ */
+export interface ModelCandidate {
+  id: string;
+  label: string;
+  /**
+   * The bucket the list filters by: text, image, embedding, reranker, audio or video. Derived from what the model writes -- reading pictures is something a text model does.
+   */
+  kind: string;
+  added: boolean;
+  /**
+   * `live` when the vendor named this model just now, `registry` when only the bundled catalogue does. A registry row is not less real: it is how a provider lists at all before a key is entered.
+   */
+  source?: string;
+  description?: string;
+  capabilities?: string[];
+  input_modalities?: string[];
+  output_modalities?: string[];
+  context_window?: number;
+}
+/**
+ * One of a provider section's several url/key groups. `label` is the idempotency key the write methods address an entry by.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ProviderEndpointInfo".
+ */
+export interface ProviderEndpointInfo {
+  label: string;
+  /**
+   * Redacted for display: `****set****` or `(empty)`.
+   */
+  api_key: string;
+  api_base?: string;
+  extra_headers?: {
+    [k: string]: string;
+  };
+}
+/**
+ * One sub-agent instance a turn is addressed to. Null means the main conversation.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DirectTarget".
+ */
+export interface DirectTarget {
+  agent: string;
+  handle: string;
+}
+/**
+ * One sub-agent instance this session has used, verbatim from the instance registry apart from `resumable`. camelCase because the web RPC serves the same record unchanged. `runId` / `nodeId` name the DAG node an instance belongs to: set on a dag-node row, and on the ordinary row of a stateful node, which is what lets one invocation's two rows be reported as one.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstanceRow".
+ */
+export interface InstanceRow {
+  sessionKey: string;
+  agent: string;
+  handle: string;
+  kind: string;
+  status?: string;
+  agentId?: string;
+  runId?: string;
+  nodeId?: string;
+  createdAtMs?: number;
+  updatedAtMs?: number;
+  /**
+   * Whether a conversation can be opened with this row. False for a dag-node row, whose handle names a node rather than a conversation, and for an agent whose backend is not stateful. Answered by the server because statefulness is a property of the agent's configured backend, which no front end can read off the row.
+   */
+  resumable?: boolean;
+  /**
+   * What this instance was asked, in one line: a spawn's task_summary, or a graph node's node_summary, or -- for an instance nobody dispatched, one the user made by hand -- the first line of the message that opened it, taken once so later messages do not rename it. Absent only for work that ran before any of those existed, or when that first message yielded nothing; a reader falls back to the handle.
+   */
+  title?: string;
+  /**
+   * What the graph this instance belongs to was dispatched for. Absent, not empty, for an instance that came from no orchestration, so its presence is what says the row has a source.
+   */
+  runTitle?: string;
+  /**
+   * When the turn this instance is answering right now began. Absent when it is answering none, so presence is what says the instance is working and the number is what says for how long. Not updatedAtMs, which every registry write stamps: a binding commit and a graph-origin write move it too, so it dates the row and not the turn.
+   */
+  turnStartedAtMs?: number;
+  /**
+   * When the run answering the current turn last showed a sign of life -- a tool call, a step, console bytes, a usage report, a republished transcript -- or the turn's start when it has shown none yet. Present exactly when turnStartedAtMs is; how long ago it was is how quiet the run has been, so a run that hangs silently reads as quiet rather than as working.
+   */
+  lastSignalAtMs?: number;
+}
+/**
+ * One row of one instance's conversation. Preferred source is the instance's own log, which is written turn by turn and holds what the run did on the way; a conversation with no log falls back to its record directories, where a turn is a pair of files.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DirectTurn".
+ */
+export interface DirectTurn {
+  /**
+   * How this turn is addressed, which depends on which lane wrote it. A spawn turn carries the node id the model chose, and subagent.context reads it. A DAG node turn carries <run_id>/<node_id>, which subagent.context rejects (it refuses any id containing a slash) -- open those through dag.node. A direct-chat turn keeps its minted call id. Still spelled call_id on the wire for every lane.
+   */
+  call_id: string;
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  at_ms: number;
+  prompt_path?: string;
+  out_path?: string;
+  /**
+   * The thought that preceded this turn, where the transport reports one.
+   */
+  reasoning_content?: string;
+  /**
+   * What this turn called on the way, matched to a later role='tool' row by id.
+   */
+  tool_calls?: TranscriptToolCall[];
+  /**
+   * On a role='tool' row, the call it answers.
+   */
+  tool_call_id?: string;
+  /**
+   * Set on a row from a turn still running, which no record holds yet. Such rows are a snapshot: the next read replaces them, and the record replaces them once the turn lands.
+   */
+  live?: boolean;
+  /**
+   * Set on a user row that was a steer: words merged into a turn already running, not the prompt that opened one. A reader draws it inside the turn rather than as a new one.
+   */
+  steer?: boolean;
+  /**
+   * Set on a trailing user row whose turn died with its session: nothing is running now and no reply ever landed. A reader marks the question as interrupted rather than leaving it hanging.
+   */
+  interrupted?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnUsage".
+ */
+export interface TurnUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd?: number | null;
+  context_used?: number;
+  context_max?: number;
+  context_percent?: number;
+  cost_missing_calls?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CliResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CliDispatchResult".
+ */
+export interface CliResult {
+  /**
+   * Rich-rendered output with ANSI SGR sequences.
+   */
+  stdout: string;
+  /**
+   * Error / warning output with ANSI SGR sequences.
+   */
+  stderr: string;
+  /**
+   * CLI command exit code; 0 = success.
+   */
+  exit_code: number;
+  /**
+   * Only present for timeout / not-dispatch-compatible cases (mirrors a JSON-RPC error code).
+   */
+  error_code?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StubResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "VoiceToggleResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserManageResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeSaveResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeListResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeLoadResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ProcessStopResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackListResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackDiffResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackRestoreResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolsConfigureResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "VoiceRecordResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSaveResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSteerResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillsReloadResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ReloadEnvResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SudoRespondResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SecretRespondResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImageAttachResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PromptSubmitResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PromptBackgroundResult".
+ */
+export interface StubResult {
+  /**
+   * Human-readable explanation of why this method is not supported in v0.1.
+   */
+  error: string;
+  /**
+   * Optional hint to the user (e.g., 'Press Ctrl+C').
+   */
+  hint?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CommandsCatalogResponse".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CommandsCatalogResult".
+ */
+export interface CommandsCatalogResponse {
+  /**
+   * alias (with leading /) -> canonical mapping. v0.1: alias = canonical 1:1 (no short aliases generated; TS-side prefix-1-match handles partials). Group + subcommand are space-separated (e.g. '/channels status'), not slash- or dot-separated.
+   */
+  canon: {
+    [k: string]: string;
+  };
+  /**
+   * Ordered (alias, canonical) tuples. TS-side createGatewayEventHandler.ts:198 gates on non-empty pairs; empty pairs degrades to slash.exec direct dispatch.
+   */
+  pairs: [unknown, unknown][];
+  /**
+   * group -> [subcommand]. Blacklisted entries (e.g. channels login) and agent-REPL are filtered out.
+   */
+  sub: {
+    [k: string]: string[];
+  };
+  /**
+   * Ordered category list: '(top-level)' first then alphabetical group names. Fully filtered groups (e.g. tui) do not appear.
+   */
+  categories: string[];
+  /**
+   * Total skill count from skill_forge store SQL count; 0 if DB missing (warning field then populated).
+   */
+  skill_count: number;
+  /**
+   * Optional warning pushed to TUI activity strip (e.g. 'skill store not initialized').
+   */
+  warning?: string;
+}
+/**
+ * A turn the runtime opened (a delegated result re-entering the conversation) has begun. `turn.send` owns `message.start`, and the spine suppresses it for these turns, so this event is the client's only live signal that a new turn started. It advances the client's live turn bookkeeping (the workspace record's turn number, which the artifact bar reads), enters the busy state, and -- when `delegated` is present -- carries the delivery identity AND the injected text, so the delivery row is drawn at the moment the result is actually visible (its turn started), not when it was submitted. A stored delegated user entry draws the same row on replay, which is what keeps the two views in step.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnStartedEvent".
+ */
+export interface TurnStartedEvent {
+  type: 'turn.started';
+  payload: {
+    turn_id: string;
+    delegated?: {
+      kind: 'spawn' | 'dag';
+      label: string;
+      status: 'ok' | 'error' | 'exception' | 'notice' | 'cancelled';
+      /**
+       * Which node of the run this is about. Present only on `kind: dag` with `status: exception`, where the report concerns one node rather than the whole run.
+       */
+      node_id?: string;
+      run_id?: string;
+      /**
+       * The text that re-entered the conversation, verbatim; a client shows the reader-facing part of it by keeping only what sits INSIDE the untrusted fence.
+       */
+      content?: string;
+    };
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MessageStartEvent".
+ */
+export interface MessageStartEvent {
+  type: 'message.start';
+  /**
+   * `target` names the conversation this event belongs to; absent is the main agent.
+   */
+  payload: {
+    turn_id: string;
+    /**
+     * The message that started the turn. Present so a client that did not send it can draw the question: the user entry reaches the transcript only at turn end.
+     */
+    content?: string;
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MessageInjectedEvent".
+ */
+export interface MessageInjectedEvent {
+  type: 'message.injected';
+  /**
+   * A message merged into the turn already running on this conversation. `message.start` cannot say this: that event opens a turn, and an inject joins one. `target` names the conversation this event belongs to; absent is the main agent.
+   */
+  payload: {
+    /**
+     * The id minted for this text, not the running turn's. It is what the fallback turn's events carry if the host ends before draining it, which is how a client tells the two views of one message apart.
+     */
+    turn_id: string;
+    content: string;
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EpisodeStartEvent".
+ */
+export interface EpisodeStartEvent {
+  type: 'episode.start';
+  payload: {
+    index: number;
+  };
+}
+/**
+ * The smart-mode permission reviewer started or finished looking at one tool call. Presentational only: it lets a surface name the pause on the running tool row instead of showing an unexplained stall; decisions never depend on it.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PermissionReviewEvent".
+ */
+export interface PermissionReviewEvent {
+  type: 'permission.review';
+  payload: {
+    /**
+     * started | ended.
+     */
+    phase: string;
+    /**
+     * The tool name under review.
+     */
+    tool: string;
+  };
+}
+/**
+ * Prose the runtime wrote, not the model.
+ *
+ * It must not arrive as `token.delta`: that buffer is the model's voice, so the text would render as the answer -- glued to whatever the model narrated just before it, carrying the answer's copy and branch actions, and stuck in English whatever language the turn was in.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "NoticeEvent".
+ */
+export interface NoticeEvent {
+  type: 'notice';
+  payload: {
+    /**
+     * Which runtime decision this reports: `action_blocked`, `llm_retry` or `organ_degraded`.
+     */
+    kind: string;
+    /**
+     * What `kind` says it is: the blocking tool's own first line, the failed call's error category, or the organ that dropped out.
+     */
+    detail?: string;
+    /**
+     * True when the turn is still running and the next frame of output replaces this: draw it as a status, not as a row. False means it stands in for the answer.
+     */
+    transient?: boolean;
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TokenDeltaEvent".
+ */
+export interface TokenDeltaEvent {
+  type: 'token.delta';
+  payload: {
+    text: string;
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ThinkingDeltaEvent".
+ */
+export interface ThinkingDeltaEvent {
+  type: 'thinking.delta';
+  payload: {
+    text: string;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolStartEvent".
+ */
+export interface ToolStartEvent {
+  type: 'tool.start';
+  payload: {
+    tool_call_id: string;
+    name: string;
+    arguments: {
+      [k: string]: JsonValue;
+    };
+    display?: string | null;
+    /**
+     * The call is a blocking interaction with no automatic deadline. A client that clocks the event stream for liveness must suspend that clock while it is in flight.
+     */
+    blocking?: boolean;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolProgressEvent".
+ */
+export interface ToolProgressEvent {
+  type: 'tool.progress';
+  payload: {
+    tool_call_id: string;
+    preview: string;
+  };
+}
+/**
+ * One file a tool call wrote, as contents rather than as a rendering of them. Beside ToolCompleteEvent.diff rather than instead of it: a client that draws its own diff needs the text, and a unified diff cannot be turned back into the file.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FileChange".
+ */
+export interface FileChange {
+  /**
+   * Absolute path of the file that was written.
+   */
+  path: string;
+  /**
+   * The file's full contents after the write.
+   */
+  after: string;
+  /**
+   * The contents the write replaced. Absent when the file did not exist, so a client renders a creation differently from a rewrite; an empty string means the file existed and was empty.
+   */
+  before?: string;
+}
+/**
+ * One file a tool call made vanish, with the text it held when known. The counterpart of FileChange and not one of them: a removal has no after, and its before is a best effort -- absent means unknown, not that the file was empty.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FileRemoval".
+ */
+export interface FileRemoval {
+  /**
+   * Absolute path of the file that is gone.
+   */
+  path: string;
+  /**
+   * The contents the file held before it went, when they could be captured. Absent means unknown -- not that the file was empty -- so a client draws the deletion with whatever it already knew of the file.
+   */
+  before?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolCompleteEvent".
+ */
+export interface ToolCompleteEvent {
+  type: 'tool.complete';
+  payload: {
+    tool_call_id: string;
+    result_preview: string;
+    truncated: boolean;
+    /**
+     * Whether the tool call succeeded, by the emit site's verdict.
+     */
+    ok?: boolean;
+    metadata?: {
+      [k: string]: JsonValue;
+    };
+    /**
+     * Unified diff of what the call changed on disk, when the tool could produce one.
+     */
+    diff?: string;
+    file_change?: FileChange;
+    /**
+     * The files this call made vanish. Absent on every call that removed nothing, which is nearly all of them.
+     */
+    file_removed?: FileRemoval[];
+    /**
+     * The files a command left behind, which no tool result names. Absent on every call that is not a command, and on a command that changed no file.
+     */
+    file_written?: FileWritten[];
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MessageCompleteEvent".
+ */
+export interface MessageCompleteEvent {
+  type: 'message.complete';
+  payload: {
+    turn_id: string;
+    usage: TurnUsage;
+    target?: DirectTarget;
+    /**
+     * How long the whole turn took, measured server-side from the moment the runner picked the turn up to the moment it returned. Sent so a live client does not have to time the turn with its own clock: a browser stopwatch starts when the events arrive rather than when the work did, and only exists while that page is open, so the same turn came out one number live and another after a reload. Absent means unknown, same rule as reasoning_ms -- fall back to timing it locally, never to zero.
+     */
+    duration_ms?: number;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ErrorEvent".
+ */
+export interface ErrorEvent {
+  type: 'error';
+  payload: {
+    code: number;
+    /**
+     * The turn this failure belongs to. Empty when the emitter did not know it; a consumer that correlates a request to a turn must not treat an empty value as its own.
+     */
+    turn_id?: string;
+    message: string;
+    reason?: 'cancelled_by_client' | 'internal';
+    detail?: string;
+    target?: DirectTarget;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronDeliveredEvent".
+ */
+export interface CronDeliveredEvent {
+  type: 'cron.delivered';
+  payload: {
+    job_id: string;
+    name: string;
+    text: string;
+    fired_at: string;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronMissedEvent".
+ */
+export interface CronMissedEvent {
+  type: 'cron.missed';
+  payload: {
+    count: number;
+    items: {
+      name: string;
+      scheduled_at: string;
+      message: string;
+    }[];
+  };
+}
+/**
+ * The model named this session, reading the opening message alongside the turn that carried it. Conversation-scoped, and emitted only when the title actually changed -- a client can replace what it is showing without comparing. A front end that parks a placeholder where the title goes fills it in here instead of showing a truncated first line and rewriting it a moment later.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionTitledEvent".
+ */
+export interface SessionTitledEvent {
+  type: 'session.titled';
+  payload: {
+    session_id: string;
+    title: string;
+  };
+}
+/**
+ * The naming call for this session finished without publishing a title. The other half of `session.titled`: exactly one of the two follows a turn whose `turn.send` reported `naming: true`, so a client parking a placeholder where the title goes can stop waiting on either instead of waiting out a grace period. `reason` is for the log and the bug report rather than for the reader -- 'timeout' the call outran its budget, 'no_title' it came back with nothing usable (the model answered without calling the naming tool, or the provider failed and generate_title swallowed it, logging the cause at debug), 'error' the naming code itself raised, 'renamed' a person named the session while the call ran.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionNamingEndedEvent".
+ */
+export interface SessionNamingEndedEvent {
+  type: 'session.naming_ended';
+  payload: {
+    session_id: string;
+    reason: 'timeout' | 'error' | 'no_title' | 'renamed';
+  };
+}
+/**
+ * A delegated run's result re-entered its conversation here. Emitted just after the result is submitted to the main loop, so a client can mark the seam where the sub-agent's answer came back. The turn it opens is submitted through the spine, which emits no `message.start`, so this event is the only live signal that it happened -- and a client REPLAYING the session later reads the same identity off the stored user entry's `delegated` field, which is what keeps the two views agreeing.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentDeliveredEvent".
+ */
+export interface SubagentDeliveredEvent {
+  type: 'subagent.delivered';
+  payload: {
+    kind: 'spawn' | 'dag';
+    /**
+     * The spawn's display label, or the dag's run_id.
+     */
+    label: string;
+    status: 'ok' | 'error' | 'exception' | 'notice' | 'cancelled';
+    /**
+     * Set for kind=dag, so a client can open the run.
+     */
+    run_id?: string;
+    /**
+     * The text that re-entered the conversation, verbatim. A client shows the reader-facing part of it by keeping only what sits INSIDE the untrusted fence -- and a client replaying this turn later reads the same string from the stored entry's `text`, so one rule over one input keeps the live view and the reloaded one from disagreeing about what was delivered.
+     */
+    content?: string;
+    /**
+     * Set for a dag node's own message, so a client can place it against that row.
+     */
+    node_id?: string;
+  };
+}
+/**
+ * One spawned run's lifecycle transition, as it happens. 'subagent.delivered' marks where a finished result re-entered the conversation; this event is the run itself moving -- queued, started, finished -- so a client can render live delegation without polling the disk-backed lists. Terminal transitions are not replayed: a client that reconnects reconciles against subagent.list instead.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentStatusEvent".
+ */
+export interface SubagentStatusEvent {
+  type: 'subagent.status';
+  payload: {
+    /**
+     * The manager's short id for this run, stable across its lifecycle.
+     */
+    task_id: string;
+    agent: string;
+    label: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    /**
+     * The node id subagent.context reads -- the model's own name for the task, shared with run_subagent_dag's node ids. Sent from 'running' onward: the id is settled before dispatch, but a pending run has written no record, and advertising an id whose read comes back empty would draw a transcript that does not exist yet.
+     */
+    call_id?: string;
+    /**
+     * The spawn tool call that dispatched this run, when the host correlates the two. What lets a client pin the run onto the tool row that made it, the same way dag.run_started names its call.
+     */
+    tool_call_id?: string;
+    /**
+     * The addressable handle, when the caller named or minted one.
+     */
+    instance?: string;
+    started_at?: number;
+    ended_at?: number;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagSnapshotNode".
+ */
+export interface DagSnapshotNode {
+  node: string;
+  subagent?: string;
+  depends_on?: string[];
+  instance?: string;
+  status: DagSnapshotNodeStatus;
+  started_at?: number;
+  ended_at?: number;
+  prompt_file?: string;
+  output_file?: string;
+  error?: string;
+  prompt_template?: string;
+  /**
+   * One line, for the user, on what this node was asked to do. Absent on a run that predates the field.
+   */
+  node_summary?: string;
+  /**
+   * What this node was handed, per key: a literal string, {file: path}, or {node: id}. The other half of prompt_template -- a template's {{ inputs.k }} does not say where k came from.
+   */
+  inputs?: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * One run rebuilt from its run dir. 'finalized' is false while it is still executing, in which case per-node state came from the instance registry overlay rather than a manifest.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagRunSnapshot".
+ */
+export interface DagRunSnapshot {
+  run_id: string;
+  dir: string;
+  finalized: boolean;
+  /**
+   * What the whole graph was dispatched for, in one line. Absent for a run written before the field existed. Per-node the equivalent is DagSnapshotNode.node_summary.
+   */
+  task_summary?: string;
+  files: DagSnapshotNode[];
+  terminal_outputs?: {
+    node: string;
+    text: string;
+  }[];
+  summary: {
+    total?: number;
+    completed?: number;
+    failed?: number;
+    skipped?: number;
+    cancelled?: number;
+  };
+}
+/**
+ * One node's rendered prompt and the head of its output. Either text is absent when its file does not exist: a node that never ran has no prompt, a failed one no output.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeDetail".
+ */
+export interface DagNodeDetail {
+  run_id: string;
+  node: string;
+  prompt?: string;
+  prompt_file?: string;
+  output?: string;
+  output_file?: string;
+  output_chars: number;
+  output_truncated: boolean;
+  /**
+   * Per-node status reported by the DAG runner. 'interrupted' never comes off the wire -- it is what a client infers for a node still called running when the run stopped reporting. 'exception' is a node that finished without accomplishing its task and is waiting on a decision; it is not terminal.
+   */
+  status?: 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'cancelled' | 'exception';
+  /**
+   * Why the node failed. A failed node has no output, so without this it reads as unanswered.
+   */
+  error?: string;
+  messages?: TranscriptMessage[];
+}
+/**
+ * A run_subagent_dag call accepted a graph. Carries the whole topology so a client can lay the graph out before any node reports.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagRunStartedEvent".
+ */
+export interface DagRunStartedEvent {
+  type: 'dag.run_started';
+  payload: {
+    /**
+     * The multi-round run this graph is one round of. Absent on an ordinary graph, which is every graph a tool call dispatched.
+     */
+    stint_id?: string;
+    /**
+     * Which round of that run this graph is, counting from one.
+     */
+    round_index?: number;
+    /**
+     * Rounds the run may open in all, so a reader can draw "round 3 of 30" without opening the run. Absent when the dispatcher did not say.
+     */
+    round_budget?: number;
+    run_id: string;
+    /**
+     * The call this run belongs to. Absent on hosts that do not correlate progress with a tool row.
+     */
+    tool_call_id?: string;
+    /**
+     * What the whole graph was dispatched for, in one line. Absent for a run started before the field existed. Per-node the equivalent is the node's node_summary.
+     */
+    task_summary?: string;
+    nodes: {
+      id: string;
+      subagent: string;
+      depends_on: string[];
+      /**
+       * Shared stateful handle. Nodes naming the same one run sequentially.
+       */
+      instance?: string;
+      /**
+       * One line, for the user, on what this node was asked to do. Absent on a run that predates the field.
+       */
+      node_summary?: string;
+    }[];
+  };
+}
+/**
+ * One node changed state.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeUpdatedEvent".
+ */
+export interface DagNodeUpdatedEvent {
+  type: 'dag.node_updated';
+  payload: {
+    /**
+     * The multi-round run this graph is one round of. Absent on an ordinary graph, which is every graph a tool call dispatched.
+     */
+    stint_id?: string;
+    /**
+     * Which round of that run this graph is, counting from one.
+     */
+    round_index?: number;
+    /**
+     * Rounds the run may open in all, so a reader can draw "round 3 of 30" without opening the run. Absent when the dispatcher did not say.
+     */
+    round_budget?: number;
+    run_id: string;
+    tool_call_id?: string;
+    node: string;
+    status: DagNodeStatus;
+    started_at?: number;
+    ended_at?: number;
+  };
+}
+/**
+ * A replan decision started a successor run for a node that could not proceed; replan_run_id names the new run.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagRunReplannedEvent".
+ */
+export interface DagRunReplannedEvent {
+  type: 'dag.run_replanned';
+  payload: {
+    run_id: string;
+    tool_call_id?: string;
+    replan_run_id: string;
+    from_node: string;
+    reason: string;
+  };
+}
+/**
+ * A running node has shown no sign of life for quiet_ms. Information only: the node is still running and nothing about the run changed.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeStalledEvent".
+ */
+export interface DagNodeStalledEvent {
+  type: 'dag.node_stalled';
+  payload: {
+    run_id: string;
+    tool_call_id?: string;
+    node: string;
+    quiet_ms: number;
+  };
+}
+/**
+ * The run finished. Terminal node output text is deliberately absent -- it is already in the tool result.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagRunCompletedEvent".
+ */
+export interface DagRunCompletedEvent {
+  type: 'dag.run_completed';
+  payload: {
+    /**
+     * The multi-round run this graph is one round of. Absent on an ordinary graph, which is every graph a tool call dispatched.
+     */
+    stint_id?: string;
+    /**
+     * Which round of that run this graph is, counting from one.
+     */
+    round_index?: number;
+    /**
+     * Rounds the run may open in all, so a reader can draw "round 3 of 30" without opening the run. Absent when the dispatcher did not say.
+     */
+    round_budget?: number;
+    run_id: string;
+    tool_call_id?: string;
+    dir: string;
+    summary: {
+      total?: number;
+      completed?: number;
+      failed?: number;
+      skipped?: number;
+      cancelled?: number;
+    };
+    files: {
+      node: string;
+      status: DagNodeStatus;
+      output_file?: string;
+      error?: string;
+    }[];
+  };
+}
+/**
+ * One file the agent produced as part of its reply, by local path.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MediaItem".
+ */
+export interface MediaItem {
+  /**
+   * Absolute path of the file on the machine the agent runs on.
+   */
+  path: string;
+  /**
+   * MIME type as declared by the emit site. Today every producer declares application/octet-stream, so a client that needs the real type should sniff the extension rather than trust this.
+   */
+  mime: string;
+  /**
+   * Coarse media class; "file" is the only value emitted today.
+   */
+  kind: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MediaEvent".
+ */
+export interface MediaEvent {
+  type: 'media';
+  payload: {
+    /**
+     * The files, in the order the turn produced them. Never empty: an event with nothing to deliver is not emitted.
+     */
+    items: MediaItem[];
+  };
+}
+/**
+ * One base as the list view needs it.
+ *
+ * ``embedding_model`` and ``dimensions`` are the base's own, recorded when it
+ * was created rather than read from today's config -- a base outlives a change
+ * to what the operator has configured, and the page has to be able to show the
+ * mismatch.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBase".
+ */
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  embedding_model: string;
+  /**
+   * Which account this base reaches its model through. Empty means the configured endpoint, which is what every base built before the pair was recorded says.
+   */
+  embedding_provider?: string;
+  dimensions: number;
+  created_at: string;
+  updated_at: string;
+  documents: number;
+  /**
+   * How many pieces the base holds. Not how many documents are in it: one that failed, one still queued and one in a base with no model all count as documents and hold nothing.
+   */
+  chunks?: number;
+  top_k?: number;
+  smart_chunking?: boolean;
+  separator?: string;
+  chunk_size?: number;
+  chunk_overlap?: number;
+  file_processing?: string;
+  /**
+   * Tokens of the prose around a table to carry into the chunk that holds it. Zero is off.
+   */
+  table_context_size?: number;
+  /**
+   * Tokens of the prose around a figure to carry into the chunk that holds it. Zero is off.
+   */
+  image_context_size?: number;
+  /**
+   * Empty when this base's model can be reached. Otherwise why not: `no_provider` for a base whose model is not the configured one and which records no provider of its own, `no_credential` for one whose recorded provider has no usable credential. Answered from what is recorded rather than by calling the endpoint, so an endpoint that is merely down still reads as reachable here.
+   */
+  embedding_reach?: string;
+  /**
+   * Kept at the head of the list.
+   */
+  pinned?: boolean;
+  /**
+   * Marked by the reader, and the whole of what the starred tab shows. Not the same fact as `pinned`, which is about order.
+   */
+  starred?: boolean;
+}
+/**
+ * One uploaded document and where its indexing got to.
+ *
+ * ``error`` is empty unless ``status`` is ``failed``; a row carries the reason
+ * with it so a reader does not have to go looking for why nothing is
+ * searchable.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocument".
+ */
+export interface KnowledgeDocument {
+  id: string;
+  base_id: string;
+  source: string;
+  media_type: string;
+  size: number;
+  status: string;
+  chunk_count: number;
+  error: string;
+  /**
+   * What the parse could not do, on a document that was indexed anyway -- pictures no model could read, most often. Not a second `error`: the document is searchable, and this says which part of it is not in the index.
+   */
+  warning?: string;
+  created_at: string;
+  updated_at: string;
+  origin?: string;
+  origin_ref?: string;
+  /**
+   * Which folder of its base it is filed under. Empty is Root.
+   */
+  folder_id?: string;
+}
+/**
+ * One indexed piece of a document, as the search sees it. The positional fields are absent for a format that does not have them -- absent means the parser did not know, never that the value is zero.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunk".
+ */
+export interface KnowledgeChunk {
+  /**
+   * Where the piece sits in its document. This is the reading order: the chunker numbers pieces as it walks the sections the parser produced.
+   */
+  chunk_index: number;
+  total_chunks: number;
+  text: string;
+  /**
+   * What the region is, as the source file marked it. Empty when the parser had nothing to go on.
+   */
+  layout_type?: string;
+  /**
+   * The 1-based page the piece starts on, where the format has pages.
+   */
+  page_number?: number | null;
+  /**
+   * The 1-based page this piece ends on. Equal to `page_number` unless it runs over a page boundary, which it can whenever it merged.
+   */
+  page_end?: number;
+  /**
+   * The headings the piece sits under, outermost first.
+   */
+  heading_path?: string[];
+  /**
+   * Where each piece of a merged chunk came from. Empty for a chunk that merged nothing, so a non-empty list is itself the statement that this chunk crossed a section boundary.
+   */
+  parts?: KnowledgeChunkPart[];
+  /**
+   * What addresses this piece. Derived from its text, so it survives a rebuild of the same document. Empty on rows written before ids existed, which can be read but not acted on until the document is reindexed.
+   */
+  chunk_id?: string;
+  /**
+   * Whether this piece may be retrieved. A disabled piece is never searched and never reaches the agent.
+   */
+  enabled?: boolean;
+  /**
+   * Whether a person wrote this piece. It is deleted with every other piece when the document is reindexed.
+   */
+  manual?: boolean;
+  /**
+   * Whether a picture of the region this piece was cut from is stored for it. Fetch it from `/knowledge/crop?document=<id>&chunk=<chunk_id>`. False for a format with no pages, for a piece a person wrote, and for one whose parser knew the page but not the position.
+   */
+  has_crop?: boolean;
+  /**
+   * Every place on a page this chunk was cut from, in reading order, for a viewer that draws where a piece came from. Empty for a format with no pages and for a piece a person wrote. A chunk that merged several pieces reports each one's region, so this can cross a page boundary.
+   */
+  regions?: KnowledgeChunkRegion[];
+}
+/**
+ * One piece of a chunk that merged several, and where it came from. The naive strategy merges across section boundaries, so a chunk can hold two pages, two headings and two sections; the flattened fields on the chunk can only carry the first of each.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunkPart".
+ */
+export interface KnowledgeChunkPart {
+  char_start: number;
+  char_end: number;
+  layout_type?: string;
+  page_number?: number;
+  heading_path?: string[];
+  /**
+   * Which section of the document this piece was cut from. The section identity: a heading path is not one, because two same-named children of a parent share it.
+   */
+  section_ordinal?: number;
+}
+/**
+ * One place on a page that a chunk was cut from. Coordinates are in the page's own points (1/72 inch) with the origin at the top left, which is the frame every parser in this tree records positions in.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunkRegion".
+ */
+export interface KnowledgeChunkRegion {
+  /**
+   * The 1-based page this region sits on.
+   */
+  page_number: number;
+  x0: number;
+  top: number;
+  x1: number;
+  bottom: number;
+}
+/**
+ * One base that answered by words, and why its vectors were out of reach.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFallback".
+ */
+export interface KnowledgeFallback {
+  base_id: string;
+  reason: string;
+}
+/**
+ * One search hit. ``score`` is a similarity, so higher is nearer -- the
+ * direction every caller already reads.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeHit".
+ */
+export interface KnowledgeHit {
+  score: number;
+  /**
+   * How this hit was found, and therefore what `score` is: `vector` is a cosine similarity in 0..1, `keyword` a BM25 score on the index's own unbounded scale. The two are not comparable by value.
+   */
+  retrieval?: 'vector' | 'keyword';
+  document_id: string;
+  text: string;
+  chunk_index?: number;
+  total_chunks?: number;
+  source?: string;
+}
+/**
+ * Just enough of one step to draw the graph: which step it is, and what it
+ * waits for. The library page draws a concept diagram per card, and shipping
+ * the prompts and per-node config the detail view needs would be the whole
+ * library on page open.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookNodeShape".
+ */
+export interface PlaybookNodeShape {
+  id: string;
+  depends_on: string[];
+}
+/**
+ * One durable Harness alias and the registered agent behind it.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookWorkerShape".
+ */
+export interface PlaybookWorkerShape {
+  label: string;
+  agent: string;
+}
+/**
+ * The full worker detail; its brief is the durable per-job instruction.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookWorker".
+ */
+export interface PlaybookWorker {
+  label: string;
+  agent: string;
+  brief: string;
+}
+/**
+ * One playbook as the library list needs it. ``error`` is empty unless the
+ * file would not parse, in which case it carries the reason and ``nodes`` is
+ * empty -- one unreadable file in a directory of user-edited text must not
+ * take the page down with it. ``disabled`` lives in config rather than in the
+ * file, because the file is the distribution unit and the switch is local to
+ * this machine.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookRow".
+ */
+export interface PlaybookRow {
+  name: string;
+  description: string;
+  task_summary: string;
+  schema_version: number;
+  artifact_kind: 'legacy' | 'workflow' | 'harness' | 'composite';
+  /**
+   * True when the Harness carries a coordinator seat, which is what makes it a Persona.
+   */
+  coordinator?: boolean;
+  workers: PlaybookWorkerShape[];
+  mode: 'dag' | 'prompt' | 'stint';
+  confirm: boolean;
+  origin: string;
+  disabled: boolean;
+  nodes: PlaybookNodeShape[];
+  error: string;
+  /**
+   * What the main Raven is in this Persona's words, empty when the Harness carries no coordinator seat.
+   */
+  coordinator_brief?: string;
+}
+/**
+ * One runtime input. ``description`` is the sentence the caller is asked when
+ * the value is missing, so a form built from this uses it as the label.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookParam".
+ */
+export interface PlaybookParam {
+  type: string;
+  required: boolean;
+  default?: JsonValue;
+  enum?: string[];
+  description: string;
+}
+/**
+ * One step, whole. ``subagent`` / ``node_summary`` / ``prompt_template`` may
+ * be empty: those three are the fields an author may leave blank for the
+ * caller to fill at run time. ``skills`` / ``mcps`` are three-state -- null
+ * means the author said nothing, ``[]`` means the author wrote an empty list,
+ * and a list names what to consider.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookNode".
+ */
+export interface PlaybookNode {
+  id: string;
+  subagent: string;
+  node_summary: string;
+  prompt_template: string;
+  depends_on: string[];
+  skills?: string[];
+  mcps?: string[];
+  instance: string;
+  inputs: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * One whole playbook: its identity, its runtime inputs, and the shape it runs as -- the graph (``mode: dag``), the assembly guidance a model turns into one (``mode: prompt``), or the roles and stopping rules of a multi-round run (``mode: stint``, under ``rounds``). ``path`` is the file this was read from.
+ *
+ * ``version`` is the spec format version the file declares, not a revision of
+ * the playbook's content.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookDetail".
+ */
+export interface PlaybookDetail {
+  name: string;
+  description: string;
+  task_summary: string;
+  version: number;
+  schema_version: number;
+  artifact_kind: 'legacy' | 'workflow' | 'harness' | 'composite';
+  /**
+   * True when the Harness carries a coordinator seat, which is what makes it a Persona.
+   */
+  coordinator?: boolean;
+  workers: PlaybookWorker[];
+  mode: 'dag' | 'prompt' | 'stint';
+  confirm: boolean;
+  origin: string;
+  disabled: boolean;
+  path: string;
+  keywords: string[];
+  params: {
+    [k: string]: PlaybookParam;
+  };
+  nodes: PlaybookNode[];
+  prompts: string;
+  mcp_servers?: {
+    [k: string]: PlaybookMcpServer;
+  };
+  /**
+   * What the main Raven is in this Persona's words, empty when the Harness carries no coordinator seat.
+   */
+  coordinator_brief?: string;
+  stint?: PlaybookStint;
+}
+/**
+ * One MCP server the playbook itself carries, as the file declares it. Carries every field the runtime reads to decide what the server is and whether it runs. `env` and `headers` are declarations rather than resolved values: a carried server references a credential through `{{ params.X }}` and the run supplies it, so nothing here is ever a secret's value, and `has_oauth_config` says only whether the file declares OAuth endpoints, never what they are.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookMcpServer".
+ */
+export interface PlaybookMcpServer {
+  type?: 'stdio' | 'sse' | 'streamableHttp';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: {
+    [k: string]: string;
+  };
+  headers?: {
+    [k: string]: string;
+  };
+  tool_timeout?: number;
+  enabled?: boolean;
+  auth?: 'none' | 'apikey' | 'oauth';
+  has_oauth_config?: boolean;
+}
+/**
+ * What `mode: stint` adds to a playbook, and what a person approving one has to be able to read: who runs, what each may write, which commands run, and when it stops. Absent on every other mode.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookStint".
+ */
+export interface PlaybookStint {
+  roles: PlaybookRole[];
+  carried: PlaybookCarried[];
+  checks: PlaybookCheck[];
+  max_rounds: number;
+  until: string;
+  report: 'round' | 'end';
+}
+/**
+ * One role of a `mode: stint` playbook: who plays it, what it waits on, and the paths it is judged against. `terminal` marks a role nothing else waits on -- the only kind whose output the plan reads when deciding whether to open another round, and so the only kind that can end one early.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookRole".
+ */
+export interface PlaybookRole {
+  label: string;
+  agent: string;
+  node_summary: string;
+  depends_on: string[];
+  owns: string[];
+  appends: string[];
+  reads: string[];
+  enforce_read: 'soft' | 'hard';
+  enforce_write: 'soft' | 'hard';
+  journal_section: string;
+  verify_after: string[];
+  max_handbacks: number;
+  terminal: boolean;
+}
+/**
+ * A file rounds hand to each other. `append` marks the journal: the one that may only grow, and the one a window of `recent_rounds` is read back from.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookCarried".
+ */
+export interface PlaybookCarried {
+  path: string;
+  append: boolean;
+  recent_rounds: number;
+  max_chars: number;
+}
+/**
+ * One objective check a round may run. `run` is a real shell command, which is why a playbook that declares any must be approved before it starts.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookCheck".
+ */
+export interface PlaybookCheck {
+  name: string;
+  run: string;
+  timeout_sec: number;
+  needs_display: boolean;
+}
+/**
+ * One `secret` param of a playbook and whether this machine holds a value for it. Never the value.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookCredentialParam".
+ */
+export interface PlaybookCredentialParam {
+  name: string;
+  set: boolean;
+  description: string;
+}
+/**
+ * One server the playbook carries, as the credentials tab needs it: its auth kind, whether this machine holds OAuth tokens for it under the playbook's scope, and whether the same name exists among the host's own servers (the carried definition wins for this playbook's runs).
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybookCredentialServer".
+ */
+export interface PlaybookCredentialServer {
+  name: string;
+  auth: 'none' | 'apikey' | 'oauth';
+  enabled: boolean;
+  authorized: boolean;
+  shadows_host: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "OkResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsSetResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsClearResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksOauthClearResult".
+ */
+export interface OkResult {
+  ok: boolean;
+}
+/**
+ * How many of the task's nodes sit in each state. Counted from graph.json, so skipped nodes are counted too.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskCounts".
+ */
+export interface TaskCounts {
+  total: number;
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+  interrupted: number;
+  /**
+   * Nodes suspended on a verdict, waiting for resolve_dag_node. A running row with one of these is waiting on a decision, not working.
+   */
+  exception: number;
+}
+/**
+ * Present only on a run a replan superseded, read from graph.json's top-level replan entry. started=false means the successor never began; error says why.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskReplan".
+ */
+export interface TaskReplan {
+  /**
+   * The successor run.
+   */
+  run_id: string;
+  from_node?: string | null;
+  reason?: string | null;
+  started: boolean;
+  error?: string | null;
+}
+/**
+ * One file a node wrote, as the lane that ran it recorded the tool result. The in-process lane records these; the acp and cli lanes record none yet. The diff body is not here: a client builds it from the node's messages.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskFile".
+ */
+export interface TaskFile {
+  path: string;
+  op: 'add' | 'write' | 'edit' | 'delete';
+  add: number;
+  del: number;
+  /**
+   * Bytes after the write, when the lane could measure it.
+   */
+  size?: number | null;
+}
+/**
+ * One step of a task: a graph node, or a spawn's single node.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskNode".
+ */
+export interface TaskNode {
+  /**
+   * The model's own id for the step, unique across the session.
+   */
+  node_id: string;
+  /**
+   * The step's one-line title. Null on a run written before the field existed.
+   */
+  node_summary?: string | null;
+  /**
+   * The roster name of the agent that runs it.
+   */
+  agent: string;
+  /**
+   * The stateful handle, named or minted. Null for a node of an agent that keeps no session.
+   */
+  instance?: string | null;
+  status: DagSnapshotNodeStatus;
+  /**
+   * May name a node outside this task: node ids are the session's, and a later graph may depend on an earlier run's completed node.
+   */
+  depends_on: string[];
+  /**
+   * Epoch milliseconds.
+   */
+  started_at?: number | null;
+  /**
+   * Epoch milliseconds; null while running, and for an interrupted node nothing recorded an end for.
+   */
+  ended_at?: number | null;
+  /**
+   * Why it failed, capped at 500 characters.
+   */
+  error?: string | null;
+  /**
+   * Null when the lane cannot report usage -- never zero for that.
+   */
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  /**
+   * Null means zero calls or an unreporting lane; the record cannot tell the two apart.
+   */
+  tool_call_count?: number | null;
+  /**
+   * How many of those calls reported failure. A completed node with all its calls failed is not a clean run.
+   */
+  tool_failure_count?: number | null;
+  /**
+   * Whether the node wrote an output at all. A completed node without one is why a downstream reference of it fails.
+   */
+  has_output?: boolean | null;
+  /**
+   * The template as dispatched, placeholders unexpanded. Null for a spawn.
+   */
+  prompt_template?: string | null;
+  /**
+   * The node's declared inputs, per key: a literal, {file: path} or {node: id}.
+   */
+  inputs?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * Absent means the agent's own menu; an empty list means none.
+   */
+  skills?: string[];
+  /**
+   * Same three-valued reading as skills.
+   */
+  mcps?: string[];
+  files: TaskFile[];
+}
+/**
+ * One unit of delegated work a conversation started, with its nodes inline.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TaskRow".
+ */
+export interface TaskRow {
+  /**
+   * The run id for a dag; the record (node) id for a spawn.
+   */
+  id: string;
+  kind: TaskKind;
+  /**
+   * What the whole task was dispatched for. Null on a run written before the field existed.
+   */
+  task_summary?: string | null;
+  status: TaskStatus;
+  replan?: TaskReplan;
+  /**
+   * Epoch milliseconds; the earliest node start.
+   */
+  started_at?: number | null;
+  /**
+   * Epoch milliseconds; the latest node end, null while running.
+   */
+  ended_at?: number | null;
+  /**
+   * A spawn's agent. Null for a dag, whose nodes name their own.
+   */
+  agent?: string | null;
+  /**
+   * A spawn's instance handle -- what subagent.cancel_instance takes. Null for a dag; a dag is stopped through subagent.interrupt on its run id.
+   */
+  handle?: string | null;
+  counts: TaskCounts;
+  nodes: TaskNode[];
+}
+/**
+ * One round of a plan, as the list needs it.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StintRoundRow".
+ */
+export interface StintRoundRow {
+  index: number;
+  run_id: string;
+  attempt: number;
+  status: string;
+  checks: string[];
+  violations: string[];
+}
+/**
+ * Something a round asked a person, and what came back.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StintQuestionRow".
+ */
+export interface StintQuestionRow {
+  round: number;
+  role: string;
+  text: string;
+  answer: string;
+}
+/**
+ * One multi-round run a rounds playbook started.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StintRow".
+ */
+export interface StintRow {
+  stint_id: string;
+  playbook: string;
+  round_index: number;
+  max_rounds: number;
+  status: string;
+  live: boolean;
+  /**
+   * Not over: running, interrupted or paused. What `stop` acts on.
+   */
+  unfinished: boolean;
+  stop_reason: string;
+  workdir: string;
+  branch: string;
+  started_at_ms: number;
+  ended_at_ms: number;
+  open_questions: number;
+}
+/**
+ * One plan, whole: every round it ran and everything it is waiting on.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StintDetail".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsGetResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsStopResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsAnswerResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsPauseResult".
+ */
+export interface StintDetail {
+  stint: StintRow;
+  rounds: StintRoundRow[];
+  questions: StintQuestionRow[];
+}
+/**
+ * A stint after a verb opened a round in this engine, with what the driver said about it.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "StintTakeUp".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsResumeResult".
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsExtendResult".
+ */
+export interface StintTakeUp {
+  stint: StintRow;
+  rounds: StintRoundRow[];
+  questions: StintQuestionRow[];
+  reply: string;
+}
+/**
+ * One folder inside a knowledge base. One level deep: Root is not a folder but the absence of one, so a document with no folder is in Root.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFolder".
+ */
+export interface KnowledgeFolder {
+  id: string;
+  base_id: string;
+  name: string;
+  created_at: string;
+  /**
+   * How many documents are filed under it.
+   */
+  documents: number;
+}
+/**
+ * One page of a document, as the reader's side draws it.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgePage".
+ */
+export interface KnowledgePage {
+  /**
+   * 1-based, and the number a chunk's region names.
+   */
+  number: number;
+  /**
+   * Points. What a region's x coordinates are a fraction of.
+   */
+  width: number;
+  /**
+   * Points. What a region's y coordinates are a fraction of.
+   */
+  height: number;
+}
+/**
+ * Where the session index stands.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryIndexState".
+ */
+export interface TrajectoryIndexState {
+  /**
+   * scanning: the log chain is still being read, so an empty list is not an answer yet.
+   */
+  phase: 'scanning' | 'ready' | 'failed';
+  scanned_bytes: number;
+  total_bytes: number;
+  /**
+   * Entries dropped from the head to stay under the entry limit.
+   */
+  head_truncated: number;
+  recovering_traces: number;
+  unresolved_traces: number;
+  unresolved_dropped: number;
+  oversized_lines_dropped: number;
+  /**
+   * Spans whose list previews are still being filled.
+   */
+  preview_pending: number;
+  failure?: string | null;
+}
+/**
+ * One row of the trajectory view.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryEntry".
+ */
+export interface TrajectoryEntry {
+  /**
+   * trace:span:slot, stable across re-reads and checkpoint upgrades.
+   */
+  entry_id: string;
+  revision: number;
+  kind: string;
+  span_name: string;
+  slot: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string | null;
+  turn_span_id?: string | null;
+  turn_number?: number | null;
+  turn_start: boolean;
+  /**
+   * Whether the trace is the session's own or a dispatched sub-agent's.
+   */
+  origin: 'main' | 'subagent';
+  sort_key: JsonValue[];
+  event_time: string;
+  /**
+   * One-line preview; null until the lazy preview fill reaches it.
+   */
+  preview?: string | null;
+  /**
+   * The owning operation's recorded status.
+   */
+  operation_status: 'running' | 'ok' | 'error' | 'cancelled' | 'unknown';
+  status_evidence: string[];
+  /**
+   * True on exactly one entry of a failed span: the one carrying the failure mark.
+   */
+  failure_entry: boolean;
+  integrity: string[];
+  operation_start?: string | null;
+  operation_end?: string | null;
+  duration_ms?: number | null;
+  /**
+   * What the duration bar charges this entry; null means unknown, never zero.
+   */
+  charged_ms?: number | null;
+  /**
+   * Why charged_ms is what it is.
+   */
+  timing_basis: 'zero' | 'span_full' | 'shared' | 'not_recorded' | 'unknown';
+  duration_owner?: string | null;
+  meta: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * An entry that left the list.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryRemoved".
+ */
+export interface TrajectoryRemoved {
+  entry_id: string;
+  revision: number;
+  /**
+   * The entry that took this one's place (an error placeholder replaced by the real output), so a selection can follow.
+   */
+  replaced_by?: string | null;
+}
+/**
+ * One block of an entry's detail: a tab, and its overview summary.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryBlockDescriptor".
+ */
+export interface TrajectoryBlockDescriptor {
+  id: string;
+  /**
+   * How the block's body renders.
+   */
+  renderer: 'text' | 'json' | 'messages' | 'key_values' | 'items' | 'references';
+  /**
+   * Whether the block's data could be served.
+   */
+  availability: 'available' | 'empty' | 'not_recorded' | 'missing' | 'truncated' | 'unreadable' | 'unsupported';
+  preview?: JsonValue;
+  total_items?: number | null;
+  related_operation?: string | null;
+  reason?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionListParams".
+ */
+export interface SessionListParams {
+  /**
+   * Max sessions to return.
+   */
+  limit?: number;
+  /**
+   * Session channels to include; defaults to tui.
+   */
+  channels?: string[];
+  /**
+   * True lists only archived sessions; absent or false lists the live ones.
+   */
+  archived?: boolean | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionListResult".
+ */
+export interface SessionListResult {
+  sessions: SessionListItem[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionGetParams".
+ */
+export interface SessionGetParams {
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionGetResult".
+ */
+export interface SessionGetResult {
+  session: SessionInfo;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCreateParams".
+ */
+export interface SessionCreateParams {
+  /**
+   * Terminal width the client is drawing at.
+   */
+  cols?: number;
+  /**
+   * Accepted and ignored; clients set titles via session.title.
+   */
+  title?: string;
+  /**
+   * Absolute directory this session's turns run in, persisted as the session's workdir override. How a client attached to a shared gateway keeps its launch directory.
+   */
+  workdir?: string;
+  /**
+   * Ids of the knowledge bases this session's turns may search. The reader's choice, not the agent's: the search tool takes a query and never a base, so a model cannot reach material nobody offered it. Empty, or absent, means the tool is not offered at all.
+   *
+   * @maxItems 32
+   */
+  knowledge_bases?: string[];
+  /**
+   * Name of a stored Harness to open this session on. A snapshot of it is frozen onto the session, so the window keeps the Harness it was opened on after the library entry changes.
+   */
+  harness?: string;
+}
+/**
+ * The key is minted lazily -- no file is written until the first save.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCreateResult".
+ */
+export interface SessionCreateResult {
+  session_id: string;
+  info: SessionInitInfo;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionResumeParams".
+ */
+export interface SessionResumeParams {
+  /**
+   * An unknown key falls back to a freshly minted one.
+   */
+  session_id?: string;
+  cols?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionResumeResult".
+ */
+export interface SessionResumeResult {
+  session_id: string;
+  info: SessionInitInfo;
+  /**
+   * Every stored message, not a sliced history: N stored is N on the wire.
+   */
+  messages: TranscriptMessage[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionDeleteParams".
+ */
+export interface SessionDeleteParams {
+  /**
+   * Full session_key as sent by the UI.
+   */
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionDeleteResult".
+ */
+export interface SessionDeleteResult {
+  /**
+   * The session_id that was deleted (matches the request param); null when no such session file existed.
+   */
+  deleted?: string;
+  /**
+   * True when a removal was attempted and the session file survived it. A null `deleted` is two answers -- nothing was there, or the removal failed -- and only the second leaves a session a client must keep listing, so the two are told apart here rather than guessed at by the caller.
+   */
+  still_on_disk?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionMostRecentParams".
+ */
+export interface SessionMostRecentParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionMostRecentResult".
+ */
+export interface SessionMostRecentResult {
+  /**
+   * Full tui:<chat_id> key; absent/null when no sessions exist.
+   */
+  session_id?: string;
+  source?: string;
+  started_at?: number;
+  title?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionTitleParams".
+ */
+export interface SessionTitleParams {
+  /**
+   * Full session_key.
+   */
+  session_id: string;
+  /**
+   * When present, set as the new title; when absent, return the current title.
+   */
+  title?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionTitleResult".
+ */
+export interface SessionTitleResult {
+  title?: string;
+  session_key: string;
+  /**
+   * True when the title is held in memory for a lazy (never-saved) session and lands with the session's first save.
+   */
+  pending: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionPinParams".
+ */
+export interface SessionPinParams {
+  /**
+   * Full session_key.
+   */
+  session_id: string;
+  /**
+   * True pins the session to the top of the picker; False unpins.
+   */
+  pinned: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionPinResult".
+ */
+export interface SessionPinResult {
+  pinned: boolean;
+  session_key: string;
+  /**
+   * True when the flag is held in memory for a lazy (never-saved) session and lands with the session's first save.
+   */
+  pending: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionArchiveParams".
+ */
+export interface SessionArchiveParams {
+  /**
+   * Full session_key.
+   */
+  session_id: string;
+  /**
+   * True hides the session from session.list; False restores it.
+   */
+  archived: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionArchiveResult".
+ */
+export interface SessionArchiveResult {
+  archived: boolean;
+  session_key: string;
+  /**
+   * True when the flag is held in memory for a lazy (never-saved) session and lands with the session's first save.
+   */
+  pending: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionClearParams".
+ */
+export interface SessionClearParams {
+  /**
+   * Full session_key to clear.
+   */
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionClearResult".
+ */
+export interface SessionClearResult {
+  /**
+   * The same session_key (no new id minted).
+   */
+  session_id: string;
+  /**
+   * True when the in-place wipe ran.
+   */
+  cleared: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionUndoParams".
+ */
+export interface SessionUndoParams {
+  /**
+   * Full session_key to undo.
+   */
+  session_id: string;
+  /**
+   * Trailing turns to drop (role==user boundary).
+   */
+  n?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionUndoResult".
+ */
+export interface SessionUndoResult {
+  /**
+   * Messages dropped (0 = nothing to undo).
+   */
+  removed: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionExportParams".
+ */
+export interface SessionExportParams {
+  /**
+   * Session id / prefix / full key to export; current session when omitted.
+   */
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionExportResult".
+ */
+export interface SessionExportResult {
+  /**
+   * True when a Markdown file was written.
+   */
+  exported: boolean;
+  /**
+   * Absolute path of the written file, or null on failure.
+   */
+  path?: string;
+  /**
+   * Failure reason when not exported: not_found | ambiguous | write_failed.
+   */
+  reason?: string;
+  /**
+   * Candidate full keys when reason is ambiguous.
+   */
+  candidates?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionHistoryParams".
+ */
+export interface SessionHistoryParams {
+  session_key: string;
+  /**
+   * Maximum number of messages to return; default 500 to match Session.get_history.
+   */
+  max_messages?: number;
+  /**
+   * Return messages with index < before_index. Used for pagination.
+   */
+  before_index?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionHistoryResult".
+ */
+export interface SessionHistoryResult {
+  messages: SessionMessage[];
+  total: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnSendParams".
+ */
+export interface TurnSendParams {
+  session_key: string;
+  content: string;
+  playbook_mode?: 'off' | 'task' | 'persona';
+  channel?: string;
+  chat_id?: string;
+  sender_id?: string;
+  /**
+   * @maxItems 64
+   */
+  media?: string[];
+  target?: DirectTarget;
+  busy?: 'inject';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnSendResult".
+ */
+export interface TurnSendResult {
+  turn_id: string;
+  accepted: boolean;
+  /**
+   * Whether a session-naming call was started for this turn. A client holding a placeholder for the name can settle it on false rather than wait out its grace period. Not quite the same as 'no session.titled is coming': a send that arrives while an earlier namer for the same session is still running is also declined, and that one's title may still land -- it overwrites, which is why the weaker guarantee is enough.
+   */
+  naming: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnSubscribeParams".
+ */
+export interface TurnSubscribeParams {
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnSubscribeResult".
+ */
+export interface TurnSubscribeResult {
+  subscription_id: string;
+  /**
+   * A turn is in flight on this session, and this subscription receives the rest of it.
+   */
+  running?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnUnsubscribeParams".
+ */
+export interface TurnUnsubscribeParams {
+  subscription_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnUnsubscribeResult".
+ */
+export interface TurnUnsubscribeResult {
+  unsubscribed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnCancelParams".
+ */
+export interface TurnCancelParams {
+  session_key: string;
+  target?: DirectTarget;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnCancelResult".
+ */
+export interface TurnCancelResult {
+  cancelled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpListParams".
+ */
+export interface McpListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpListResult".
+ */
+export interface McpListResult {
+  servers: McpServerInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpTestParams".
+ */
+export interface McpTestParams {
+  server_name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpTestResult".
+ */
+export interface McpTestResult {
+  ok: boolean;
+  latency_ms: number;
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpToolsParams".
+ */
+export interface McpToolsParams {
+  server_name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "McpToolsResult".
+ */
+export interface McpToolsResult {
+  tools: McpToolInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillListParams".
+ */
+export interface SkillListParams {
+  /**
+   * Filter by skill source; default 'all'.
+   */
+  source?: 'local' | 'remote' | 'all';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillListResult".
+ */
+export interface SkillListResult {
+  skills: SkillInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillPinParams".
+ */
+export interface SkillPinParams {
+  skill_name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillPinResult".
+ */
+export interface SkillPinResult {
+  pinned: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillUnpinParams".
+ */
+export interface SkillUnpinParams {
+  skill_name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillUnpinResult".
+ */
+export interface SkillUnpinResult {
+  unpinned: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOptionsParams".
+ */
+export interface ModelOptionsParams {
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOptionsResult".
+ */
+export interface ModelOptionsResult {
+  model: string;
+  provider: string;
+  providers: ModelOptionProvider[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSetProtocolParams".
+ */
+export interface ModelSetProtocolParams {
+  slug: string;
+  model: string;
+  protocol: 'auto' | 'chat' | 'responses' | 'anthropic';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSetProtocolResult".
+ */
+export interface ModelSetProtocolResult {
+  provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSaveKeyParams".
+ */
+export interface ModelSaveKeyParams {
+  slug: string;
+  api_key?: string;
+  api_base?: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSaveKeyResult".
+ */
+export interface ModelSaveKeyResult {
+  provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelDisconnectParams".
+ */
+export interface ModelDisconnectParams {
+  slug: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelDisconnectResult".
+ */
+export interface ModelDisconnectResult {
+  disconnected: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRevealKeyParams".
+ */
+export interface ModelRevealKeyParams {
+  slug: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRevealKeyResult".
+ */
+export interface ModelRevealKeyResult {
+  /**
+   * The key saved in the provider's own section -- the one `model.save_key` writes -- or null when none is saved there, or when an endpoints list or key list replaces it and requests do not carry it. A key the provider takes from the environment is not read back.
+   */
+  api_key?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelFetchModelsParams".
+ */
+export interface ModelFetchModelsParams {
+  slug: string;
+  verify?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelFetchModelsResult".
+ */
+export interface ModelFetchModelsResult {
+  models: ModelCandidate[];
+  /**
+   * `ok` when the vendor answered, otherwise why it did not (`not_configured`, `invalid_key`, `network_error`, `certificate_untrusted`, `proxy_unreachable`, `no_probe_endpoint`, `http_NNN`). The models are the bundled catalogue unioned with whatever the vendor named, so a failure to reach it costs currency, not the list.
+   */
+  status: string;
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddModelParams".
+ */
+export interface ModelAddModelParams {
+  slug: string;
+  model: string;
+  label?: string;
+  /**
+   * One line about the model; an empty string clears it, as it does for label.
+   */
+  description?: string;
+  capabilities?: string[];
+  input_modalities?: string[];
+  output_modalities?: string[];
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddModelResult".
+ */
+export interface ModelAddModelResult {
+  provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddModelsParams".
+ */
+export interface ModelAddModelsParams {
+  slug: string;
+  models: string[];
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddModelsResult".
+ */
+export interface ModelAddModelsResult {
+  provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSetFieldsParams".
+ */
+export interface ModelSetFieldsParams {
+  slug: string;
+  fields: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelSetFieldsResult".
+ */
+export interface ModelSetFieldsResult {
+  /**
+   * Previous values, header values redacted.
+   */
+  previous: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOauthLoginParams".
+ */
+export interface ModelOauthLoginParams {
+  slug: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOauthLoginResult".
+ */
+export interface ModelOauthLoginResult {
+  verification_uri: string;
+  user_code: string;
+  /**
+   * Seconds the code stays valid; the gateway polls until then.
+   */
+  expires_in: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOauthCodeParams".
+ */
+export interface ModelOauthCodeParams {
+  slug: string;
+  /**
+   * The code the vendor's page showed after sign-in.
+   */
+  code: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOauthCodeResult".
+ */
+export interface ModelOauthCodeResult {
+  submitted: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRemoveModelParams".
+ */
+export interface ModelRemoveModelParams {
+  slug: string;
+  model: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRemoveModelResult".
+ */
+export interface ModelRemoveModelResult {
+  provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelEndpointsParams".
+ */
+export interface ModelEndpointsParams {
+  slug: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelEndpointsResult".
+ */
+export interface ModelEndpointsResult {
+  endpoints: ProviderEndpointInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddEndpointParams".
+ */
+export interface ModelAddEndpointParams {
+  slug: string;
+  label: string;
+  api_key?: string;
+  api_base?: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelAddEndpointResult".
+ */
+export interface ModelAddEndpointResult {
+  endpoints: ProviderEndpointInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRemoveEndpointParams".
+ */
+export interface ModelRemoveEndpointParams {
+  slug: string;
+  label: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelRemoveEndpointResult".
+ */
+export interface ModelRemoveEndpointResult {
+  endpoints: ProviderEndpointInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigGetParams".
+ */
+export interface ConfigGetParams {
+  /**
+   * If omitted, return all whitelisted fields. Unknown keys are silently dropped.
+   */
+  keys?: string[];
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigGetResult".
+ */
+export interface ConfigGetResult {
+  config: {
+    [k: string]: JsonValue;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigSetParams".
+ */
+export interface ConfigSetParams {
+  key: string;
+  value: JsonValue;
+  session_id?: string;
+  provider?: string;
+  scope?: 'session' | 'default';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigSetResult".
+ */
+export interface ConfigSetResult {
+  applied: boolean;
+  previous: JsonValue | null;
+  value?: string;
+  scope?: 'session' | 'default';
+  session_id?: string;
+  applies_to_session?: boolean;
+  /**
+   * True when the write landed in a process that has no agent loop: the config is right and this gateway still cannot run a turn on it.
+   */
+  needs_restart?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigUnsetParams".
+ */
+export interface ConfigUnsetParams {
+  key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfigUnsetResult".
+ */
+export interface ConfigUnsetResult {
+  removed: boolean;
+  previous: JsonValue | null;
+  default: JsonValue | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentListParams".
+ */
+export interface SubagentListParams {
+  /**
+   * Absent or unknown is an empty list, not an error.
+   */
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentListResult".
+ */
+export interface SubagentListResult {
+  items: SubagentCall[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentContextParams".
+ */
+export interface SubagentContextParams {
+  id: string;
+  /**
+   * A call is addressed by conversation and call, never by call alone.
+   */
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentContextResult".
+ */
+export interface SubagentContextResult {
+  id: string;
+  messages: TranscriptMessage[];
+  status?: string;
+  label?: string;
+  agent?: string;
+  started_at?: string;
+  ended_at?: string;
+  /**
+   * What it did between the question and the answer, in order. Empty where the transport that ran it has no per-step visibility.
+   */
+  tool_calls?: string[];
+  /**
+   * Input plus output; null when usage was not reported.
+   */
+  tokens?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  /**
+   * How much reasoning it emitted, where the transport reports it separately from the answer.
+   */
+  thought_chars?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsListParams".
+ */
+export interface SubagentsListParams {
+  probe?: boolean;
+  refresh_login_env?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsListResult".
+ */
+export interface SubagentsListResult {
+  rows: SubagentRow[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsAddParams".
+ */
+export interface SubagentsAddParams {
+  preset: string;
+  name?: string;
+  description?: string;
+  model?: string;
+  lend_key?: string;
+  api_key?: string;
+  mcps?: string[];
+  allow_mcp_secrets?: boolean;
+  force?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsAddResult".
+ */
+export interface SubagentsAddResult {
+  added: boolean;
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsUpdateParams".
+ */
+export interface SubagentsUpdateParams {
+  name: string;
+  new_name?: string;
+  description?: string;
+  api_key?: string;
+  mcps?: string[];
+  allow_mcp_secrets?: boolean;
+  lend_keys?: string[];
+  model?: string;
+  /**
+   * The provider whose credential serves model, for the built-in row: the id is stored naming it, the way config.set model stores the host's. Ignored for an acp row, whose values are the agent's own.
+   */
+  provider?: string;
+  /**
+   * Drop the row's own model, reverting to the agent's default. Wins over model when both are sent.
+   */
+  clear_model?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsUpdateResult".
+ */
+export interface SubagentsUpdateResult {
+  updated: boolean;
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsRemoveParams".
+ */
+export interface SubagentsRemoveParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsRemoveResult".
+ */
+export interface SubagentsRemoveResult {
+  removed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsBuildParams".
+ */
+export interface SubagentsBuildParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsBuildResult".
+ */
+export interface SubagentsBuildResult {
+  /**
+   * True once the build is under way, including when one was already running.
+   */
+  building: boolean;
+  /**
+   * Why nothing new was started, or "" when this call started it.
+   */
+  detail: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsToggleParams".
+ */
+export interface SubagentsToggleParams {
+  name: string;
+  enabled: boolean;
+  force?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsToggleResult".
+ */
+export interface SubagentsToggleResult {
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsProbeParams".
+ */
+export interface SubagentsProbeParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsProbeResult".
+ */
+export interface SubagentsProbeResult {
+  rows: SubagentRow[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsTestParams".
+ */
+export interface SubagentsTestParams {
+  name: string;
+  source?: 'config' | 'preset' | 'vendored';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsTestResult".
+ */
+export interface SubagentsTestResult {
+  ok: boolean;
+  detail: string;
+  elapsed_ms: number;
+  reply?: string;
+  cancelled?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsTestCancelParams".
+ */
+export interface SubagentsTestCancelParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsTestCancelResult".
+ */
+export interface SubagentsTestCancelResult {
+  cancelled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstancesParams".
+ */
+export interface SubagentsInstancesParams {
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstancesResult".
+ */
+export interface SubagentsInstancesResult {
+  instances: InstanceRow[];
+  /**
+   * Direct-chat turns, and instances the user created, not yet reported to the main agent. Display only.
+   */
+  pending_handoff_count: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceCreateParams".
+ */
+export interface SubagentsInstanceCreateParams {
+  session_key: string;
+  /**
+   * Which sub-agent to instantiate. Must be enabled and stateful: a direct chat is a continuation, and against a stateless agent every turn would start over.
+   */
+  agent: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceCreateResult".
+ */
+export interface SubagentsInstanceCreateResult {
+  instance: InstanceRow;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceHistoryParams".
+ */
+export interface SubagentsInstanceHistoryParams {
+  session_key: string;
+  agent: string;
+  handle: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceHistoryResult".
+ */
+export interface SubagentsInstanceHistoryResult {
+  turns: DirectTurn[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceForgetParams".
+ */
+export interface SubagentsInstanceForgetParams {
+  session_key: string;
+  agent: string;
+  handle: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceForgetResult".
+ */
+export interface SubagentsInstanceForgetResult {
+  removed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSteerParams".
+ */
+export interface SubagentsInstanceSteerParams {
+  session_key: string;
+  agent: string;
+  handle: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSteerResult".
+ */
+export interface SubagentsInstanceSteerResult {
+  status: 'injected' | 'no_turn' | 'unsupported';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSetModeParams".
+ */
+export interface SubagentsInstanceSetModeParams {
+  session_key: string;
+  agent: string;
+  handle: string;
+  mode?: string;
+  /**
+   * Drop this instance's override, after which the session's tier is what the next dispatch runs at. mode wins when both are given: naming one is a statement, clearing is the absence of one. session.set_mode resolves the pair the other way, because there clear selects the configured default.
+   */
+  clear?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSetModeResult".
+ */
+export interface SubagentsInstanceSetModeResult {
+  /**
+   * This instance's own override, or null when it has none. Null is the ordinary answer to a read with no override set and to every clear, not an error.
+   */
+  mode?: string | null;
+  /**
+   * What a dispatch runs at when there is no override: this session's tier, clamped to what the agent offers. Null when nothing is inherited and the agent's own default is what runs.
+   */
+  inherited?: string | null;
+  availableModes?: {
+    id: string;
+    name?: string;
+    description?: string;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSetModelParams".
+ */
+export interface SubagentsInstanceSetModelParams {
+  session_key: string;
+  agent: string;
+  handle: string;
+  /**
+   * The opaque provider-qualified id the agent offered. Never a display name: the two differ and the agent takes only the id back.
+   */
+  model?: string;
+  /**
+   * Drop this instance's override, returning it to the agent's own model. model wins when both are given, matching set_mode: naming one is a statement, clearing is the absence of one.
+   */
+  clear?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentsInstanceSetModelResult".
+ */
+export interface SubagentsInstanceSetModelResult {
+  /**
+   * This instance's override, or null when it follows the agent's own model.
+   */
+  model?: string | null;
+  /**
+   * The menu the agent advertised, measured from its own handshake rather than declared here.
+   */
+  availableModels?: {
+    /**
+     * The id the agent takes back.
+     */
+    value: string;
+    /**
+     * What the agent asked to be shown, usually far shorter than the value.
+     */
+    name?: string;
+    /**
+     * The agent's own bucketing, a provider typically. Empty when it offered none.
+     */
+    group?: string;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetHarnessParams".
+ */
+export interface SessionSetHarnessParams {
+  session_key: string;
+  /**
+   * A stored Harness name to bind. Null unbinds.
+   */
+  harness?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetHarnessResult".
+ */
+export interface SessionSetHarnessResult {
+  session_key: string;
+  /**
+   * The Harness now bound to this session.
+   */
+  harness?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetModeParams".
+ */
+export interface SessionSetModeParams {
+  session_key: string;
+  mode?: string;
+  /**
+   * Drop the session override and go back to the configured default. Wins over mode when both are given, the opposite of subagents.instance.set_mode -- these are different operations: this one selects a tier, that one removes an override.
+   */
+  clear?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetModeResult".
+ */
+export interface SessionSetModeResult {
+  /**
+   * The tier now in force.
+   */
+  mode?: string | null;
+  availableModes?: {
+    id: string;
+    name?: string;
+    description?: string;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetKnowledgeParams".
+ */
+export interface SessionSetKnowledgeParams {
+  session_id: string;
+  /**
+   * Ids of the knowledge bases this session's turns may search. The reader's choice, not the agent's: the search tool takes a query and never a base, so a model cannot reach material nobody offered it. Empty, or absent, means the tool is not offered at all.
+   *
+   * @maxItems 32
+   */
+  knowledge_bases?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSetKnowledgeResult".
+ */
+export interface SessionSetKnowledgeResult {
+  knowledge_bases: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemHelloParams".
+ */
+export interface SystemHelloParams {
+  client_version: string;
+  client_capabilities?: string[];
+  /**
+   * Which front end this connection is ('tui', 'page', 'shell'). Recorded per connection for tracing only; session keys and channels are unaffected.
+   */
+  surface?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemHelloResult".
+ */
+export interface SystemHelloResult {
+  server_version: string;
+  server_capabilities: string[];
+  session: {
+    /**
+     * The channel this dispatcher's turns run on; the terminal and the served page share one.
+     */
+    default_channel: string;
+    default_session_key: string;
+  };
+  /**
+   * The gateway host's OS family, so a client can word host-side actions (Finder vs Explorer).
+   */
+  platform?: 'mac' | 'windows' | 'linux';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemPingParams".
+ */
+export interface SystemPingParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemPingResult".
+ */
+export interface SystemPingResult {
+  pong: true;
+  server_time_ms: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemVersionParams".
+ */
+export interface SystemVersionParams {
+  /**
+   * Fetch the latest release now instead of answering from the daily cache.
+   */
+  check?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemVersionResult".
+ */
+export interface SystemVersionResult {
+  server_version: string;
+  /**
+   * OpenRPC info.version mirrored back to client.
+   */
+  schema_version: string;
+  raven_version: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CliDispatchParams".
+ */
+export interface CliDispatchParams {
+  /**
+   * Pre-tokenized argv (TUI side has already shlex-split).
+   */
+  argv: string[];
+  /**
+   * Ink container width in cells; required for Rich Console wrapping.
+   */
+  width: number;
+  /**
+   * Override the default 30s timeout for long-running commands.
+   */
+  timeout_s?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SetupStatusParams".
+ */
+export interface SetupStatusParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SetupStatusResult".
+ */
+export interface SetupStatusResult {
+  provider_configured: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ReloadMcpParams".
+ */
+export interface ReloadMcpParams {
+  session_id?: string;
+  confirm?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ReloadMcpResult".
+ */
+export interface ReloadMcpResult {
+  ok: boolean;
+  status: 'reloaded' | 'noop' | 'confirm_required';
+  message: string;
+  reloaded: number;
+  tools_changed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CommandsCatalogParams".
+ */
+export interface CommandsCatalogParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "VoiceToggleParams".
+ */
+export interface VoiceToggleParams {
+  action?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserManageParams".
+ */
+export interface BrowserManageParams {
+  action?: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeSaveParams".
+ */
+export interface SpawnTreeSaveParams {
+  name?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeListParams".
+ */
+export interface SpawnTreeListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SpawnTreeLoadParams".
+ */
+export interface SpawnTreeLoadParams {
+  name?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ProcessStopParams".
+ */
+export interface ProcessStopParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackListParams".
+ */
+export interface RollbackListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackDiffParams".
+ */
+export interface RollbackDiffParams {
+  id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "RollbackRestoreParams".
+ */
+export interface RollbackRestoreParams {
+  id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ToolsConfigureParams".
+ */
+export interface ToolsConfigureParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagGetParams".
+ */
+export interface DagGetParams {
+  run_id: string;
+  session_key?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagGetResult".
+ */
+export interface DagGetResult {
+  run: DagRunSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeParams".
+ */
+export interface DagNodeParams {
+  run_id: string;
+  node: string;
+  max_output_chars?: number;
+  session_key?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DagNodeResult".
+ */
+export interface DagNodeResult {
+  node: DagNodeDetail;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlughubSearchParams".
+ */
+export interface PlughubSearchParams {
+  q?: string;
+  category?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlughubSearchResult".
+ */
+export interface PlughubSearchResult {
+  items: PlughubCatalogItem[];
+  categories: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlughubDetailParams".
+ */
+export interface PlughubDetailParams {
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlughubDetailResult".
+ */
+export interface PlughubDetailResult {
+  item: {
+    [k: string]: JsonValue;
+  };
+  installed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugInstallParams".
+ */
+export interface PlugInstallParams {
+  id: string;
+  /**
+   * Values for the entry's auth.fields, by key.
+   */
+  form?: {
+    [k: string]: string;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugInstallResult".
+ */
+export interface PlugInstallResult {
+  /**
+   * False while an auth flow is still open; see `pending`.
+   */
+  installed: boolean;
+  /**
+   * True when the browser round-trip has not settled inside the connect window.
+   */
+  pending: boolean;
+  ledger: PlugLedger;
+  mcp?: McpSnapshot1;
+}
+/**
+ * One server's live connection state, as `MCPConnectionManager` reports it.
+ *
+ * Every mutating `plug.*` call answers with this, and the gateway broadcasts the
+ * same shape as an `mcp.status` notification, so a client renders one state
+ * machine rather than two.
+ */
+export interface McpSnapshot1 {
+  name: string;
+  /**
+   * stdio | sse | streamableHttp, or 'unknown'.
+   */
+  transport: string;
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_required' | 'error';
+  connected: boolean;
+  tool_count: number;
+  error?: string;
+  enabled: boolean;
+  /**
+   * The authorization URL this server is parked on, when it is. Carried on the pull because the `oauth.pending` notification that also carries it is dropped when no client is attached, which is every connect started at assembly time.
+   */
+  auth_url?: string;
+  /**
+   * How the server authenticates (ext.list rows only).
+   */
+  auth?: ('none' | 'apikey' | 'oauth') | null;
+  /**
+   * Whether it holds the credential that mode needs (ext.list rows only).
+   */
+  credentialed?: boolean | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRemoveParams".
+ */
+export interface PlugRemoveParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRemoveResult".
+ */
+export interface PlugRemoveResult {
+  removed: boolean;
+  /**
+   * 'market' when a ledger drove the removal, 'manual' for a hand-written server.
+   */
+  origin: 'market' | 'manual';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugToggleParams".
+ */
+export interface PlugToggleParams {
+  name: string;
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugToggleResult".
+ */
+export interface PlugToggleResult {
+  name: string;
+  enabled: boolean;
+  mcp?: McpSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugAuthParams".
+ */
+export interface PlugAuthParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugAuthResult".
+ */
+export interface PlugAuthResult {
+  name: string;
+  mcp?: McpSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRetryParams".
+ */
+export interface PlugRetryParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRetryResult".
+ */
+export interface PlugRetryResult {
+  name: string;
+  mcp?: McpSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRevokeParams".
+ */
+export interface PlugRevokeParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugRevokeResult".
+ */
+export interface PlugRevokeResult {
+  name: string;
+  mcp?: McpSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugConfigureParams".
+ */
+export interface PlugConfigureParams {
+  name: string;
+  form?: {
+    [k: string]: string;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlugConfigureResult".
+ */
+export interface PlugConfigureResult {
+  name: string;
+  mcp?: McpSnapshot;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubSearchParams".
+ */
+export interface SkillhubSearchParams {
+  /**
+   * Natural-language search; empty browses the hub.
+   */
+  query?: string;
+  /**
+   * Category enum, e.g. DEV / TESTING / DOC-PROC.
+   */
+  category?: string;
+  /**
+   * Comma-separated tags, intersected.
+   */
+  tags?: string;
+  min_score?: number;
+  page?: number;
+  limit?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubSearchResult".
+ */
+export interface SkillhubSearchResult {
+  items: SkillhubItem[];
+  total: number;
+  page: number;
+  limit: number;
+  base_url: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubDetailParams".
+ */
+export interface SkillhubDetailParams {
+  /**
+   * Hub UUID or dataset skill_id.
+   */
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubDetailResult".
+ */
+export interface SkillhubDetailResult {
+  id: string;
+  skill_id: string;
+  name: string;
+  description: string;
+  source: string;
+  source_url: string;
+  category: string;
+  quality_score: number;
+  install_count: number;
+  github_star: number;
+  license: string;
+  tags: string[];
+  installed: boolean;
+  /**
+   * The local directory name when installed, else empty.
+   */
+  installed_name: string;
+  files: string[];
+  skill_md: string;
+  body_tokens: number;
+  subscores: SkillhubSubscores;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubInstallParams".
+ */
+export interface SkillhubInstallParams {
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubInstallResult".
+ */
+export interface SkillhubInstallResult {
+  name: string;
+  path: string;
+  files: string[];
+  /**
+   * Members the suffix/size policy refused, so the gap is visible.
+   */
+  skipped: string[];
+  replaced: boolean;
+  size_bytes: number;
+  install_count: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubRemoveParams".
+ */
+export interface SkillhubRemoveParams {
+  /**
+   * Installed skill directory name.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillhubRemoveResult".
+ */
+export interface SkillhubRemoveResult {
+  removed: boolean;
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCloseParams".
+ */
+export interface SessionCloseParams {
+  /**
+   * Absent or unknown is a no-op.
+   */
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCloseResult".
+ */
+export interface SessionCloseResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionBranchParams".
+ */
+export interface SessionBranchParams {
+  session_id?: string;
+  /**
+   * Title for the child session.
+   */
+  name?: string;
+}
+/**
+ * ``session_id`` is null when the source was unknown or empty, which the
+ * caller treats as a no-op rather than an error.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionBranchResult".
+ */
+export interface SessionBranchResult {
+  session_id?: string;
+  title?: string;
+  message_count?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCompressParams".
+ */
+export interface SessionCompressParams {
+  session_id: string;
+  focus_topic?: string;
+}
+/**
+ * The three redraw fields ride along only when something was archived: a
+ * caller that just dropped half the transcript is looking at messages that no
+ * longer exist.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionCompressResult".
+ */
+export interface SessionCompressResult {
+  before_messages: number;
+  after_messages: number;
+  before_tokens: number;
+  after_tokens: number;
+  removed: number;
+  summary: SessionCompressSummary;
+  info?: SessionInitInfo;
+  messages?: TranscriptMessage[];
+  usage?: SessionUsage;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionStatusParams".
+ */
+export interface SessionStatusParams {
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionStatusResult".
+ */
+export interface SessionStatusResult {
+  /**
+   * Rich-rendered `raven status` output with ANSI SGR sequences.
+   */
+  output: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ExtListParams".
+ */
+export interface ExtListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ExtListResult".
+ */
+export interface ExtListResult {
+  skills: ExtSkillRow[];
+  plugins: ExtPluginRow[];
+  tools: ExtToolRow[];
+  /**
+   * Live connections, plus configured servers not yet connected, reported as disconnected.
+   */
+  mcp: McpSnapshot[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronListParams".
+ */
+export interface CronListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronListResult".
+ */
+export interface CronListResult {
+  /**
+   * Disabled jobs included.
+   */
+  jobs: CronJobInfo[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronSaveParams".
+ */
+export interface CronSaveParams {
+  kind: 'at' | 'every' | 'cron';
+  name: string;
+  message: string;
+  expr?: string;
+  every_seconds?: number;
+  at_iso?: string;
+  tz?: string;
+  /**
+   * Editing an existing job: the id is kept so its run history does not orphan.
+   */
+  id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronSaveResult".
+ */
+export interface CronSaveResult {
+  job: CronJobInfo;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronDeleteParams".
+ */
+export interface CronDeleteParams {
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronDeleteResult".
+ */
+export interface CronDeleteResult {
+  deleted: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronSetEnabledParams".
+ */
+export interface CronSetEnabledParams {
+  id: string;
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronSetEnabledResult".
+ */
+export interface CronSetEnabledResult {
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronRunNowParams".
+ */
+export interface CronRunNowParams {
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronRunNowResult".
+ */
+export interface CronRunNowResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronRunsParams".
+ */
+export interface CronRunsParams {
+  id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CronRunsResult".
+ */
+export interface CronRunsResult {
+  /**
+   * Newest first, capped at 50.
+   */
+  runs: CronRun[];
+  /**
+   * The cron:<id> session the history is derived from.
+   */
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsGetParams".
+ */
+export interface SettingsGetParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsGetResult".
+ */
+export interface SettingsGetResult {
+  /**
+   * Raw config.json with secret-looking values masked.
+   */
+  settings: {
+    [k: string]: JsonValue;
+  };
+  config_path: string;
+  raven_version: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsSetParams".
+ */
+export interface SettingsSetParams {
+  /**
+   * Dotted path; only whitelisted keys are writable through this method.
+   */
+  key: string;
+  value: JsonValue;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsSetResult".
+ */
+export interface SettingsSetResult {
+  applied: boolean;
+  previous: JsonValue;
+  /**
+   * Why this page has nothing to show, when that is not a failure: the memory plugin is not installed, or it is installed but is not what memory.backend names. Null when the store was actually consulted.
+   */
+  warning?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsUsageParams".
+ */
+export interface SettingsUsageParams {
+  /**
+   * Window to scan; 30 by default, capped at 90.
+   */
+  days?: number;
+  session_key?: string | null;
+  /**
+   * First day (YYYY-MM-DD), inclusive; clamped to 90 days back.
+   */
+  from?: string | null;
+  /**
+   * Last day (YYYY-MM-DD), inclusive; today when absent.
+   */
+  to?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsUsageResult".
+ */
+export interface SettingsUsageResult {
+  days: number;
+  from: string;
+  to: string;
+  /**
+   * One entry per day of the range, zeros for days without a file.
+   */
+  daily: DailyUsage[];
+  llm: LlmUsage;
+  tools: ToolUsage;
+  session_key?: string | null;
+  sessions?: string[];
+  session_titles?: {
+    [k: string]: string;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsEverosParams".
+ */
+export interface SettingsEverosParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsEverosResult".
+ */
+export interface SettingsEverosResult {
+  sections: {
+    [k: string]: EverosSection;
+  };
+  config_path: string;
+  /**
+   * Whether this install has an EverOS to configure at all. False leaves sections empty and note set.
+   */
+  available: boolean;
+  /**
+   * Why this page has nothing to show, when that is not a failure: the memory plugin is not installed, or it is installed but is not what memory.backend names. Null when the store was actually consulted.
+   */
+  note?: string | null;
+  /**
+   * Whether raven manages this EverOS root. False makes the role slots read-only: raven neither writes that install's config nor starts or stops its server.
+   */
+  owned?: boolean;
+  /**
+   * Which roles each vendor can serve, so a slot does not offer a provider that cannot do the job. Keyed by provider name.
+   */
+  supports?: {
+    [k: string]: string[];
+  };
+  /**
+   * Roles that cannot be cleared, so the page knows which slots get a clear control. Sent rather than mirrored: a mirrored copy drew one on a slot whose clear the write refuses.
+   */
+  required?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsEverosSetParams".
+ */
+export interface SettingsEverosSetParams {
+  /**
+   * Which EverOS role: llm, embedding, rerank or multimodal.
+   */
+  section: string;
+  /**
+   * Model id, as the provider names it.
+   */
+  model?: string | null;
+  /**
+   * Which configured provider serves `model`. Its address and key are what the call goes out on, resolved at spawn time rather than copied -- so rotating a key is one edit in the provider and every role serving on it follows.
+   */
+  provider?: string | null;
+  /**
+   * Rerank only, and only for a self-hosted endpoint: which request shape EverOS must post (`deepinfra` / `vllm` / `dashscope`). A curated vendor's shape comes from the vendor table and this is ignored; somebody's own server is the one case nothing but the operator can answer.
+   */
+  protocol?: string | null;
+  /**
+   * Drop the role; refused for llm and embedding.
+   */
+  clear?: boolean | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsEverosSetResult".
+ */
+export interface SettingsEverosSetResult {
+  applied: boolean;
+  /**
+   * Why this page has nothing to show, when that is not a failure: the memory plugin is not installed, or it is installed but is not what memory.backend names. Null when the store was actually consulted.
+   */
+  warning?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsStatusParams".
+ */
+export interface ChannelsStatusParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsStatusResult".
+ */
+export interface ChannelsStatusResult {
+  channels: ChannelStatusRow[];
+  gateway_running: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsConfigureParams".
+ */
+export interface ChannelsConfigureParams {
+  name: string;
+  /**
+   * Field-path -> value patch; blank strings are skipped, never written.
+   */
+  fields?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * Connect or disconnect the channel; omitted leaves its current state alone.
+   */
+  enabled?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsConfigureResult".
+ */
+export interface ChannelsConfigureResult {
+  applied: boolean;
+  /**
+   * What the gateway did with the switch: started | already | stopped | absent | disabled | deny_all | missing_dep | bad_config | unknown | no_manager, or 'unreachable' when no gateway answered. Null when the write carried no switch.
+   */
+  outcome?: string;
+  /**
+   * What to do about an outcome that is not a start, when there is something to say.
+   */
+  detail?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "AttentionListParams".
+ */
+export interface AttentionListParams {
+  /**
+   * Only this conversation's items.
+   */
+  session_key?: string;
+  /**
+   * Also the resolved items still kept.
+   */
+  include_resolved?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "AttentionListResult".
+ */
+export interface AttentionListResult {
+  items: {
+    id: string;
+    kind: string;
+    /**
+     * critical, high, normal or low, as raised.
+     */
+    priority: string;
+    /**
+     * The priority it counts at now, after waiting raised it.
+     */
+    effective_priority: string;
+    title: string;
+    detail: string;
+    session_key: string;
+    source: string;
+    created: number;
+    updated: number;
+    /**
+     * open or resolved.
+     */
+    status: string;
+    resolution: string;
+  }[];
+  summary: {
+    critical: number;
+    high: number;
+    normal: number;
+    low: number;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "AttentionResolveParams".
+ */
+export interface AttentionResolveParams {
+  id: string;
+  resolution?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "AttentionResolveResult".
+ */
+export interface AttentionResolveResult {
+  resolved: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsMcpClientsParams".
+ */
+export interface SettingsMcpClientsParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SettingsMcpClientsResult".
+ */
+export interface SettingsMcpClientsResult {
+  clients: {
+    /**
+     * Client id, e.g. claude-code, cursor.
+     */
+    client: string;
+    label: string;
+    /**
+     * 'cli': run connect as a command; 'config': write connect into filename.
+     */
+    kind: string;
+    /**
+     * The command to run, or the file content to write.
+     */
+    connect: string;
+    /**
+     * Where a config client reads its file; empty for a command.
+     */
+    filename: string;
+    /**
+     * The text to give the connected agent.
+     */
+    instructions: string;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsQrParams".
+ */
+export interface ChannelsQrParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ChannelsQrResult".
+ */
+export interface ChannelsQrResult {
+  /**
+   * The scan code as a PNG data URI, or null when there is none.
+   */
+  qr?: string;
+  /**
+   * The raw scan payload, sent only when the server could not rasterise it.
+   */
+  qr_text?: string;
+  /**
+   * Whether the account is paired; true ends the client's polling.
+   */
+  connected: boolean;
+  running: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsListParams".
+ */
+export interface FsListParams {
+  /**
+   * Root-relative; the root when omitted.
+   */
+  path?: string;
+  /**
+   * Session key whose working directory roots the listing; the policy default when omitted.
+   */
+  session?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsListResult".
+ */
+export interface FsListResult {
+  /**
+   * Absolute working directory the listing is rooted at.
+   */
+  root: string;
+  path: string;
+  /**
+   * Directories first, dotfiles omitted, capped at 500.
+   */
+  entries: FsEntry[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsDirsParams".
+ */
+export interface FsDirsParams {
+  /**
+   * Absolute directory to list the subdirectories of; the user's home directory when omitted.
+   */
+  path?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsDirsResult".
+ */
+export interface FsDirsResult {
+  /**
+   * The directory listed, resolved.
+   */
+  path: string;
+  /**
+   * One level up; null at the filesystem root.
+   */
+  parent?: string;
+  /**
+   * The user's home directory, where the browser starts.
+   */
+  home: string;
+  /**
+   * Whether the listed directory itself may be a session's working directory.
+   */
+  ok: boolean;
+  /**
+   * Subdirectories only, dotfiles omitted, sorted by name; at most the first 500 found.
+   */
+  entries: FsDirEntry[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsPickDirParams".
+ */
+export interface FsPickDirParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsPickDirResult".
+ */
+export interface FsPickDirResult {
+  /**
+   * The folder chosen, absolute and resolved; absent when the dialog was dismissed.
+   */
+  path?: string;
+  /**
+   * Whether a session may be pinned to the chosen folder (see raven.agent.workdir); false with no path.
+   */
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsReadParams".
+ */
+export interface FsReadParams {
+  path: string;
+  max_bytes?: number;
+  session?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsReadResult".
+ */
+export interface FsReadResult {
+  /**
+   * Decoded as UTF-8 with replacement, so binary never fails the call.
+   */
+  content: string;
+  truncated: boolean;
+  /**
+   * Size on disk, which exceeds len(content) when truncated.
+   */
+  size: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsUploadParams".
+ */
+export interface FsUploadParams {
+  name: string;
+  content_b64: string;
+  session?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsUploadResult".
+ */
+export interface FsUploadResult {
+  /**
+   * Workspace-relative path to hand the agent; uploads never return bytes.
+   */
+  path: string;
+  abs_path: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesListParams".
+ */
+export interface DeckTemplatesListParams {
+  /**
+   * False lists the names alone, without rendering a cover for each.
+   */
+  covers?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesListResult".
+ */
+export interface DeckTemplatesListResult {
+  templates: DeckTemplateRow[];
+  /**
+   * False when the deck engine is not installed here; the picker then stays hidden.
+   */
+  available: boolean;
+  /**
+   * True while a cover is still being drawn in the background; ask again for it.
+   */
+  pending?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesPagesParams".
+ */
+export interface DeckTemplatesPagesParams {
+  /**
+   * A row's name from deck.templates.list.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesPagesResult".
+ */
+export interface DeckTemplatesPagesResult {
+  /**
+   * Every page as a JPEG data URL, in order; empty where this host cannot render.
+   */
+  pages: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesPickParams".
+ */
+export interface DeckTemplatesPickParams {
+  /**
+   * A row's name from deck.templates.list.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeckTemplatesPickResult".
+ */
+export interface DeckTemplatesPickResult {
+  /**
+   * Workspace-relative path to hand the agent; uploads never return bytes.
+   */
+  path: string;
+  abs_path: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsRevealParams".
+ */
+export interface FsRevealParams {
+  /**
+   * Absolute, or relative to the session's working directory. Give this or `place`.
+   */
+  path?: string;
+  /**
+   * One of raven's own locations, resolved by the gateway rather than sent: the config file (shown selected) or agent home (opened). Give this or `path`.
+   */
+  place?: 'config' | 'workspace';
+  session?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsRevealResult".
+ */
+export interface FsRevealResult {
+  ok: true;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsOpenParams".
+ */
+export interface FsOpenParams {
+  /**
+   * Absolute, or relative to the session's working directory.
+   */
+  path: string;
+  /**
+   * Which installed application to hand the file to. Absent means the host's own default. A NAME, not a path or a command line: the server rejects anything with a separator, a shell character or a leading dash, and never runs it through a shell.
+   */
+  app?: string;
+  session?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "FsOpenResult".
+ */
+export interface FsOpenResult {
+  ok: true;
+  /**
+   * The application asked for, echoed back; absent when the host default was used.
+   */
+  app?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeliverablesListParams".
+ */
+export interface DeliverablesListParams {
+  /**
+   * Full session_key. An empty or unknown key answers with an empty list.
+   */
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DeliverablesListResult".
+ */
+export interface DeliverablesListResult {
+  /**
+   * Oldest first, one entry per delivered path.
+   */
+  files: {
+    path: string;
+    name: string;
+    /**
+     * What the agent called the file; empty when it named none.
+     */
+    title?: string;
+    description?: string;
+    size: number;
+    media_type: string;
+    /**
+     * Token URL on the gateway; never a path.
+     */
+    download_path: string;
+    /**
+     * ISO-8601, when the file was first delivered.
+     */
+    created_at: string;
+    /**
+     * The registry has it, the filesystem no longer does.
+     */
+    missing: boolean;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MemoryStatsParams".
+ */
+export interface MemoryStatsParams {}
+/**
+ * ``ok`` is false when a kind could not be counted; the counts stay zero
+ * rather than the call failing, so the page opens with EverOS down.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MemoryStatsResult".
+ */
+export interface MemoryStatsResult {
+  ok: boolean;
+  base_url: string;
+  episodes: number;
+  profiles: number;
+  agent_cases: number;
+  agent_skills: number;
+  /**
+   * Why this page has nothing to show, when that is not a failure: the memory plugin is not installed, or it is installed but is not what memory.backend names. Null when the store was actually consulted.
+   */
+  note?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MemoryListParams".
+ */
+export interface MemoryListParams {
+  kind: 'episode' | 'profile' | 'agent_case' | 'agent_skill';
+  page?: number;
+  /**
+   * Capped at 100.
+   */
+  page_size?: number;
+  /**
+   * Non-empty switches to search, which returns one page.
+   */
+  q?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "MemoryListResult".
+ */
+export interface MemoryListResult {
+  items: MemoryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  /**
+   * Why this page has nothing to show, when that is not a failure: the memory plugin is not installed, or it is installed but is not what memory.backend names. Null when the store was actually consulted.
+   */
+  note?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsListParams".
+ */
+export interface InstructionsListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsListResult".
+ */
+export interface InstructionsListResult {
+  files: {
+    /**
+     * The file, relative to agent home; also its id for every other call.
+     */
+    key: string;
+    /**
+     * instruction (rendered into every turn) or memory.
+     */
+    kind: string;
+    exists: boolean;
+    size: number;
+    /**
+     * Hash of the text on disk now; a save sends it back as expected_sha256.
+     */
+    sha256: string;
+    /**
+     * The revision the file holds; 0 when none was recorded.
+     */
+    head: number;
+    revisions: number;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsGetParams".
+ */
+export interface InstructionsGetParams {
+  key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsGetResult".
+ */
+export interface InstructionsGetResult {
+  key: string;
+  kind: string;
+  text: string;
+  sha256: string;
+  head: number;
+  /**
+   * Newest first, at most 30.
+   */
+  revisions: {
+    rev: number;
+    at: number;
+    author: string;
+    note: string;
+    sha256: string;
+    /**
+     * save or rollback.
+     */
+    action: string;
+    restored_from?: number;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsSaveParams".
+ */
+export interface InstructionsSaveParams {
+  key: string;
+  text: string;
+  /**
+   * The sha256 the caller read; a file that changed since is refused with revision_changed.
+   */
+  expected_sha256: string;
+  note?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsSaveResult".
+ */
+export interface InstructionsSaveResult {
+  key: string;
+  sha256: string;
+  head: number;
+  /**
+   * False when the text was already what the file held.
+   */
+  saved: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsRevisionParams".
+ */
+export interface InstructionsRevisionParams {
+  key: string;
+  rev: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsRevisionResult".
+ */
+export interface InstructionsRevisionResult {
+  key: string;
+  rev: number;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsDiffParams".
+ */
+export interface InstructionsDiffParams {
+  key: string;
+  a: number;
+  /**
+   * Defaults to the head.
+   */
+  b?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsDiffResult".
+ */
+export interface InstructionsDiffResult {
+  key: string;
+  diff: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsRollbackParams".
+ */
+export interface InstructionsRollbackParams {
+  key: string;
+  rev: number;
+  expected_sha256: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InstructionsRollbackResult".
+ */
+export interface InstructionsRollbackResult {
+  key: string;
+  sha256: string;
+  head: number;
+  /**
+   * False when the text was already what the file held.
+   */
+  saved: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksListParams".
+ */
+export interface PlaybooksListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksListResult".
+ */
+export interface PlaybooksListResult {
+  playbooks: PlaybookRow[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGetParams".
+ */
+export interface PlaybooksGetParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGetResult".
+ */
+export interface PlaybooksGetResult {
+  playbook: PlaybookDetail;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsGetParams".
+ */
+export interface PlaybooksCredentialsGetParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsGetResult".
+ */
+export interface PlaybooksCredentialsGetResult {
+  params: PlaybookCredentialParam[];
+  servers: PlaybookCredentialServer[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsSetParams".
+ */
+export interface PlaybooksCredentialsSetParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  param: string;
+  value: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCredentialsClearParams".
+ */
+export interface PlaybooksCredentialsClearParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  param: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksOauthAuthorizeParams".
+ */
+export interface PlaybooksOauthAuthorizeParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  server: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksOauthAuthorizeResult".
+ */
+export interface PlaybooksOauthAuthorizeResult {
+  server: string;
+  state: string;
+  auth_url?: string | null;
+  error?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksOauthClearParams".
+ */
+export interface PlaybooksOauthClearParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  server: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksSetEnabledParams".
+ */
+export interface PlaybooksSetEnabledParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  /**
+   * The state wanted. true takes the name off the deny list, false puts it on.
+   */
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksSetEnabledResult".
+ */
+export interface PlaybooksSetEnabledResult {
+  name: string;
+  /**
+   * The state now in force.
+   */
+  enabled: boolean;
+  /**
+   * False when it was already in that state, so a caller can tell 'you did that' from 'it was already so'.
+   */
+  changed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksValidateParams".
+ */
+export interface PlaybooksValidateParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksValidateResult".
+ */
+export interface PlaybooksValidateResult {
+  name: string;
+  /**
+   * True when errors is empty.
+   */
+  ok: boolean;
+  /**
+   * Every finding, in the order the validator reports them. Empty when the playbook is sound.
+   */
+  errors: string[];
+  /**
+   * The file the findings refer to.
+   */
+  path: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphGetParams".
+ */
+export interface PlaybooksGraphGetParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphGetResult".
+ */
+export interface PlaybooksGraphGetResult {
+  /**
+   * The plain steps the graph runs as once its typed steps are expanded, with the field names the graph tool uses (depends_on, node_summary, prompt_template). Empty when it cannot expand.
+   */
+  expanded: {
+    [k: string]: JsonValue;
+  }[];
+  /**
+   * Everything the library would refuse the graph for, in order. Empty when it is sound.
+   */
+  errors: string[];
+  name: string;
+  description: string;
+  origin: 'builtin' | 'user';
+  /**
+   * The steps as the file has them, typed ones unexpanded -- what an editor edits.
+   */
+  nodes: {
+    [k: string]: JsonValue;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphCheckParams".
+ */
+export interface PlaybooksGraphCheckParams {
+  /**
+   * The steps as written, typed ones included: forEach (a list of items), repeat (a number of passes), branches (a list of steps), each with an optional collect step.
+   */
+  nodes: {
+    [k: string]: JsonValue;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphCheckResult".
+ */
+export interface PlaybooksGraphCheckResult {
+  /**
+   * The plain steps the graph runs as once its typed steps are expanded, with the field names the graph tool uses (depends_on, node_summary, prompt_template). Empty when it cannot expand.
+   */
+  expanded: {
+    [k: string]: JsonValue;
+  }[];
+  /**
+   * Everything the library would refuse the graph for, in order. Empty when it is sound.
+   */
+  errors: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphSaveParams".
+ */
+export interface PlaybooksGraphSaveParams {
+  /**
+   * Kebab-case: it names the playbook's directory under the user layer.
+   */
+  name: string;
+  /**
+   * The steps as written, typed ones included.
+   */
+  nodes: {
+    [k: string]: JsonValue;
+  }[];
+  /**
+   * Required for a new playbook (it is what matches it to a request); omitted keeps the old.
+   */
+  description?: string;
+  /**
+   * Write over a playbook that exists; a builtin is shadowed by a user copy, never edited.
+   */
+  overwrite?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksGraphSaveResult".
+ */
+export interface PlaybooksGraphSaveResult {
+  /**
+   * The plain steps the graph runs as once its typed steps are expanded, with the field names the graph tool uses (depends_on, node_summary, prompt_template). Empty when it cannot expand.
+   */
+  expanded: {
+    [k: string]: JsonValue;
+  }[];
+  /**
+   * Everything the library would refuse the graph for, in order. Empty when it is sound.
+   */
+  errors: string[];
+  name: string;
+  /**
+   * The playbook.md written, always in the user layer.
+   */
+  path: string;
+  origin: 'user';
+  /**
+   * True when the save created a user copy over a builtin.
+   */
+  shadows_builtin: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesListParams".
+ */
+export interface EmployeesListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesListResult".
+ */
+export interface EmployeesListResult {
+  employees: {
+    name: string;
+    /**
+     * The folder under <RAVEN_HOME>/employees.
+     */
+    folder: string;
+    /**
+     * What it does: the dispatching model reads it to decide when to hand it work.
+     */
+    role: string;
+    owns: string;
+    /**
+     * Empty: the host's provider.
+     */
+    provider: string;
+    /**
+     * Empty: the host's model.
+     */
+    model: string;
+    /**
+     * It runs on a key of its own (kept in its .env, never sent back).
+     */
+    own_key: boolean;
+    hired_at: number;
+  }[];
+  /**
+   * The providers this Raven has configured, for the host-keys choice.
+   */
+  providers: string[];
+  /**
+   * Every provider a key of the employee's own can be for.
+   */
+  all_providers: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesHireParams".
+ */
+export interface EmployeesHireParams {
+  name: string;
+  role: string;
+  system_prompt: string;
+  owns?: string;
+  provider?: string;
+  model?: string;
+  /**
+   * A key of the employee's own; kept in its .env and never returned.
+   */
+  api_key?: string;
+  api_base?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesHireResult".
+ */
+export interface EmployeesHireResult {
+  employee: {
+    name: string;
+    /**
+     * The folder under <RAVEN_HOME>/employees.
+     */
+    folder: string;
+    /**
+     * What it does: the dispatching model reads it to decide when to hand it work.
+     */
+    role: string;
+    owns: string;
+    /**
+     * Empty: the host's provider.
+     */
+    provider: string;
+    /**
+     * Empty: the host's model.
+     */
+    model: string;
+    /**
+     * It runs on a key of its own (kept in its .env, never sent back).
+     */
+    own_key: boolean;
+    hired_at: number;
+  };
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesPromptGetParams".
+ */
+export interface EmployeesPromptGetParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesPromptGetResult".
+ */
+export interface EmployeesPromptGetResult {
+  prompt: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesPromptSetParams".
+ */
+export interface EmployeesPromptSetParams {
+  name: string;
+  prompt: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesPromptSetResult".
+ */
+export interface EmployeesPromptSetResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesRetireParams".
+ */
+export interface EmployeesRetireParams {
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "EmployeesRetireResult".
+ */
+export interface EmployeesRetireResult {
+  /**
+   * Where the folder was moved to (employees/.retired).
+   */
+  kept: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDeleteParams".
+ */
+export interface PlaybooksDeleteParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDeleteResult".
+ */
+export interface PlaybooksDeleteResult {
+  name: string;
+  deleted: boolean;
+  /**
+   * True when a user playbook was shadowing a builtin of the same name, so the name is still in the library and now resolves to the builtin.
+   */
+  uncovered_builtin: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksRunParams".
+ */
+export interface PlaybooksRunParams {
+  /**
+   * A library name. Kebab-case: the name is joined to the library root to resolve a directory, so anything else could name a path outside it.
+   */
+  name: string;
+  /**
+   * The conversation this run reports to, as its own `channel:chat_id`. Required because a run's progress and completion announce are addressed to a conversation, and an RPC call is an origin nothing else sets one for.
+   */
+  session_key: string;
+  /**
+   * Values for the playbook's declared `params`. A parameter this machine holds as a stored secret is filled from there and must not be sent.
+   */
+  params?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * Node fields the author left blank, keyed by the node id written in the file. Only `subagent`, `nodeSummary` and `promptTemplate` may be filled; aimed at a field the author already wrote, the whole call is refused.
+   */
+  fills?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * The caller's statement that it already put this run to the user, so the graph-level gate does not ask a second time. Send it only when a person actually saw the run and agreed.
+   */
+  confirmed?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksRunResult".
+ */
+export interface PlaybooksRunResult {
+  name: string;
+  /**
+   * `dag`: dispatched, `reply` is the receipt. `guidance`: prompt-mode composition instructions. `gaps`: nothing was dispatched and `reply` names what is missing. `questions`: it cannot proceed and `reply` says why.
+   */
+  kind: 'dag' | 'guidance' | 'gaps' | 'questions';
+  /**
+   * The executor's own answer, verbatim. For a dispatched graph this is the receipt the run id is read out of.
+   */
+  reply: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCreateParams".
+ */
+export interface PlaybooksCreateParams {
+  /**
+   * Short kebab-case name; becomes the library directory name. Must not already exist in either layer.
+   */
+  name: string;
+  /**
+   * The whole procedure in plain language: steps in order, what each produces and consumes, per-run parameters, trigger phrases, and any MCP server a step needs. The generator sees only this text.
+   */
+  workflow: string;
+  /**
+   * Skill names to pin to specific steps, when the caller named some.
+   */
+  skills?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksCreateResult".
+ */
+export interface PlaybooksCreateResult {
+  name: string;
+  /**
+   * Whether a playbook now exists. False only when the generation failed, in which case `errors` says why.
+   */
+  created: boolean;
+  /**
+   * Where the file landed; empty when nothing was created.
+   */
+  path: string;
+  /**
+   * The composer's own open questions -- assumptions it made and gaps it could not close. Written into the file's prose for review and returned here so a client need not read the file back.
+   */
+  notes: string[];
+  /**
+   * Why the composer could not produce a valid playbook. Non-empty exactly when `created` is false.
+   */
+  errors: string[];
+  /**
+   * Whether the live library loaded the new file, so it is usable in this process without a restart.
+   */
+  adopted: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftParams".
+ */
+export interface PlaybooksDraftParams {
+  /**
+   * The conversation whose generated Persona this is. A draft belongs to the session that asked for it.
+   */
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftResult".
+ */
+export interface PlaybooksDraftResult {
+  draft?: PlaybookRow1;
+}
+/**
+ * One playbook as the library list needs it. ``error`` is empty unless the
+ * file would not parse, in which case it carries the reason and ``nodes`` is
+ * empty -- one unreadable file in a directory of user-edited text must not
+ * take the page down with it. ``disabled`` lives in config rather than in the
+ * file, because the file is the distribution unit and the switch is local to
+ * this machine.
+ */
+export interface PlaybookRow1 {
+  name: string;
+  description: string;
+  task_summary: string;
+  schema_version: number;
+  artifact_kind: 'legacy' | 'workflow' | 'harness' | 'composite';
+  /**
+   * True when the Harness carries a coordinator seat, which is what makes it a Persona.
+   */
+  coordinator?: boolean;
+  workers: PlaybookWorkerShape[];
+  mode: 'dag' | 'prompt' | 'stint';
+  confirm: boolean;
+  origin: string;
+  disabled: boolean;
+  nodes: PlaybookNodeShape[];
+  error: string;
+  /**
+   * What the main Raven is in this Persona's words, empty when the Harness carries no coordinator seat.
+   */
+  coordinator_brief?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftSaveParams".
+ */
+export interface PlaybooksDraftSaveParams {
+  /**
+   * The conversation whose generated Persona this is. A draft belongs to the session that asked for it.
+   */
+  session_key: string;
+  /**
+   * The name to keep it under. Kebab-case, because the name resolves a directory under the library root. Omitted keeps the generated one.
+   */
+  name?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftSaveResult".
+ */
+export interface PlaybooksDraftSaveResult {
+  /**
+   * The name it was saved under, which a collision may have suffixed.
+   */
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftDiscardParams".
+ */
+export interface PlaybooksDraftDiscardParams {
+  /**
+   * The conversation whose generated Persona this is. A draft belongs to the session that asked for it.
+   */
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksDraftDiscardResult".
+ */
+export interface PlaybooksDraftDiscardResult {
+  discarded: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalRespondParams".
+ */
+export interface ApprovalRespondParams {
+  approval_id: string;
+  /**
+   * allow | allow_session | allow_always | deny | deny_stop.
+   */
+  choice: string;
+  /**
+   * Optional sentence attached to a refusal, relayed to the model.
+   */
+  feedback?: string;
+  /**
+   * With allow_always: the exec prefix rule to persist, as the human confirmed or edited it.
+   */
+  pattern?: string;
+  session_id?: string;
+  /**
+   * Compatibility spelling of session_id.
+   */
+  conversation_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalRespondResult".
+ */
+export interface ApprovalRespondResult {
+  /**
+   * False for an unknown, expired or mis-bound request; the caller fails closed.
+   */
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalRevokeParams".
+ */
+export interface ApprovalRevokeParams {
+  /**
+   * The answered request whose grant to take back.
+   */
+  approval_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalRevokeResult".
+ */
+export interface ApprovalRevokeResult {
+  /**
+   * False when that answer wrote no rule of its own, the undo came twice, or the file could not be written.
+   */
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalPendingParams".
+ */
+export interface ApprovalPendingParams {
+  /**
+   * One conversation's requests; every conversation's when absent.
+   */
+  session_id?: string;
+  /**
+   * Compatibility spelling of session_id.
+   */
+  conversation_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ApprovalPendingResult".
+ */
+export interface ApprovalPendingResult {
+  /**
+   * Each open request's approval.request params, exactly as they were first sent.
+   */
+  requests: {
+    [k: string]: JsonValue;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialSubmitParams".
+ */
+export interface CredentialSubmitParams {
+  request_id: string;
+  /**
+   * The credential as typed. Not logged, not returned, not kept once written.
+   */
+  value: string;
+  session_id?: string;
+  /**
+   * Compatibility spelling of session_id.
+   */
+  conversation_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialSubmitResult".
+ */
+export interface CredentialSubmitResult {
+  /**
+   * True once the value is written; the waiting tool then resumes.
+   */
+  ok: boolean;
+  /**
+   * Why it was not written, for the card to show; the request stays open.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialSkipParams".
+ */
+export interface CredentialSkipParams {
+  request_id: string;
+  session_id?: string;
+  /**
+   * Compatibility spelling of session_id.
+   */
+  conversation_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialSkipResult".
+ */
+export interface CredentialSkipResult {
+  /**
+   * False for an unknown, answered or mis-bound request.
+   */
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialPendingParams".
+ */
+export interface CredentialPendingParams {
+  /**
+   * One conversation's requests; every conversation's when absent.
+   */
+  session_id?: string;
+  /**
+   * Compatibility spelling of session_id.
+   */
+  conversation_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CredentialPendingResult".
+ */
+export interface CredentialPendingResult {
+  /**
+   * Each open request's credential.request params, exactly as they were first sent.
+   */
+  requests: {
+    [k: string]: JsonValue;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ClarifyRespondParams".
+ */
+export interface ClarifyRespondParams {
+  answer: string;
+  request_id?: string;
+  conversation_id?: string;
+  answers?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ClarifyRespondResult".
+ */
+export interface ClarifyRespondResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfirmRespondParams".
+ */
+export interface ConfirmRespondParams {
+  request_id: string;
+  answer: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ConfirmRespondResult".
+ */
+export interface ConfirmRespondResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SlashExecParams".
+ */
+export interface SlashExecParams {
+  /**
+   * The slash text without its leading slash; shlex-split into argv.
+   */
+  command: string;
+  session_id?: string;
+}
+/**
+ * Never an error frame: an unknown verb, a blacklisted one, a timeout and a
+ * non-zero exit all arrive here, because the client's error branch falls
+ * through to a method that does not exist.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SlashExecResult".
+ */
+export interface SlashExecResult {
+  output: string;
+  warning?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CompleteSlashParams".
+ */
+export interface CompleteSlashParams {
+  word?: string;
+  session_id?: string;
+}
+/**
+ * The provider is a no-op that exists to stop the client's
+ * completion-unavailable toast, so ``items`` is always empty and its element
+ * type is whatever a real provider would later return.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CompleteSlashResult".
+ */
+export interface CompleteSlashResult {
+  items: JsonValue[];
+  replace_from: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CompletePathParams".
+ */
+export interface CompletePathParams {
+  word?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CompletePathResult".
+ */
+export interface CompletePathResult {
+  items: JsonValue[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TerminalResizeParams".
+ */
+export interface TerminalResizeParams {
+  cols?: number;
+  rows?: number;
+  /**
+   * Sent by the client; the handler does not read it.
+   */
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TerminalResizeResult".
+ */
+export interface TerminalResizeResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemUpgradeParams".
+ */
+export interface SystemUpgradeParams {}
+/**
+ * Returned once the detached helper owns the install. The shutdown is
+ * scheduled a beat later so this reply reaches the client first.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SystemUpgradeResult".
+ */
+export interface SystemUpgradeResult {
+  status: string;
+  from_version: string;
+  to_version: string;
+  /**
+   * Whether the helper will start `raven serve` again on the same port.
+   */
+  relaunch: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "VoiceRecordParams".
+ */
+export interface VoiceRecordParams {
+  action?: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSaveParams".
+ */
+export interface SessionSaveParams {
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionSteerParams".
+ */
+export interface SessionSteerParams {
+  session_id?: string;
+  text?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionUsageParams".
+ */
+export interface SessionUsageParams {
+  /**
+   * Full session_key to report on.
+   */
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionUsageResult".
+ */
+export interface SessionUsageResult {
+  /**
+   * Recorded calls under this session's root.
+   */
+  calls: number;
+  /**
+   * The model this session runs on now.
+   */
+  model: string;
+  /**
+   * Fresh input tokens; cache excluded.
+   */
+  input: number;
+  /**
+   * Output tokens.
+   */
+  output: number;
+  /**
+   * Cache-read tokens.
+   */
+  cache_read: number;
+  /**
+   * Cache-write tokens.
+   */
+  cache_write: number;
+  /**
+   * input + output + cache_read + cache_write.
+   */
+  total: number;
+  /**
+   * Sum of provider-reported USD; null when no call reported a price.
+   */
+  cost_usd?: number | null;
+  /**
+   * exact when every call reported a price; estimated when some did not.
+   */
+  cost_status: 'estimated' | 'exact';
+  /**
+   * Calls with no reported price, left out of cost_usd.
+   */
+  cost_missing_calls: number;
+  /**
+   * Context window of the session's model; 0 when unknown.
+   */
+  context_max: number;
+  /**
+   * Estimated tokens the next call would send.
+   */
+  context_used: number;
+  /**
+   * context_used as a percentage of context_max.
+   */
+  context_percent: number;
+  /**
+   * True when context_used is a tiktoken estimate.
+   */
+  context_estimated: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillsReloadParams".
+ */
+export interface SkillsReloadParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ReloadEnvParams".
+ */
+export interface ReloadEnvParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SudoRespondParams".
+ */
+export interface SudoRespondParams {
+  request_id?: string;
+  password?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SecretRespondParams".
+ */
+export interface SecretRespondParams {
+  request_id?: string;
+  value?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImageAttachParams".
+ */
+export interface ImageAttachParams {
+  path?: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PromptSubmitParams".
+ */
+export interface PromptSubmitParams {
+  session_id?: string;
+  text?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PromptBackgroundParams".
+ */
+export interface PromptBackgroundParams {
+  session_id?: string;
+  text?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserStateParams".
+ */
+export interface BrowserStateParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserStateResult".
+ */
+export interface BrowserStateResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserOpenParams".
+ */
+export interface BrowserOpenParams {
+  /**
+   * http or https only; a bare host is completed to https. Other schemes are refused.
+   */
+  url?: string;
+  /**
+   * back | forward | reload | stop, instead of a url.
+   */
+  action?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserOpenResult".
+ */
+export interface BrowserOpenResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserTabsParams".
+ */
+export interface BrowserTabsParams {
+  /**
+   * list (default) | new | activate | close.
+   */
+  action?: string;
+  index?: number;
+  /**
+   * Navigate a freshly opened tab in the same call.
+   */
+  url?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserTabsResult".
+ */
+export interface BrowserTabsResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+  tabs?: BrowserTab[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserFrameParams".
+ */
+export interface BrowserFrameParams {
+  /**
+   * JPEG quality; 55 by default.
+   */
+  quality?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserFrameResult".
+ */
+export interface BrowserFrameResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+  /**
+   * Base64 JPEG of the page, absent when nothing is started.
+   */
+  jpeg?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserReadParams".
+ */
+export interface BrowserReadParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserReadResult".
+ */
+export interface BrowserReadResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+  /**
+   * Page text, capped.
+   */
+  text?: string;
+  refs?: BrowserRef[];
+  console?: BrowserConsoleLine[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserInputParams".
+ */
+export interface BrowserInputParams {
+  /**
+   * click | text | key | scroll, or the raw stream kinds move/down/up/wheel/keydown/keyup.
+   */
+  kind: string;
+  ref?: string;
+  x?: number;
+  y?: number;
+  dx?: number;
+  dy?: number;
+  button?: string;
+  count?: number;
+  key?: string;
+  text?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserInputResult".
+ */
+export interface BrowserInputResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserModeParams".
+ */
+export interface BrowserModeParams {
+  /**
+   * True pops the page into a real window; false folds it back.
+   */
+  headful: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserModeResult".
+ */
+export interface BrowserModeResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserCloseParams".
+ */
+export interface BrowserCloseParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserCloseResult".
+ */
+export interface BrowserCloseResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserWatchParams".
+ */
+export interface BrowserWatchParams {
+  on: boolean;
+  width?: number;
+  height?: number;
+  quality?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "BrowserWatchResult".
+ */
+export interface BrowserWatchResult {
+  ok: boolean;
+  url?: string;
+  title?: string;
+  started?: boolean;
+  headful?: boolean;
+  /**
+   * False when playwright or its Chromium is missing.
+   */
+  available?: boolean;
+  /**
+   * Why a browser cannot be started, when it cannot.
+   */
+  reason?: string;
+  loading?: boolean;
+  can_back?: boolean;
+  can_forward?: boolean;
+  tab_count?: number;
+  /**
+   * A refused navigation or a failed action; the call still answers rather than raising.
+   */
+  error?: string;
+  watching?: boolean;
+  vw?: number;
+  vh?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeStatusParams".
+ */
+export interface KnowledgeStatusParams {}
+/**
+ * Whether a base can be created, and with which model.
+ *
+ * ``model`` is empty exactly when ``configured`` is false. No credential is
+ * reported: the key's presence *is* the flag.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeStatusResult".
+ */
+export interface KnowledgeStatusResult {
+  configured: boolean;
+  model: string;
+  /**
+   * Who serves the configured model. The two together are what a picker selects with: a model id names no credential, so half the pin cannot be preselected.
+   */
+  provider?: string;
+  extensions?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesListParams".
+ */
+export interface KnowledgeBasesListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesListResult".
+ */
+export interface KnowledgeBasesListResult {
+  bases: KnowledgeBase[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesCreateParams".
+ */
+export interface KnowledgeBasesCreateParams {
+  name: string;
+  description?: string;
+  embedding?: boolean;
+  /**
+   * The model to build the base on. Omitted, the configured pin is used.
+   */
+  embedding_model?: string;
+  /**
+   * Who serves that model. A model id names no credential, so the pair travels together.
+   */
+  embedding_provider?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesCreateResult".
+ */
+export interface KnowledgeBasesCreateResult {
+  base: KnowledgeBase;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesRenameParams".
+ */
+export interface KnowledgeBasesRenameParams {
+  base_id: string;
+  name?: string;
+  description?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesRenameResult".
+ */
+export interface KnowledgeBasesRenameResult {
+  base: KnowledgeBase;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesSettingsParams".
+ */
+export interface KnowledgeBasesSettingsParams {
+  base_id: string;
+  top_k?: number;
+  smart_chunking?: boolean;
+  separator?: string;
+  chunk_size?: number;
+  chunk_overlap?: number;
+  file_processing?: string;
+  table_context_size?: number;
+  image_context_size?: number;
+  embedding_provider?: string;
+  /**
+   * The model this base holds vectors from. Not a setting: sending it rebuilds the base -- the collection is made again at the new width and every document goes back to the queue. Empty turns embedding off.
+   */
+  embedding_model?: string;
+  pinned?: boolean;
+  starred?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesSettingsResult".
+ */
+export interface KnowledgeBasesSettingsResult {
+  base: KnowledgeBase;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesDeleteParams".
+ */
+export interface KnowledgeBasesDeleteParams {
+  base_id: string;
+}
+/**
+ * False for a base that was not there: a second delete from a stale page
+ * reached the outcome its caller wanted.
+ *
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeBasesDeleteResult".
+ */
+export interface KnowledgeBasesDeleteResult {
+  removed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsListParams".
+ */
+export interface KnowledgeDocumentsListParams {
+  base_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsListResult".
+ */
+export interface KnowledgeDocumentsListResult {
+  documents: KnowledgeDocument[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddParams".
+ */
+export interface KnowledgeDocumentsAddParams {
+  base_id: string;
+  path: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddResult".
+ */
+export interface KnowledgeDocumentsAddResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddNoteParams".
+ */
+export interface KnowledgeDocumentsAddNoteParams {
+  base_id: string;
+  title?: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddNoteResult".
+ */
+export interface KnowledgeDocumentsAddNoteResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsUpdateNoteParams".
+ */
+export interface KnowledgeDocumentsUpdateNoteParams {
+  document_id: string;
+  title?: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsUpdateNoteResult".
+ */
+export interface KnowledgeDocumentsUpdateNoteResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddUrlParams".
+ */
+export interface KnowledgeDocumentsAddUrlParams {
+  base_id: string;
+  url: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsAddUrlResult".
+ */
+export interface KnowledgeDocumentsAddUrlResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsIndexParams".
+ */
+export interface KnowledgeDocumentsIndexParams {
+  document_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsIndexResult".
+ */
+export interface KnowledgeDocumentsIndexResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsDeleteParams".
+ */
+export interface KnowledgeDocumentsDeleteParams {
+  document_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsDeleteResult".
+ */
+export interface KnowledgeDocumentsDeleteResult {
+  /**
+   * False when there was no such document, which is not an error: two clicks on one row answer the same way.
+   */
+  removed: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeSearchParams".
+ */
+export interface KnowledgeSearchParams {
+  base_ids: string[];
+  query: string;
+  top_k?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeSearchResult".
+ */
+export interface KnowledgeSearchResult {
+  hits: KnowledgeHit[];
+  /**
+   * The bases that answered by keyword rather than by meaning, each with the reason its vectors could not be reached. Empty on an ordinary search.
+   */
+  by_keyword?: KnowledgeFallback[];
+  search_ms?: number;
+  embed_ms?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsChunksParams".
+ */
+export interface KnowledgeDocumentsChunksParams {
+  document_id: string;
+  /**
+   * 1-based page of the reading order. Defaults to the first.
+   */
+  page?: number;
+  page_size?: number;
+  /**
+   * Filter by state; omit for both.
+   */
+  available?: boolean | null;
+  /**
+   * When set, the pieces are the ones that answer this query, best first, rather than a page of the reading order -- the same retrieval a search of the base does, narrowed to this document, by keyword where the model cannot be reached.
+   */
+  query?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsChunksResult".
+ */
+export interface KnowledgeDocumentsChunksResult {
+  chunks: KnowledgeChunk[];
+  /**
+   * How many pieces the filter admits, which is what a pager counts.
+   */
+  total: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsPagesParams".
+ */
+export interface KnowledgeDocumentsPagesParams {
+  document_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsPagesResult".
+ */
+export interface KnowledgeDocumentsPagesResult {
+  pages: KnowledgePage[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksSwitchParams".
+ */
+export interface KnowledgeChunksSwitchParams {
+  document_id: string;
+  chunk_ids: string[];
+  enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksSwitchResult".
+ */
+export interface KnowledgeChunksSwitchResult {
+  /**
+   * How many pieces the store actually changed.
+   */
+  changed: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksDeleteParams".
+ */
+export interface KnowledgeChunksDeleteParams {
+  document_id: string;
+  chunk_ids: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksDeleteResult".
+ */
+export interface KnowledgeChunksDeleteResult {
+  remaining: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksCreateParams".
+ */
+export interface KnowledgeChunksCreateParams {
+  document_id: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksCreateResult".
+ */
+export interface KnowledgeChunksCreateResult {
+  chunk: KnowledgeChunk;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksUpdateParams".
+ */
+export interface KnowledgeChunksUpdateParams {
+  document_id: string;
+  chunk_id: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeChunksUpdateResult".
+ */
+export interface KnowledgeChunksUpdateResult {
+  chunk: KnowledgeChunk;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersListParams".
+ */
+export interface KnowledgeFoldersListParams {
+  base_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersListResult".
+ */
+export interface KnowledgeFoldersListResult {
+  folders?: KnowledgeFolder[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersCreateParams".
+ */
+export interface KnowledgeFoldersCreateParams {
+  base_id: string;
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersCreateResult".
+ */
+export interface KnowledgeFoldersCreateResult {
+  folder: KnowledgeFolder;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersRenameParams".
+ */
+export interface KnowledgeFoldersRenameParams {
+  folder_id: string;
+  name: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersRenameResult".
+ */
+export interface KnowledgeFoldersRenameResult {
+  folder: KnowledgeFolder;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersDeleteParams".
+ */
+export interface KnowledgeFoldersDeleteParams {
+  folder_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeFoldersDeleteResult".
+ */
+export interface KnowledgeFoldersDeleteResult {
+  /**
+   * How many documents returned to Root.
+   */
+  moved: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsMoveParams".
+ */
+export interface KnowledgeDocumentsMoveParams {
+  document_id: string;
+  folder_id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "KnowledgeDocumentsMoveResult".
+ */
+export interface KnowledgeDocumentsMoveResult {
+  document: KnowledgeDocument;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ClipboardPasteParams".
+ */
+export interface ClipboardPasteParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ClipboardPasteResult".
+ */
+export interface ClipboardPasteResult {
+  attached: boolean;
+  message?: string;
+  width?: number;
+  height?: number;
+  token_estimate?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CommandDispatchParams".
+ */
+export interface CommandDispatchParams {
+  name: string;
+  arg?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "CommandDispatchResult".
+ */
+export interface CommandDispatchResult {
+  /**
+   * `exec` (a shell-style command ran) or `skill` (the name resolved to a skill).
+   */
+  type: string;
+  output?: string;
+  name?: string;
+  message?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DelegationStatusParams".
+ */
+export interface DelegationStatusParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DelegationStatusResult".
+ */
+export interface DelegationStatusResult {
+  max_concurrent_children: number;
+  max_spawn_depth: number;
+  paused: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DelegationPauseParams".
+ */
+export interface DelegationPauseParams {
+  paused: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "DelegationPauseResult".
+ */
+export interface DelegationPauseResult {
+  paused: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InputDetectDropParams".
+ */
+export interface InputDetectDropParams {
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "InputDetectDropResult".
+ */
+export interface InputDetectDropResult {
+  matched: boolean;
+  name?: string;
+  /**
+   * The resolved absolute path when matched.
+   */
+  text?: string;
+  is_image?: boolean;
+  width?: number;
+  height?: number;
+  token_estimate?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionInterruptParams".
+ */
+export interface SessionInterruptParams {
+  session_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SessionInterruptResult".
+ */
+export interface SessionInterruptResult {
+  ok: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ShellExecParams".
+ */
+export interface ShellExecParams {
+  command: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ShellExecResult".
+ */
+export interface ShellExecResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillsManageParams".
+ */
+export interface SkillsManageParams {
+  /**
+   * One of list, inspect, search, browse, install, open.
+   */
+  action: string;
+  query?: string;
+  page?: number;
+  /**
+   * `open`: a file name relative to the skill's directory.
+   */
+  file?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SkillsManageResult".
+ */
+export interface SkillsManageResult {
+  /**
+   * `list`: names grouped by source.
+   */
+  skills?: {
+    [k: string]: string[];
+  };
+  /**
+   * `inspect`: one skill's metadata (name, description, category, path, body, files, always, hub, hub_id, install), {} when unknown.
+   */
+  info?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * `search`: matches.
+   */
+  results?: {
+    [k: string]: JsonValue;
+  }[];
+  /**
+   * `browse`: one page of the hub.
+   */
+  items?: {
+    [k: string]: JsonValue;
+  }[];
+  page?: number;
+  total?: number;
+  total_pages?: number;
+  /**
+   * `install`.
+   */
+  installed?: boolean;
+  name?: string;
+  /**
+   * `open`.
+   */
+  opened?: boolean | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentInterruptParams".
+ */
+export interface SubagentInterruptParams {
+  subagent_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentInterruptResult".
+ */
+export interface SubagentInterruptResult {
+  found: boolean;
+  subagent_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentCancelSessionParams".
+ */
+export interface SubagentCancelSessionParams {
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentCancelSessionResult".
+ */
+export interface SubagentCancelSessionResult {
+  cancelled: number;
+  session_key: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentCancelInstanceParams".
+ */
+export interface SubagentCancelInstanceParams {
+  session_key?: string;
+  agent: string;
+  handle: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "SubagentCancelInstanceResult".
+ */
+export interface SubagentCancelInstanceResult {
+  found: boolean;
+  session_key: string;
+  agent: string;
+  handle: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TasksListParams".
+ */
+export interface TasksListParams {
+  /**
+   * Whose tasks to list. An empty or unknown key answers with an empty list, not an error.
+   */
+  session_key: string;
+  kind?: TaskKind;
+  id?: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TasksListResult".
+ */
+export interface TasksListResult {
+  tasks: TaskRow[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportScanParams".
+ */
+export interface ImportScanParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportScanResult".
+ */
+export interface ImportScanResult {
+  ready: boolean;
+  reason: string;
+  platforms: {
+    platform: string;
+    scannable: boolean;
+    memory_files: number;
+    conversations: number;
+    estimated_size: number;
+    skills: number;
+  }[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportRunParams".
+ */
+export interface ImportRunParams {
+  platforms: string[];
+  tier: 'memory_files' | 'full';
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportRunResult".
+ */
+export interface ImportRunResult {
+  started: boolean;
+  total: number;
+  detail: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportStatusParams".
+ */
+export interface ImportStatusParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportStatusResult".
+ */
+export interface ImportStatusResult {
+  running: boolean;
+  total: number;
+  submitted: number;
+  failed: number;
+  by_platform: {
+    [k: string]: {
+      total: number;
+      submitted: number;
+      failed: number;
+    };
+  };
+  current?: {
+    platform: string;
+    source_key: string;
+    sent: number;
+    total: number;
+  } | null;
+  phase?: {
+    kind: 'profile' | 'skills';
+    current: number;
+    total: number;
+  } | null;
+  phases?: {
+    status: 'pending' | 'done' | 'failed' | 'cancelled';
+    errors: string[];
+  } | null;
+  tier?: 'memory_files' | 'full' | null;
+  platforms?: string[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportStopParams".
+ */
+export interface ImportStopParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "ImportStopResult".
+ */
+export interface ImportStopResult {
+  stopped: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsListParams".
+ */
+export interface PlaybooksStintsListParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsListResult".
+ */
+export interface PlaybooksStintsListResult {
+  stints: StintRow[];
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsGetParams".
+ */
+export interface PlaybooksStintsGetParams {
+  stint_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsStopParams".
+ */
+export interface PlaybooksStintsStopParams {
+  stint_id: string;
+  /**
+   * Cut the round in flight short instead of letting it finish. Reaches only a round this process is running.
+   */
+  now?: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsAnswerParams".
+ */
+export interface PlaybooksStintsAnswerParams {
+  stint_id: string;
+  question: number;
+  text: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsPauseParams".
+ */
+export interface PlaybooksStintsPauseParams {
+  stint_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsResumeParams".
+ */
+export interface PlaybooksStintsResumeParams {
+  stint_id: string;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "PlaybooksStintsExtendParams".
+ */
+export interface PlaybooksStintsExtendParams {
+  stint_id: string;
+  rounds: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryStateParams".
+ */
+export interface TrajectoryStateParams {}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryStateResult".
+ */
+export interface TrajectoryStateResult {
+  enabled: boolean;
+  policy_revision: number;
+  recording_enabled: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryListParams".
+ */
+export interface TrajectoryListParams {
+  session_key: string;
+  cursor?: string | null;
+  limit?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryListResult".
+ */
+export interface TrajectoryListResult {
+  epoch: string;
+  snapshot_revision: number;
+  entries: TrajectoryEntry[];
+  next_cursor?: string | null;
+  index_state: TrajectoryIndexState;
+  complete: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryChangesParams".
+ */
+export interface TrajectoryChangesParams {
+  session_key: string;
+  epoch: string;
+  after_revision: number;
+  limit?: number;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryChangesResult".
+ */
+export interface TrajectoryChangesResult {
+  epoch: string;
+  from_revision: number;
+  to_revision: number;
+  upserts: TrajectoryEntry[];
+  removed: TrajectoryRemoved[];
+  has_more: boolean;
+  reset_required: boolean;
+  index_state: TrajectoryIndexState;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryDetailParams".
+ */
+export interface TrajectoryDetailParams {
+  session_key: string;
+  entry_id: string;
+  entry_revision?: number | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryDetailResult".
+ */
+export interface TrajectoryDetailResult {
+  session_key: string;
+  epoch: string;
+  entry_id: string;
+  entry_revision: number;
+  kind: string;
+  span_name: string;
+  slot: string;
+  /**
+   * The owning operation's recorded status.
+   */
+  operation_status: 'running' | 'ok' | 'error' | 'cancelled' | 'unknown';
+  status_evidence: string[];
+  failure_entry: boolean;
+  integrity: string[];
+  notes: string[];
+  blocks: TrajectoryBlockDescriptor[];
+  revision_changed: boolean;
+  truncated: boolean;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryBlockParams".
+ */
+export interface TrajectoryBlockParams {
+  session_key: string;
+  entry_id: string;
+  entry_revision: number;
+  epoch: string;
+  block_id: string;
+  cursor?: string | null;
+}
+/**
+ * This interface was referenced by `RavenRpcRoot`'s JSON-Schema
+ * via the `definition` "TrajectoryBlockResult".
+ */
+export interface TrajectoryBlockResult {
+  entry_id: string;
+  entry_revision: number;
+  epoch: string;
+  block_id: string;
+  /**
+   * How the body renders.
+   */
+  renderer: 'text' | 'json' | 'messages' | 'key_values' | 'items' | 'references';
+  /**
+   * Whether the data could be served.
+   */
+  availability: 'available' | 'empty' | 'not_recorded' | 'missing' | 'truncated' | 'unreadable' | 'unsupported';
+  reason?: string | null;
+  data?: JsonValue;
+  next_cursor?: string | null;
+  total_items?: number | null;
+  integrity: string[];
+  truncated: boolean;
+}
+
+// ---- Schema-name aliases for structurally-deduplicated types ----
+export type BrowserManageResult = StubResult;
+export type CliDispatchResult = CliResult;
+export type CommandsCatalogResult = CommandsCatalogResponse;
+export type ImageAttachResult = StubResult;
+export type PlaybooksCredentialsClearResult = OkResult;
+export type PlaybooksCredentialsSetResult = OkResult;
+export type PlaybooksOauthClearResult = OkResult;
+export type PlaybooksStintsAnswerResult = StintDetail;
+export type PlaybooksStintsExtendResult = StintTakeUp;
+export type PlaybooksStintsGetResult = StintDetail;
+export type PlaybooksStintsPauseResult = StintDetail;
+export type PlaybooksStintsResumeResult = StintTakeUp;
+export type PlaybooksStintsStopResult = StintDetail;
+export type ProcessStopResult = StubResult;
+export type PromptBackgroundResult = StubResult;
+export type PromptSubmitResult = StubResult;
+export type ReloadEnvResult = StubResult;
+export type RollbackDiffResult = StubResult;
+export type RollbackListResult = StubResult;
+export type RollbackRestoreResult = StubResult;
+export type SecretRespondResult = StubResult;
+export type SessionSaveResult = StubResult;
+export type SessionSteerResult = StubResult;
+export type SkillsReloadResult = StubResult;
+export type SpawnTreeListResult = StubResult;
+export type SpawnTreeLoadResult = StubResult;
+export type SpawnTreeSaveResult = StubResult;
+export type SudoRespondResult = StubResult;
+export type ToolsConfigureResult = StubResult;
+export type VoiceRecordResult = StubResult;
+export type VoiceToggleResult = StubResult;
+
+// ---------------------------------------------------------------------------
+// JSON-RPC 2.0 envelope (specs/tui-ipc.md §2.1/2.2/2.3/2.4)
+// ---------------------------------------------------------------------------
+
+export interface JsonRpcRequest<P = unknown> {
+  jsonrpc: '2.0';
+  id: string | number;
+  method: string;
+  params: P;
+}
+
+export interface JsonRpcSuccess<R = unknown> {
+  jsonrpc: '2.0';
+  id: string | number;
+  result: R;
+}
+
+export interface JsonRpcErrorObject {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+export interface JsonRpcErrorResponse {
+  jsonrpc: '2.0';
+  id: string | number;
+  error: JsonRpcErrorObject;
+}
+
+export type JsonRpcResponse<R = unknown> = JsonRpcSuccess<R> | JsonRpcErrorResponse;
+
+export interface JsonRpcNotification<P = unknown> {
+  jsonrpc: '2.0';
+  method: string;
+  params: P;
+}
+
+export interface EventNotificationParams<E = unknown> {
+  subscription_id: string;
+  event: E;
+}
+
+export function isJsonRpcError<R>(
+  resp: JsonRpcResponse<R>,
+): resp is JsonRpcErrorResponse {
+  return (resp as JsonRpcErrorResponse).error !== undefined;
+}

@@ -1,0 +1,814 @@
+"""Tests for the event-driven heartbeat wake stack.
+
+Covers the three new pieces and their composition:
+  - ``SystemEventQueue`` — peek/ack two-phase consumption, seq watermark,
+    context-key dedup, bounded drop.
+  - ``WakeScheduler`` — coalescing, busy deferral, turn-complete re-fire.
+  - ``HeartbeatService`` loop — wake-triggered ticks, spurious-wake
+    short-circuit (no LLM call), failure-keeps-events, legacy
+    interval-only equivalence.
+  - ``make_on_cron_job`` producer wiring.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from raven.proactive_engine.schedulers.heartbeat.service import HeartbeatService
+from raven.proactive_engine.system_events import SystemEvent, SystemEventQueue
+from raven.proactive_engine.wake import WakeScheduler
+from raven.spine import TurnOutcome, Usage
+
+# ---------------------------------------------------------------------------
+# SystemEventQueue
+# ---------------------------------------------------------------------------
+
+
+def test_queue_peek_does_not_consume():
+    q = SystemEventQueue()
+    q.enqueue(SystemEvent(text="a", source="test"))
+    assert len(q.peek_all()) == 1
+    assert len(q.peek_all()) == 1  # still there
+
+
+def test_queue_ack_removes_only_seen_events():
+    q = SystemEventQueue()
+    q.enqueue(SystemEvent(text="a", source="test"))
+    snapshot = q.peek_all()
+    q.enqueue(SystemEvent(text="b", source="test"))  # arrives mid-tick
+    q.ack(snapshot)
+    remaining = q.peek_all()
+    assert [e.text for e in remaining] == ["b"]
+
+
+def test_queue_context_key_replacement_survives_inflight_ack():
+    """A replacement under the same context_key gets a fresh seq, so an
+    in-flight tick's ack cannot delete the newer payload."""
+    q = SystemEventQueue()
+    q.enqueue(SystemEvent(text="old", source="cron", context_key="cron:j1"))
+    snapshot = q.peek_all()
+    q.enqueue(SystemEvent(text="new", source="cron", context_key="cron:j1"))
+    q.ack(snapshot)
+    remaining = q.peek_all()
+    assert [e.text for e in remaining] == ["new"]
+
+
+def test_queue_context_key_dedup_keeps_single_entry():
+    q = SystemEventQueue()
+    q.enqueue(SystemEvent(text="v1", source="cron", context_key="cron:j1"))
+    q.enqueue(SystemEvent(text="v2", source="cron", context_key="cron:j1"))
+    events = q.peek_all()
+    assert len(events) == 1
+    assert events[0].text == "v2"
+
+
+def test_queue_discard_removes_by_context_key():
+    q = SystemEventQueue()
+    q.enqueue(SystemEvent(text="boom", source="cron", context_key="cron:j1:fail"))
+    q.enqueue(SystemEvent(text="other", source="cron", context_key="cron:j2"))
+    assert q.discard("cron:j1:fail") is True
+    assert q.discard("cron:j1:fail") is False  # already gone
+    assert [e.context_key for e in q.peek_all()] == ["cron:j2"]
+
+
+def test_queue_bounded_drops_oldest():
+    q = SystemEventQueue(max_events=2)
+    q.enqueue(SystemEvent(text="a", source="test"))
+    q.enqueue(SystemEvent(text="b", source="test"))
+    q.enqueue(SystemEvent(text="c", source="test"))
+    assert [e.text for e in q.peek_all()] == ["b", "c"]
+
+
+# ---------------------------------------------------------------------------
+# WakeScheduler
+# ---------------------------------------------------------------------------
+
+
+async def test_wake_coalesces_multiple_requests():
+    wake = WakeScheduler(coalesce_s=0.02)
+    wake.request_wake_now("r1")
+    wake.request_wake_now("r2")
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+    assert wake.consume_reasons() == ["r1", "r2"]
+
+
+async def test_wake_deferred_while_busy_refires_on_turn_complete():
+    busy = True
+    wake = WakeScheduler(is_busy=lambda: busy, coalesce_s=0.02)
+    wake.request_wake_now("r1")
+    await asyncio.sleep(0.05)
+    assert not wake.wake_event.is_set()  # parked
+
+    busy = False
+    wake.on_turn_complete()
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+
+
+async def test_wake_turn_complete_noop_without_pending():
+    wake = WakeScheduler(coalesce_s=0.02)
+    wake.on_turn_complete()
+    await asyncio.sleep(0.05)
+    assert not wake.wake_event.is_set()
+
+
+async def test_wake_min_interval_first_fire_immediate():
+    """The guard spaces consecutive fires; it must not delay the first one."""
+    wake = WakeScheduler(coalesce_s=0.01, min_interval_s=10.0)
+    wake.request_wake_now("r1")
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+
+
+async def test_wake_min_interval_defers_and_accumulates():
+    wake = WakeScheduler(coalesce_s=0.01, min_interval_s=0.2)
+    wake.request_wake_now("r1")
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+    wake.wake_event.clear()
+    assert wake.consume_reasons() == ["r1"]
+
+    # Second and third requests inside the guard window: no fire yet,
+    # reasons accumulate.
+    wake.request_wake_now("r2")
+    wake.request_wake_now("r3")
+    await asyncio.sleep(0.05)
+    assert not wake.wake_event.is_set()
+
+    # One fire at the window boundary, carrying both reasons.
+    await asyncio.sleep(0.25)
+    assert wake.wake_event.is_set()
+    assert wake.consume_reasons() == ["r2", "r3"]
+
+
+async def test_wake_min_interval_zero_disables_guard():
+    wake = WakeScheduler(coalesce_s=0.01, min_interval_s=0.0)
+    wake.request_wake_now("r1")
+    await asyncio.sleep(0.05)
+    wake.wake_event.clear()
+    wake.consume_reasons()
+    wake.request_wake_now("r2")
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# HeartbeatService — event wake loop
+# ---------------------------------------------------------------------------
+
+
+class FakeProvider:
+    """LLM provider stub: phase-1 always answers with a fixed decision."""
+
+    def __init__(self, action: str = "skip", tasks: str = ""):
+        self.action = action
+        self.tasks = tasks
+        self.calls: list[list[dict]] = []
+
+    async def chat_with_retry(self, messages, tools, model):
+        self.calls.append(messages)
+        return SimpleNamespace(
+            has_tool_calls=True,
+            tool_calls=[SimpleNamespace(arguments={"action": self.action, "tasks": self.tasks})],
+        )
+
+
+def _make_service(
+    workspace: Path,
+    provider: FakeProvider,
+    *,
+    wake: WakeScheduler | None = None,
+    queue: SystemEventQueue | None = None,
+    on_execute=None,
+    interval_s: int = 60,
+) -> HeartbeatService:
+    return HeartbeatService(
+        agent_home=workspace,
+        provider=provider,  # type: ignore[arg-type]
+        model="test-model",
+        on_execute=on_execute,
+        interval_s=interval_s,
+        enabled=True,
+        wake=wake,
+        system_events=queue,
+    )
+
+
+async def _run_briefly(service: HeartbeatService, seconds: float) -> None:
+    await service.start()
+    try:
+        await asyncio.sleep(seconds)
+    finally:
+        service.stop()
+        await asyncio.sleep(0)  # let cancellation propagate
+
+
+async def test_wake_tick_sees_events_and_acks(tmp_path: Path):
+    provider = FakeProvider(action="skip")
+    wake = WakeScheduler(coalesce_s=0.01)
+    queue = SystemEventQueue()
+    service = _make_service(tmp_path, provider, wake=wake, queue=queue)
+
+    await service.start()
+    try:
+        queue.enqueue(SystemEvent(text="cron job done", source="cron"))
+        wake.request_wake_now("cron:j1")
+        await asyncio.sleep(0.1)
+    finally:
+        service.stop()
+
+    assert len(provider.calls) == 1
+    prompt = provider.calls[0][1]["content"]
+    assert "cron job done" in prompt
+    # skip is a successful decision — events are consumed.
+    assert len(queue) == 0
+
+
+async def test_spurious_wake_costs_no_llm_call(tmp_path: Path):
+    provider = FakeProvider()
+    wake = WakeScheduler(coalesce_s=0.01)
+    queue = SystemEventQueue()
+    service = _make_service(tmp_path, provider, wake=wake, queue=queue)
+
+    await service.start()
+    try:
+        wake.request_wake_now("phantom")  # no event enqueued
+        await asyncio.sleep(0.1)
+    finally:
+        service.stop()
+
+    assert provider.calls == []
+
+
+async def test_failed_tick_keeps_events_queued(tmp_path: Path):
+    provider = FakeProvider(action="run", tasks="do the thing")
+    wake = WakeScheduler(coalesce_s=0.01)
+    queue = SystemEventQueue()
+    on_execute = AsyncMock(side_effect=RuntimeError("boom"))
+    service = _make_service(tmp_path, provider, wake=wake, queue=queue, on_execute=on_execute)
+
+    await service.start()
+    try:
+        queue.enqueue(SystemEvent(text="needs follow-up", source="cron"))
+        wake.request_wake_now("cron:j1")
+        await asyncio.sleep(0.1)
+    finally:
+        service.stop()
+
+    on_execute.assert_awaited()
+    # Failure must NOT ack — the event survives for the next attempt.
+    assert len(queue) == 1
+
+
+async def test_run_decision_executes_and_acks(tmp_path: Path):
+    provider = FakeProvider(action="run", tasks="follow up on cron")
+    wake = WakeScheduler(coalesce_s=0.01)
+    queue = SystemEventQueue()
+    on_execute = AsyncMock(return_value="done")
+    service = _make_service(tmp_path, provider, wake=wake, queue=queue, on_execute=on_execute)
+
+    await service.start()
+    try:
+        queue.enqueue(SystemEvent(text="report ready", source="cron"))
+        wake.request_wake_now("cron:j1")
+        await asyncio.sleep(0.1)
+    finally:
+        service.stop()
+
+    on_execute.assert_awaited_once_with("follow up on cron")
+    assert len(queue) == 0
+
+
+async def test_legacy_interval_mode_unchanged(tmp_path: Path):
+    """Without wake/queue collaborators the service ticks on the interval."""
+    (tmp_path / "HEARTBEAT.md").write_text("- check things", encoding="utf-8")
+    provider = FakeProvider(action="skip")
+    service = _make_service(tmp_path, provider, interval_s=0)
+
+    await _run_briefly(service, 0.1)
+
+    assert len(provider.calls) >= 1
+
+
+async def test_interval_tick_skips_when_no_file_and_no_events(tmp_path: Path):
+    provider = FakeProvider()
+    service = _make_service(tmp_path, provider, interval_s=0)
+
+    await _run_briefly(service, 0.1)
+
+    assert provider.calls == []
+
+
+def _shipped_template() -> str:
+    from importlib.resources import files
+
+    return (files("raven") / "templates" / "HEARTBEAT.md").read_text(encoding="utf-8")
+
+
+async def test_an_untouched_template_costs_no_llm_call(tmp_path: Path):
+    """The template says a file of only headers and comments skips the
+    heartbeat; the tick used to skip only an empty file, so every workspace
+    that never edited it paid one decision call per interval."""
+    (tmp_path / "HEARTBEAT.md").write_text(_shipped_template(), encoding="utf-8")
+    provider = FakeProvider()
+    service = _make_service(tmp_path, provider, interval_s=0)
+
+    await _run_briefly(service, 0.1)
+
+    assert provider.calls == []
+
+
+async def test_a_task_added_to_the_template_is_still_decided(tmp_path: Path):
+    """The control for the skip: the same template with one task under Active
+    Tasks reaches the model, and so does a task written as a heading of the
+    user's own -- the skip reads only the template's own lines as scaffolding."""
+    template = _shipped_template()
+    marker = "<!-- Add your periodic tasks below this line -->"
+    for body in (
+        template.replace(marker, marker + "\n- check the deploy every morning"),
+        template + "\n### Water the plants\n",
+    ):
+        (tmp_path / "HEARTBEAT.md").write_text(body, encoding="utf-8")
+        provider = FakeProvider(action="skip")
+        service = _make_service(tmp_path, provider, interval_s=0)
+
+        await _run_briefly(service, 0.1)
+
+        assert len(provider.calls) >= 1, body[-60:]
+
+
+async def test_an_event_is_decided_even_when_the_file_holds_no_tasks(tmp_path: Path):
+    (tmp_path / "HEARTBEAT.md").write_text(_shipped_template(), encoding="utf-8")
+    provider = FakeProvider(action="skip")
+    queue = SystemEventQueue()
+    service = _make_service(tmp_path, provider, queue=queue)
+    queue.enqueue(SystemEvent(text="cron job done", source="cron"))
+
+    await service.trigger_now()
+
+    assert len(provider.calls) == 1
+    assert len(queue) == 0
+
+
+async def test_trigger_now_on_an_untouched_template_asks_nothing(tmp_path: Path):
+    (tmp_path / "HEARTBEAT.md").write_text(_shipped_template(), encoding="utf-8")
+    provider = FakeProvider(action="run", tasks="x")
+    executed = AsyncMock(return_value="done")
+    service = _make_service(tmp_path, provider, on_execute=executed)
+
+    assert await service.trigger_now() is None
+    assert provider.calls == []
+    executed.assert_not_awaited()
+
+
+async def test_the_heartbeat_decision_is_billed_to_the_heartbeat_session(tmp_path: Path):
+    """The decision call runs outside any turn. It used to reach no usage row at
+    all; through the provider seam it is billed, under the heartbeat's own
+    session rather than whichever conversation happened to run last."""
+    from raven.contracts.llm_provider import ToolCallRequest
+    from raven.providers import usage_record
+    from raven.providers.base import LLMProvider, LLMResponse
+    from raven.token_wise.registry import StrategyRegistry
+    from raven.token_wise.usage_tracker import UsageTracker
+
+    class _Provider(LLMProvider):
+        async def chat(self, messages, tools=None, model=None, **_kwargs):
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="h1", name="heartbeat", arguments={"action": "skip"})],
+                usage={"prompt_tokens": 210, "completion_tokens": 12},
+            )
+
+        def get_default_model(self) -> str:
+            return "hb/model"
+
+    tracker = UsageTracker(persist=False)
+    usage_record.install(StrategyRegistry([tracker]).after_llm_call)
+    (tmp_path / "HEARTBEAT.md").write_text("- check the deploy", encoding="utf-8")
+    service = HeartbeatService(agent_home=tmp_path, provider=_Provider(api_key="k"), model="hb/model")
+
+    await service._tick()
+
+    row = tracker.snapshot("heartbeat")
+    assert (row.calls, row.input_tokens, row.output_tokens) == (1, 210, 12)
+    assert tracker.total.calls == 1
+
+
+async def test_trigger_now_consumes_events(tmp_path: Path):
+    provider = FakeProvider(action="skip")
+    queue = SystemEventQueue()
+    service = _make_service(tmp_path, provider, queue=queue)
+    queue.enqueue(SystemEvent(text="manual check", source="manual"))
+
+    result = await service.trigger_now()
+
+    assert result is None  # skip decision
+    assert len(provider.calls) == 1
+    assert len(queue) == 0
+
+
+# ---------------------------------------------------------------------------
+# Producer wiring — make_on_cron_job
+# ---------------------------------------------------------------------------
+
+
+def _make_job():
+    from raven.proactive_engine.schedulers.cron.types import (
+        CronJob,
+        CronJobState,
+        CronPayload,
+        CronSchedule,
+    )
+
+    return CronJob(
+        id="job_wake",
+        name="wake_test",
+        enabled=True,
+        schedule=CronSchedule(kind="at", at_ms=1000),
+        payload=CronPayload(
+            message="reminder body",
+            channel="cli",
+            to="direct",
+        ),
+        state=CronJobState(),
+    )
+
+
+def _spine_submit(outcomes: list, *, explicit_reply: bool = True):
+    """Spine submit mock + readback map. ``outcomes`` is consumed one per fire:
+    an Exception → result() raises (cron failure path); a str → stored in
+    readback under req.conversation (mimics the gateway capturing runner) so the
+    handler reads it back for the return value or silent completion event."""
+    readback: dict[str, str] = {}
+    it = iter(outcomes)
+
+    def _submit(req):
+        outcome = next(it)
+
+        class _Handle:
+            async def result(self_inner):
+                if isinstance(outcome, Exception):
+                    raise outcome
+                if outcome is not None:
+                    readback[req.conversation] = outcome
+                return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=explicit_reply)
+
+        return _Handle()
+
+    return _submit, readback
+
+
+@pytest.mark.parametrize("capture_reply", [True, False])
+async def test_cron_reply_is_delivered_once_when_heartbeat_checks(tmp_path: Path, capture_reply: bool):
+    from raven.core.cron_stack import make_on_cron_job
+    from raven.spine import ChatType, Origin, OriginPools, Scheduler, Source, Text, TurnRequest
+    from raven.spine.delivery import Capabilities, DeliveryHub, make_hub_sink
+
+    readback: dict[str, str] = {}
+    origins: list[Origin] = []
+
+    class Runner:
+        async def run(self, req, emit, drain):
+            origins.append(req.origin)
+            await emit(Text(content="scheduled reminder"))
+            if capture_reply and req.origin is Origin.CRON:
+                readback[req.conversation] = "scheduled reminder"
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+    outlet = SimpleNamespace(name="telegram", capabilities=Capabilities(), deliver=AsyncMock())
+    hub = DeliveryHub()
+    hub.register(outlet)
+    scheduler = Scheduler(Runner(), OriginPools(user=1, system=1), make_hub_sink(hub))
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+    provider = FakeProvider(action="run", tasks="Send the scheduled reminder to the user")
+
+    async def execute(tasks: str) -> str:
+        await scheduler.submit(
+            TurnRequest(
+                origin=Origin.HEARTBEAT,
+                source=Source(channel="telegram", chat_id="recipient", sender_id="heartbeat", chat_type=ChatType.DM),
+                text=tasks,
+                conversation="heartbeat",
+            )
+        ).result()
+        return ""
+
+    heartbeat = _make_service(tmp_path, provider, queue=queue, wake=wake, on_execute=execute)
+    on_job = make_on_cron_job(submit=scheduler.submit, readback_texts=readback, system_events=queue, wake=wake)
+    job = _make_job()
+    job.payload.channel = "telegram"
+    job.payload.to = "recipient"
+    try:
+        assert await on_job(job) == ("scheduled reminder" if capture_reply else None)
+        await heartbeat.trigger_now()
+        await hub.wait_idle("telegram")
+
+        assert outlet.deliver.await_count == 1
+        delivered = outlet.deliver.await_args.args[0]
+        assert delivered.content == "scheduled reminder"
+        assert delivered.source.chat_id == "recipient"
+        assert origins == [Origin.CRON]
+        assert provider.calls == []
+        assert queue.peek_all() == []
+        assert wake.consume_reasons() == []
+        assert readback == {}
+    finally:
+        wake.stop()
+        await scheduler.shutdown(grace=1)
+        await hub.aclose()
+
+
+@pytest.mark.parametrize("response", ["cron result text", None])
+async def test_silent_cron_completion_enqueues_event_and_wakes(response: str | None):
+    from raven.core.cron_stack import make_on_cron_job
+
+    submit, readback = _spine_submit([response], explicit_reply=False)
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+    await on_job(_make_job())
+
+    events = queue.peek_all()
+    assert len(events) == 1
+    assert events[0].source == "cron"
+    assert events[0].context_key == "cron:job_wake"
+    assert "wake_test" in events[0].text
+    assert (response or "(no response)") in events[0].text
+    assert readback == {}
+
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+    assert wake.consume_reasons() == ["cron:job_wake"]
+
+
+async def test_cron_failure_enqueues_failure_event_and_reraises():
+    from raven.core.cron_stack import make_on_cron_job
+
+    agent = MagicMock()
+    hub = MagicMock()
+    submit, readback = _spine_submit([RuntimeError("provider down")])
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+    with pytest.raises(RuntimeError, match="provider down"):
+        await on_job(_make_job())
+
+    events = queue.peek_all()
+    assert len(events) == 1
+    assert events[0].source == "cron"
+    assert events[0].context_key == "cron:job_wake:fail"
+    assert "failed" in events[0].text
+    assert "provider down" in events[0].text
+
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+    assert wake.consume_reasons() == ["cron:job_wake:fail"]
+
+
+@pytest.mark.parametrize("unrelated_event", [True, False])
+async def test_cron_recovery_drops_stale_failure_event(unrelated_event: bool):
+    """A successful retry discards the job's pending :fail event — a
+    recovered flake must not drive a user-facing follow-up or discard
+    another producer's pending event."""
+    from raven.core.cron_stack import make_on_cron_job
+
+    agent = MagicMock()
+    hub = MagicMock()
+    submit, readback = _spine_submit([RuntimeError("flaky"), "recovered fine"])
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+    if unrelated_event:
+        queue.enqueue(SystemEvent(text="manual task", source="manual", context_key="manual:task"))
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+    with pytest.raises(RuntimeError):
+        await on_job(_make_job())
+    assert "cron:job_wake:fail" in [e.context_key for e in queue.peek_all()]
+
+    await on_job(_make_job())
+
+    keys = [e.context_key for e in queue.peek_all()]
+    assert keys == (["manual:task"] if unrelated_event else [])
+    wake.stop()
+
+
+async def test_cron_failure_after_reply_keeps_the_failure_event():
+    from raven.core.cron_stack import make_on_cron_job
+
+    agent = MagicMock()
+    hub = MagicMock()
+    submit, readback = _spine_submit(["all good", RuntimeError("broke later")])
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+    await on_job(_make_job())
+    with pytest.raises(RuntimeError):
+        await on_job(_make_job())
+
+    keys = [e.context_key for e in queue.peek_all()]
+    assert keys == ["cron:job_wake:fail"]
+    wake.stop()
+
+
+async def test_cron_reply_clears_a_queued_silent_completion():
+    from raven.core.cron_stack import make_on_cron_job
+
+    submit, readback = _spine_submit(["reply sent"])
+    queue = SystemEventQueue()
+    queue.enqueue(SystemEvent(text="earlier silent result", source="cron", context_key="cron:job_wake"))
+    queue.enqueue(SystemEvent(text="manual task", source="manual", context_key="manual:task"))
+    wake = WakeScheduler(coalesce_s=0.01)
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+
+    assert await on_job(_make_job()) == "reply sent"
+
+    assert [event.context_key for event in queue.peek_all()] == ["manual:task"]
+    assert wake.consume_reasons() == []
+    wake.stop()
+
+
+async def test_cron_event_emit_is_best_effort():
+    """A broken queue must not fail a successful run, and on the failure
+    path it must not mask the original cron error."""
+    from raven.core.cron_stack import make_on_cron_job
+
+    agent = MagicMock()
+    hub = MagicMock()
+    submit, readback = _spine_submit(["fine", RuntimeError("the real error")])
+
+    queue = MagicMock()
+    queue.discard.side_effect = ValueError("queue broken")
+    queue.enqueue.side_effect = ValueError("queue broken")
+    wake = WakeScheduler(coalesce_s=0.01)
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback, system_events=queue, wake=wake)
+    assert await on_job(_make_job()) == "fine"
+    with pytest.raises(RuntimeError, match="the real error"):
+        await on_job(_make_job())
+
+
+async def test_cron_without_wake_wiring_unchanged():
+    from raven.core.cron_stack import make_on_cron_job
+
+    agent = MagicMock()
+    hub = MagicMock()
+    submit, readback = _spine_submit(["resolved body"])
+
+    on_job = make_on_cron_job(submit=submit, readback_texts=readback)
+    result = await on_job(_make_job())
+    assert result == "resolved body"
+
+
+# ---------------------------------------------------------------------------
+# Producer wiring — make_on_missed_foreign (missed-reminder sink)
+# ---------------------------------------------------------------------------
+
+
+def _make_missed_job(job_id: str = "job_missed", *, minutes_late: int = 6):
+    import time as _time
+
+    from raven.proactive_engine.schedulers.cron.types import (
+        CronJob,
+        CronJobState,
+        CronPayload,
+        CronSchedule,
+    )
+
+    at_ms = int(_time.time() * 1000) - minutes_late * 60 * 1000
+    return CronJob(
+        id=job_id,
+        name="stretch break",
+        enabled=True,
+        schedule=CronSchedule(kind="at", at_ms=at_ms),
+        payload=CronPayload(message="stretch", channel="tui", to="default"),
+        state=CronJobState(next_run_at_ms=at_ms),
+    )
+
+
+async def test_missed_foreign_enqueues_one_event_and_wakes():
+    from raven.core.cron_stack import make_on_missed_foreign
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+    observer = make_on_missed_foreign(queue, wake)
+    job = _make_missed_job()
+
+    # The service re-reports the still-missed job on every wake pass; the
+    # observer must surface exactly one event.
+    observer([job])
+    observer([job])
+    observer([job])
+
+    events = queue.peek_all()
+    assert len(events) == 1
+    assert events[0].source == "cron"
+    assert events[0].context_key == "cron:job_missed:missed"
+    assert "stretch break" in events[0].text
+    assert "was missed" in events[0].text
+    assert "tui" in events[0].text
+
+    await asyncio.sleep(0.05)
+    assert wake.wake_event.is_set()
+    assert wake.consume_reasons() == ["cron:job_missed:missed"]
+
+
+async def test_missed_foreign_not_reenqueued_after_heartbeat_consumed():
+    """After the heartbeat acks the event, later wake passes must not
+    re-notify (in-process notified set — the second dedup layer, past the
+    queue's context_key replacement)."""
+    from raven.core.cron_stack import make_on_missed_foreign
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+    observer = make_on_missed_foreign(queue, wake)
+    job = _make_missed_job()
+
+    observer([job])
+    queue.ack(queue.peek_all())  # heartbeat tick consumed it
+    observer([job])
+
+    assert queue.peek_all() == []
+
+
+async def test_missed_foreign_emit_failure_retried_next_pass():
+    from raven.core.cron_stack import make_on_missed_foreign
+
+    queue = MagicMock()
+    queue.enqueue.side_effect = [ValueError("queue broken"), None]
+    wake = WakeScheduler(coalesce_s=0.01)
+    observer = make_on_missed_foreign(queue, wake)
+    job = _make_missed_job()
+
+    observer([job])  # first pass: enqueue blew up — must not mark notified
+    observer([job])  # second pass: retried and succeeds
+    observer([job])  # third pass: now deduped
+
+    assert queue.enqueue.call_count == 2
+
+
+async def test_missed_foreign_end_to_end_service_start(tmp_path: Path):
+    """Full wiring: a gateway-partitioned CronService with a stranded tui
+    one-shot notifies the heartbeat sink exactly once across start plus
+    wake-loop passes."""
+    import json
+    import time as _time
+
+    from raven.core.cron_stack import make_on_missed_foreign
+    from raven.proactive_engine.schedulers.cron.service import CronService
+
+    store_path = tmp_path / "jobs.json"
+    at_ms = int(_time.time() * 1000) - 6 * 60 * 1000
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "tuiX",
+                        "name": "call mom",
+                        "enabled": True,
+                        "schedule": {"kind": "at", "atMs": at_ms},
+                        "payload": {"message": "call mom", "channel": "tui", "to": "default"},
+                        "state": {"nextRunAtMs": at_ms},
+                        "createdAtMs": at_ms - 60_000,
+                        "updatedAtMs": at_ms - 60_000,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    queue = SystemEventQueue()
+    wake = WakeScheduler(coalesce_s=0.01)
+    svc = CronService(store_path, allowed_channels={"weixin"})
+    svc.on_missed_foreign = make_on_missed_foreign(queue, wake)
+
+    await svc.start()
+    try:
+        await asyncio.sleep(0.05)  # let the first wake-loop pass re-observe
+    finally:
+        svc.stop()
+
+    events = queue.peek_all()
+    assert len(events) == 1, "start + loop passes must surface exactly one event"
+    assert events[0].context_key == "cron:tuiX:missed"
+    assert "call mom" in events[0].text
+    # The foreign job itself is untouched (read-only observation).
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    assert [j["id"] for j in data["jobs"]] == ["tuiX"]
+    assert data["jobs"][0]["enabled"] is True

@@ -1,0 +1,396 @@
+"""Plugin manifest schema.
+
+A manifest is a TOML file (``raven-plugin.toml``) shipped alongside
+a plugin's Python package. It declares the plugin's identity,
+contribution points, and config schema — everything the registry needs
+to know without importing the plugin's code.
+
+The single root table is ``[plugin]``. Contribution arrays are
+``[[plugin.contributes.<kind>]]``; the eight kinds consumed today are
+``memory_backends``, ``tools``, ``hooks``, ``services``, ``tool_gates``,
+``session_observers``, ``onboard`` and ``scheduled``, and the model ignores
+kinds it does not know so a manifest written for a later host still loads.
+
+Validation rules worth flagging:
+
+- ``id`` and ``version`` are required (``min_length=1``).
+- ``factory`` must look like ``module.path:callable_name`` — checked
+  here so a typo fails at startup rather than at first activation.
+- Contribution name uniqueness *within a manifest* is enforced; the
+  registry separately enforces uniqueness *across* manifests.
+"""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+# A factory reference is ``module.path:callable``. The regex is
+# deliberately loose: any non-empty module-like path, a single colon,
+# any non-empty identifier-ish suffix.
+_FACTORY_REF_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
+
+# A memory-backend name is also a skill-source namespace: skill_hub.py
+# splits a qualified skill id as ``<name>/<id>`` at the first slash, so a
+# slash in the name would break that split, and ``local`` / ``hub`` already
+# name the two built-in skill sources.
+_BACKEND_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_RESERVED_BACKEND_NAMES = frozenset({"local", "hub"})
+
+
+class _ManifestBase(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+
+class MemoryBackendContribution(_ManifestBase):
+    """One ``[[plugin.contributes.memory_backends]]`` entry."""
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_a_valid_skill_namespace(cls, v: str) -> str:
+        if not _BACKEND_NAME_RE.match(v):
+            raise ValueError(
+                f"memory_backend name must match {_BACKEND_NAME_RE.pattern!r} "
+                f"-- it becomes the '<name>/<id>' skill-source namespace, got {v!r}",
+            )
+        if v in _RESERVED_BACKEND_NAMES:
+            raise ValueError(
+                f"memory_backend name {v!r} is reserved for a built-in skill "
+                f"source ({sorted(_RESERVED_BACKEND_NAMES)}) and cannot be reused",
+            )
+        return v
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class ToolContribution(_ManifestBase):
+    """One ``[[plugin.contributes.tools]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], Tool]`` — it returns a single
+    :class:`~raven.contracts.tool.Tool` the host registers into the
+    agent's tool set at boot. One tool per entry; a plugin exposing
+    several tools lists several entries.
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class HookContribution(_ManifestBase):
+    """One ``[[plugin.contributes.hooks]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], AgentHook]`` -- it returns one
+    :class:`~raven.contracts.loop_hooks.AgentHook` the host appends to the
+    loop's hook chain at boot. This is how product code steers the loop
+    (budget notes, forced finalization, spin breaking) from a plugin
+    directory instead of a fork: the loop fires the phases, the plugin
+    decides on them.
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class ServiceContribution(_ManifestBase):
+    """One ``[[plugin.contributes.services]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], PluginService]`` -- it returns one object
+    satisfying :class:`~raven.contracts.services.PluginService`. Only a
+    resident host starts it; the host owns the lifecycle, and the paper pins
+    the two disciplines (no assembly mutation, loud stop on error).
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class ToolGateContribution(_ManifestBase):
+    """One ``[[plugin.contributes.tool_gates]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], ToolGate]`` -- it returns one object
+    satisfying :class:`~raven.contracts.tool_gate.ToolGate`, or ``None`` to
+    decline (no policy configured means no gate). The host casts the built
+    gates over the agent's tool registry at assembly; the paper pins the
+    three disciplines (cast at assembly, a verdict replaces one call, an
+    error refuses it).
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class SessionObserverContribution(_ManifestBase):
+    """One ``[[plugin.contributes.session_observers]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], SessionObserver]`` -- it returns one object
+    satisfying :class:`~raven.contracts.session_events.SessionObserver`, or
+    ``None`` to decline (nothing to release means no observer). A resident
+    host attaches the built observers to the session store for the
+    generation; the paper pins the three disciplines (the store notifies and
+    never waits, the request and its outcome, in-process only).
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class OnboardContribution(_ManifestBase):
+    """One ``[[plugin.contributes.onboard]]`` entry.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], OnboardStep]`` -- it returns one object
+    satisfying :class:`~raven.contracts.onboard.OnboardStep`. ``raven
+    onboard`` lends the wizard shell as one ``OnboardUI`` and records the
+    returned ``StepOutcome``; the plugin never writes ``memory.backend``
+    itself (paper: contracts/onboard.py).
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+
+class ScheduledHookContribution(_ManifestBase):
+    """One ``[[plugin.contributes.scheduled]]`` entry: a hook that fires at a time.
+
+    ``factory`` is a ``module.path:callable`` resolving to a
+    ``Callable[[PluginContext], ScheduledHook]`` -- an object with
+    ``async run(fire: ScheduledFire) -> str | None`` (``raven.plugins.schedule``).
+    ``cron`` is a five-field cron expression read in ``timezone``. A host that
+    was down across one or more occurrences fires once for the latest of them
+    (``missed = "latest"``) or not at all until the next (``"skip"``).
+
+    Firing on its own, with no turn and nobody asking, is a power of its own:
+    a plugin contributing one needs the ``schedule`` permission
+    (``raven.plugins.access``).
+    """
+
+    name: str = Field(min_length=1)
+    factory: str = Field(min_length=1)
+    cron: str = Field(min_length=1)
+    timezone: str = "UTC"
+    missed: Literal["latest", "skip"] = "latest"
+    timeout_s: float = Field(default=300.0, gt=0, le=3600)
+
+    @field_validator("factory")
+    @classmethod
+    def _factory_is_module_path(cls, v: str) -> str:
+        if not _FACTORY_REF_RE.match(v):
+            raise ValueError(
+                f"factory must be 'module.path:callable', got {v!r}",
+            )
+        return v
+
+    @field_validator("cron")
+    @classmethod
+    def _cron_is_valid(cls, v: str) -> str:
+        from croniter import croniter
+
+        if len(v.split()) != 5 or not croniter.is_valid(v):
+            raise ValueError(f"cron must be a five-field cron expression, got {v!r}")
+        return v
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_is_known(cls, v: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone {v!r}") from exc
+        return v
+
+
+class Contributes(_ManifestBase):
+    """All contribution arrays for a single manifest.
+
+    ``memory_backends``, ``tools``, ``hooks``, ``services``, ``tool_gates``,
+    ``session_observers``, ``onboard`` and ``scheduled`` are consumed today; the
+    model keeps extra fields silently so future contribution types don't break
+    older hosts reading newer manifests.
+    """
+
+    memory_backends: list[MemoryBackendContribution] = Field(default_factory=list)
+    tools: list[ToolContribution] = Field(default_factory=list)
+    hooks: list[HookContribution] = Field(default_factory=list)
+    services: list[ServiceContribution] = Field(default_factory=list)
+    tool_gates: list[ToolGateContribution] = Field(default_factory=list)
+    session_observers: list[SessionObserverContribution] = Field(default_factory=list)
+    onboard: list[OnboardContribution] = Field(default_factory=list)
+    scheduled: list[ScheduledHookContribution] = Field(default_factory=list)
+
+
+class PluginManifest(_ManifestBase):
+    """Parsed ``raven-plugin.toml``.
+
+    Constructed via :meth:`from_toml_path` / :meth:`from_toml_str`; the
+    raw ``__init__`` works too for programmatic tests.
+    """
+
+    id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    display_name: str | None = None
+    raven: str | None = None  # the host version the plugin declares; nothing enforces it
+    bundled: bool = False
+    contributes: Contributes = Field(default_factory=Contributes)
+    config_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _contribution_names_unique(self) -> "PluginManifest":
+        # Uniqueness is enforced *within each kind*; a backend and a tool
+        # may share a name (different slots). The registry separately
+        # enforces uniqueness across manifests.
+        for kind, items in (
+            ("memory_backend", self.contributes.memory_backends),
+            ("tool", self.contributes.tools),
+            ("hook", self.contributes.hooks),
+            ("service", self.contributes.services),
+            ("tool_gate", self.contributes.tool_gates),
+            ("session_observer", self.contributes.session_observers),
+            ("onboard", self.contributes.onboard),
+            ("scheduled", self.contributes.scheduled),
+        ):
+            names = [c.name for c in items]
+            if len(names) != len(set(names)):
+                dupes = sorted({n for n in names if names.count(n) > 1})
+                raise ValueError(
+                    f"duplicate {kind} name(s) in manifest {self.id!r}: {dupes}",
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _onboard_matches_own_backend(self) -> "PluginManifest":
+        # An onboard screen configures the backend it is named after; a
+        # manifest cannot contribute a screen for a backend it does not
+        # own. This also keeps build_onboard_steps' plugin-id lookup
+        # correct: an onboard entry's owning plugin is the same plugin
+        # that owns the backend of the same name.
+        backend_names = {c.name for c in self.contributes.memory_backends}
+        for step in self.contributes.onboard:
+            if step.name not in backend_names:
+                raise ValueError(
+                    f"onboard {step.name!r} in manifest {self.id!r} has no "
+                    f"memory_backend of the same name in this manifest "
+                    f"(backends here: {sorted(backend_names)})",
+                )
+        return self
+
+    # ── Constructors ────────────────────────────────────────────────
+
+    @classmethod
+    def from_toml_str(cls, data: str) -> "PluginManifest":
+        """Parse from a raw TOML string."""
+        raw = tomllib.loads(data)
+        return cls._from_raw(raw)
+
+    @classmethod
+    def from_toml_path(cls, path: Path) -> "PluginManifest":
+        """Parse from a file on disk.
+
+        Raises ``FileNotFoundError`` if missing, ``tomllib.TOMLDecodeError``
+        on malformed TOML, and ``pydantic.ValidationError`` on schema
+        mismatch.
+        """
+        with path.open("rb") as f:
+            raw = tomllib.load(f)
+        return cls._from_raw(raw)
+
+    @classmethod
+    def _from_raw(cls, raw: dict[str, Any]) -> "PluginManifest":
+        # Manifests nest everything under [plugin]. Unwrap before
+        # handing to pydantic so the schema talks in plugin-relative
+        # fields.
+        if "plugin" not in raw:
+            raise ValueError(
+                "manifest missing top-level [plugin] table",
+            )
+        return cls.model_validate(raw["plugin"])
+
+
+__all__ = [
+    "Contributes",
+    "MemoryBackendContribution",
+    "OnboardContribution",
+    "PluginManifest",
+    "ScheduledHookContribution",
+    "ToolContribution",
+]

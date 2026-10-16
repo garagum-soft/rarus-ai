@@ -1,0 +1,2194 @@
+"""Tests for the ``model.*`` RPC handlers (TUI ``/model`` v1 backend).
+
+The eight handlers wrap ``raven.config.update_providers`` write/read helpers
+plus the provider registry. Config is sandboxed by redirecting ``Path.home()``
+to a tmp dir (same mechanism as ``test_rpc_config`` / ``test_rpc_setup``)
+so the real user config is never touched. No network is hit.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from raven.providers.common_models import common_models_for
+from raven.providers.registry import PROVIDERS
+from raven.rpc.errors import ConfigValidationError, NotSupportedError
+from raven.rpc.methods import model as model_module
+from raven.rpc.methods.model import (
+    model_add_endpoint,
+    model_add_model,
+    model_disconnect,
+    model_endpoints,
+    model_fetch_models,
+    model_options,
+    model_remove_endpoint,
+    model_remove_model,
+    model_reveal_key,
+    model_save_key,
+)
+
+
+@pytest.fixture
+def fake_home(monkeypatch, tmp_path) -> Path:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    # Clear any process-wide config-path override a prior test left set, so
+    # get_config_path() falls back to the patched Path.home (monkeypatch restores it).
+    monkeypatch.setattr("raven.home._current_config_path", None)
+    # OAuth credentials live under ``~/.raven`` too, so the patched home covers
+    # them -- but each family prefers an environment override when one is set, and
+    # the suite-wide fixture sets all of them.
+    for name in ("CHATGPT_TOKEN_DIR", "GITHUB_COPILOT_TOKEN_DIR", "MINIMAX_OAUTH_TOKEN_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    return tmp_path
+
+
+def _write_config(home: Path, payload: dict) -> None:
+    cfg_dir = home / ".raven"
+    cfg_dir.mkdir(exist_ok=True)
+    (cfg_dir / "config.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _entry(result: dict, slug: str) -> dict:
+    for entry in result["providers"]:
+        if entry["slug"] == slug:
+            return entry
+    raise AssertionError(f"provider {slug!r} not in options result")
+
+
+# ----------------------------------------------------------------------------
+# model.options
+# ----------------------------------------------------------------------------
+
+
+async def test_options_authed_provider_lists_models(fake_home: Path) -> None:
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}},
+            "providers": {
+                "anthropic": {
+                    "apiKey": "sk-ant-xxx",
+                    "models": ["claude-opus-4-8", "claude-sonnet-4-5"],
+                }
+            },
+        },
+    )
+    result = await model_options({})
+    entry = _entry(result, "anthropic")
+    assert entry["authenticated"] is True
+    # Configured models rank first, then the curated shortlist, then LiteLLM's
+    # catalogue (deduped). The order is the contract: recommendations stay at the
+    # top of a list the catalogue makes long.
+    assert entry["models"][:2] == ["claude-opus-4-8", "claude-sonnet-4-5"]
+
+    # The configured entries are written in the pre-contract bare spelling, and
+    # the curated list carries the qualified one. They are the same two models,
+    # so the shortlist contributes everything except those -- listing a model the
+    # user already has, under the other spelling, is the duplicate the picker
+    # used to show.
+    from raven.providers.wire import merge_key
+
+    configured_keys = {merge_key("anthropic", m) for m in ("claude-opus-4-8", "claude-sonnet-4-5")}
+    curated = [m for m in common_models_for("anthropic") if merge_key("anthropic", m) not in configured_keys]
+    assert entry["models"][2 : 2 + len(curated)] == curated
+    assert len(entry["models"]) == len({merge_key("anthropic", m) for m in entry["models"]}), "a model is listed twice"
+    assert entry["total_models"] > 2 + len(curated), "the catalogue tier added nothing"
+    assert entry["auth_type"] == "key"
+    assert entry["key_env"] == "ANTHROPIC_API_KEY"
+    assert entry["homepage"] == "https://anthropic.com/"
+
+
+async def test_options_unauthed_provider_marked(fake_home: Path) -> None:
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    entry = _entry(result, "openai")
+    assert entry["authenticated"] is False
+    # Curated shortlist is shown regardless of auth (as openrouter always has),
+    # so the picker is never empty; the unauthed state is conveyed separately.
+    curated = common_models_for("openai")
+    assert entry["models"][: len(curated)] == curated
+    assert entry["total_models"] > len(curated), "the catalogue tier added nothing"
+
+
+async def test_options_current_provider_marked(fake_home: Path) -> None:
+    _write_config(
+        fake_home,
+        {
+            "agents": {
+                "defaults": {
+                    "model": "anthropic/claude-sonnet-4-5",
+                    "provider": "anthropic",
+                }
+            }
+        },
+    )
+    result = await model_options({})
+    assert result["model"] == "anthropic/claude-sonnet-4-5"
+    assert result["provider"] == "anthropic"
+    assert _entry(result, "anthropic")["is_current"] is True
+    assert _entry(result, "openai")["is_current"] is False
+
+
+async def test_options_current_provider_derived_from_model(fake_home: Path) -> None:
+    _write_config(
+        fake_home,
+        {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}},
+    )
+    result = await model_options({})
+    assert result["provider"] == "anthropic"
+    assert _entry(result, "anthropic")["is_current"] is True
+
+
+async def test_options_rows_carry_the_gateway_flag(fake_home: Path) -> None:
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    assert _entry(result, "openrouter")["gateway"] is True
+    assert _entry(result, "custom")["gateway"] is True
+    assert _entry(result, "anthropic")["gateway"] is False
+
+
+async def test_options_rows_say_which_providers_the_image_tool_runs_on(fake_home: Path) -> None:
+    """The roles card offers the image role exactly these, and the save checks the
+    same flag, so the two cannot disagree about a provider."""
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    serving = sorted(row["slug"] for row in result["providers"] if row["image_api"])
+    assert serving == ["custom", "openai", "openrouter"]
+
+
+async def test_options_rows_carry_every_prefix_that_names_the_provider(fake_home: Path) -> None:
+    """The set ``merge_key`` strips, so a client can ask the same identity.
+
+    A page holding only the current slug cannot tell that a model id written
+    before a rename names the same model; ``ProviderSpec.route_names`` is what
+    says so, and it has to reach the client rather than be rebuilt there.
+    """
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    assert _entry(result, "zai")["route_names"] == ["zai", "zhipu"]
+    assert _entry(result, "anthropic")["route_names"] == ["anthropic"]
+    for row in result["providers"]:
+        assert row["slug"] in row["route_names"], row["slug"]
+
+
+async def test_model_labels_carry_a_kind(fake_home: Path) -> None:
+    # openrouter with a key and one configured model whose name is the only
+    # thing that says what it is
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "openrouter/anthropic/claude-sonnet-4-5"}},
+            "providers": {"openrouter": {"apiKey": "sk-or-xxx", "models": ["openai/text-embedding-3-small"]}},
+        },
+    )
+    result = await model_options({})
+    labels = _entry(result, "openrouter")["model_labels"]
+    assert labels["openai/text-embedding-3-small"]["kind"] == "embedding"
+    assert all("kind" in v for v in labels.values())
+
+
+async def test_a_window_is_shown_for_an_id_the_vendor_serves_itself(fake_home: Path, monkeypatch) -> None:
+    """The badge a person reads to size a conversation. LiteLLM's table ships
+    pinned with the dependency, so every model added by hand is unknown to it,
+    and the catalogue that does carry the window files the row under the
+    vendor's own id -- which the lookup used to refuse for anything but an
+    ``openrouter/`` route. The row then had nothing to show at all: a model
+    nothing describes and nothing sizes is left out of the labels entirely.
+    """
+    from raven.providers import rates
+
+    rates.reset_openrouter_cache()
+    monkeypatch.setattr(rates, "_OPENROUTER_CACHE", {"deepseek/deepseek-v9-pro": {"context_length": 1_048_576}})
+    monkeypatch.setattr(rates, "_OPENROUTER_CACHE_TIME", 0.0)
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "deepseek/deepseek-v9-pro"}},
+            "providers": {"deepseek": {"apiKey": "sk-xxx", "models": ["deepseek/deepseek-v9-pro"]}},
+        },
+    )
+
+    result = await model_options({})
+    labels = _entry(result, "deepseek")["model_labels"]
+    assert labels["deepseek/deepseek-v9-pro"]["context_window"] == 1_048_576
+
+
+async def test_options_asks_for_a_fresh_catalogue(fake_home: Path, monkeypatch) -> None:
+    """Nothing else on this page would ever fill the table the windows are read
+    from: the warm runs on a vision probe that misses, so a home whose models
+    never raise that question keeps whatever it cached, or nothing. The picker
+    is the surface those figures are for, so it is the surface that asks.
+    """
+    from raven.providers import rates
+
+    calls: list[int] = []
+    monkeypatch.setattr(rates, "warm_catalog_in_background", lambda: calls.append(1))
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+
+    await model_options({})
+    assert calls == [1]
+
+
+async def test_options_oauth_provider_warning_and_auth_type(fake_home: Path) -> None:
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    entry = _entry(result, "openai_codex")
+    assert entry["auth_type"] == "oauth"
+    assert entry["authenticated"] is False
+    assert entry["warning"]
+    assert "provider login" in entry["warning"]
+
+
+async def test_options_needs_api_base_flag(fake_home: Path) -> None:
+    """True only when the gate itself demands an address: azure ships no
+    default, a local deployment's address IS the credential -- while custom
+    runs on a bare key over its shipped localhost default, so the picker must
+    not block the submission the gate accepts."""
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({})
+    assert _entry(result, "custom")["needs_api_base"] is False
+    assert _entry(result, "azure_openai")["needs_api_base"] is True
+    assert _entry(result, "ollama_chat")["needs_api_base"] is True
+    lm_studio = _entry(result, "lm_studio")
+    assert lm_studio["needs_api_base"] is True
+    assert lm_studio["api_base"] is None
+    assert lm_studio["default_api_base"] == "http://localhost:1234/v1"
+    minimax_cn = _entry(result, "minimax_cn_api")
+    assert minimax_cn["name"] == "MiniMax (CN)"
+    assert minimax_cn["auth_type"] == "endpoint"
+    assert minimax_cn["needs_api_base"] is False
+    assert minimax_cn["default_api_base"] == "https://api.minimaxi.com/v1/"
+    nvidia = _entry(result, "nvidia_nim")
+    assert nvidia["name"] == "NVIDIA"
+    assert nvidia["auth_type"] == "key"
+    assert nvidia["key_env"] == "NVIDIA_NIM_API_KEY"
+    assert nvidia["default_api_base"] == "https://integrate.api.nvidia.com/v1"
+    assert _entry(result, "minimax")["name"] == "MiniMax (Global)"
+    assert _entry(result, "minimax")["homepage"] == "https://platform.minimax.io/"
+    assert _entry(result, "minimax_cn_api")["homepage"] == "https://platform.minimaxi.com/"
+    assert _entry(result, "volcengine")["homepage"] == ("https://console.volcengine.com/ark/region:cn-beijing/overview")
+    assert _entry(result, "gemini")["homepage"] == "https://gemini.google.com/"
+    assert _entry(result, "custom")["homepage"] is None
+    assert _entry(result, "anthropic")["needs_api_base"] is False
+
+
+# ----------------------------------------------------------------------------
+# model.save_key
+# ----------------------------------------------------------------------------
+
+
+async def test_save_key_happy_path_writes_key(fake_home: Path) -> None:
+    result = await model_save_key({"slug": "anthropic", "api_key": "sk-ant-new"})
+    entry = result["provider"]
+    assert entry["slug"] == "anthropic"
+    assert entry["authenticated"] is True
+
+    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    assert cfg["providers"]["anthropic"]["apiKey"] == "sk-ant-new"
+
+
+async def test_save_key_custom_accepts_api_base(fake_home: Path) -> None:
+    result = await model_save_key(
+        {
+            "slug": "custom",
+            "api_key": "key123",
+            "api_base": "https://example.test/v1",
+        }
+    )
+    assert result["provider"]["slug"] == "custom"
+    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    assert cfg["providers"]["custom"]["apiBase"] == "https://example.test/v1"
+
+
+async def test_save_key_oauth_rejected(fake_home: Path) -> None:
+    with pytest.raises(NotSupportedError):
+        await model_save_key({"slug": "openai_codex", "api_key": "x"})
+
+
+async def test_save_key_missing_params_rejected(fake_home: Path) -> None:
+    with pytest.raises(ConfigValidationError):
+        await model_save_key({"slug": "anthropic"})
+
+
+# ----------------------------------------------------------------------------
+# model.disconnect
+# ----------------------------------------------------------------------------
+
+
+async def test_disconnect_clears_creds(fake_home: Path) -> None:
+    await model_save_key({"slug": "anthropic", "api_key": "sk-ant-xxx"})
+    result = await model_disconnect({"slug": "anthropic"})
+    assert result == {"disconnected": True}
+
+    options = await model_options({})
+    assert _entry(options, "anthropic")["authenticated"] is False
+
+
+# ----------------------------------------------------------------------------
+# model.reveal_key
+# ----------------------------------------------------------------------------
+
+
+async def test_reveal_key_reads_back_the_key_save_key_stored(fake_home: Path) -> None:
+    await model_save_key({"slug": "openrouter", "api_key": "sk-or-v1-abc"})
+    assert await model_reveal_key({"slug": "openrouter"}) == {"api_key": "sk-or-v1-abc"}
+
+
+async def test_reveal_key_is_null_for_a_provider_with_no_key_saved(fake_home: Path) -> None:
+    assert await model_reveal_key({"slug": "anthropic"}) == {"api_key": None}
+    await model_save_key({"slug": "anthropic", "api_key": "sk-ant-xxx"})
+    await model_disconnect({"slug": "anthropic"})
+    assert await model_reveal_key({"slug": "anthropic"}) == {"api_key": None}
+
+
+async def test_reveal_key_answers_with_the_key_alone(fake_home: Path) -> None:
+    """Not the section around it: not the address, not a header that can carry a secret of its own."""
+    _write_config(
+        fake_home,
+        {
+            "providers": {
+                "openrouter": {
+                    "apiKey": "sk-or-flat",
+                    "apiBase": "https://relay.example/v1",
+                    "extraHeaders": {"X-Relay-Token": "hdr-secret"},
+                }
+            }
+        },
+    )
+    assert await model_reveal_key({"slug": "openrouter"}) == {"api_key": "sk-or-flat"}
+
+
+@pytest.mark.parametrize(
+    "slug, section",
+    [
+        # `endpoint add` leaves the flat key in place; requests carry the endpoint's.
+        ("openrouter", {"apiKey": "sk-or-left-behind", "endpoints": [{"label": "rotated", "apiKey": "sk-or-in-use"}]}),
+        ("gemini", {"apiKey": "g-left-behind", "apiKeyList": ["g-in-use-1", "g-in-use-2"]}),
+    ],
+)
+async def test_reveal_key_does_not_show_a_flat_key_requests_do_not_carry(
+    fake_home: Path, slug: str, section: dict
+) -> None:
+    """An endpoints list or a key list replaces the flat key outright (`provider_endpoints`).
+
+    Shown beside a provider marked connected, a flat key left behind would read
+    as the key in use, possibly the very one the endpoint was added to replace.
+    """
+    _write_config(fake_home, {"providers": {slug: section}})
+    assert await model_reveal_key({"slug": slug}) == {"api_key": None}
+
+
+async def test_reveal_key_shows_a_flat_key_an_endpoint_still_carries(fake_home: Path) -> None:
+    """Decided by what requests carry, not by the section's shape: a lone endpoint holding the same key uses it."""
+    _write_config(
+        fake_home,
+        {
+            "providers": {
+                "openrouter": {"apiKey": "sk-or-same", "endpoints": [{"label": "only", "apiKey": "sk-or-same"}]}
+            }
+        },
+    )
+    assert await model_reveal_key({"slug": "openrouter"}) == {"api_key": "sk-or-same"}
+
+
+async def test_reveal_key_reads_what_is_saved_not_the_environment(fake_home: Path, monkeypatch) -> None:
+    """The field the eye sits in edits the saved key, so a key the environment supplies is not the one to show."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-from-env")
+    assert await model_reveal_key({"slug": "openrouter"}) == {"api_key": None}
+
+
+async def test_reveal_key_refuses_a_provider_nobody_knows(fake_home: Path) -> None:
+    with pytest.raises(ConfigValidationError):
+        await model_reveal_key({"slug": "no_such_provider"})
+    with pytest.raises(ConfigValidationError):
+        await model_reveal_key({})
+
+
+# ----------------------------------------------------------------------------
+# model.add_model / model.remove_model
+# ----------------------------------------------------------------------------
+
+
+async def test_add_model_reflected_in_options(fake_home: Path) -> None:
+    await model_save_key({"slug": "anthropic", "api_key": "sk-ant-xxx"})
+    result = await model_add_model({"slug": "anthropic", "model": "claude-opus-4-8"})
+    # Stored qualified: a bare id is claimed by keyword matching instead.
+    assert "anthropic/claude-opus-4-8" in result["provider"]["models"]
+
+    options = await model_options({})
+    assert "anthropic/claude-opus-4-8" in _entry(options, "anthropic")["models"]
+
+
+async def test_a_bare_model_typed_for_codex_is_stored_so_it_finds_codex(fake_home: Path) -> None:
+    """Through the handler, not just the helper: the screen takes free text and the
+    catalogue offers bare slugs, so this is what a user actually types. Stored bare
+    it resolves to OpenAI and the request leaves for a provider that does not serve
+    it."""
+    from raven.providers.registry import find_by_model
+
+    result = await model_add_model({"slug": "openai_codex", "model": "gpt-5.6-sol"})
+
+    stored = result["provider"]["models"]
+    assert "openai-codex/gpt-5.6-sol" in stored, stored
+    assert "gpt-5.6-sol" not in stored, "the bare spelling was stored as well"
+    resolved = find_by_model("openai-codex/gpt-5.6-sol")
+    assert resolved is not None and resolved.name == "openai_codex"
+
+
+async def test_remove_model_reflected_in_options(fake_home: Path) -> None:
+    await model_save_key({"slug": "anthropic", "api_key": "sk-ant-xxx"})
+    await model_add_model({"slug": "anthropic", "model": "claude-opus-4-8"})
+    result = await model_remove_model({"slug": "anthropic", "model": "claude-opus-4-8"})
+    assert "claude-opus-4-8" not in result["provider"]["models"]
+
+    options = await model_options({})
+    assert "claude-opus-4-8" not in _entry(options, "anthropic")["models"]
+
+
+async def test_add_model_unknown_provider_rejected(fake_home: Path) -> None:
+    with pytest.raises(ConfigValidationError):
+        await model_add_model({"slug": "no_such_provider", "model": "x"})
+
+
+# ----------------------------------------------------------------------------
+# model.endpoints / model.add_endpoint / model.remove_endpoint
+# ----------------------------------------------------------------------------
+
+
+async def test_add_endpoint_answers_with_the_refreshed_list(fake_home: Path) -> None:
+    result = await model_add_endpoint(
+        {"slug": "deepseek", "label": "eu", "api_key": "sk-eu", "api_base": "https://eu.example.test/v1"}
+    )
+    assert [ep["label"] for ep in result["endpoints"]] == ["eu"]
+    assert result["endpoints"][0]["api_base"] == "https://eu.example.test/v1"
+
+    listed = await model_endpoints({"slug": "deepseek"})
+    assert listed == result
+
+
+async def test_endpoints_never_hand_back_the_key(fake_home: Path) -> None:
+    """The picker only ever displays this list, and a key it did not need to see
+    is a key a screenshot can leak.
+
+    ``hosted_vllm`` rather than ``deepseek``: a key-based provider now refuses
+    a keyless endpoint at write time (see the tests below), so a local
+    deployment -- which legitimately has none -- is what exercises the
+    keyless half of this without also asserting the opposite rule.
+    """
+    await model_add_endpoint({"slug": "hosted_vllm", "label": "eu", "api_key": "sk-eu-secret"})
+    await model_add_endpoint({"slug": "hosted_vllm", "label": "keyless"})
+
+    by_label = {ep["label"]: ep["api_key"] for ep in (await model_endpoints({"slug": "hosted_vllm"}))["endpoints"]}
+
+    assert "sk-eu-secret" not in by_label.values()
+    assert by_label == {"eu": "****set****", "keyless": "(empty)"}
+
+
+async def test_add_endpoint_without_a_key_is_refused_for_a_key_based_provider(fake_home: Path) -> None:
+    """Same ops-layer rule the CLI ``endpoint add`` command goes through --
+    the picker must not be able to persist what the CLI refuses."""
+    with pytest.raises(ConfigValidationError, match="api_key"):
+        await model_add_endpoint({"slug": "deepseek", "label": "keyless"})
+
+
+async def test_add_endpoint_replaces_the_entry_with_the_same_label(fake_home: Path) -> None:
+    """``label`` is the idempotency key, so re-adding it is how a rotated key is
+    written -- appending a second entry would leave the dead key in rotation."""
+    await model_add_endpoint({"slug": "deepseek", "label": "eu", "api_key": "sk-old"})
+    result = await model_add_endpoint(
+        {"slug": "deepseek", "label": "eu", "api_key": "sk-new", "api_base": "https://eu.example.test/v1"}
+    )
+
+    assert [ep["label"] for ep in result["endpoints"]] == ["eu"]
+    assert result["endpoints"][0]["api_base"] == "https://eu.example.test/v1"
+    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["deepseek"]
+    assert [ep["apiKey"] for ep in section["endpoints"]] == ["sk-new"]
+
+
+async def test_remove_endpoint_reflected_in_the_list(fake_home: Path) -> None:
+    await model_add_endpoint({"slug": "deepseek", "label": "eu", "api_key": "sk-eu"})
+    await model_add_endpoint({"slug": "deepseek", "label": "us", "api_key": "sk-us"})
+
+    result = await model_remove_endpoint({"slug": "deepseek", "label": "eu"})
+
+    assert [ep["label"] for ep in result["endpoints"]] == ["us"]
+    listed = await model_endpoints({"slug": "deepseek"})
+    assert [ep["label"] for ep in listed["endpoints"]] == ["us"]
+
+
+async def test_removing_an_absent_label_is_a_no_op(fake_home: Path) -> None:
+    await model_add_endpoint({"slug": "deepseek", "label": "eu", "api_key": "sk-eu"})
+
+    result = await model_remove_endpoint({"slug": "deepseek", "label": "never-existed"})
+
+    assert [ep["label"] for ep in result["endpoints"]] == ["eu"]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda: model_endpoints({"slug": "no_such_provider"}), id="endpoints"),
+        pytest.param(lambda: model_add_endpoint({"slug": "no_such_provider", "label": "eu"}), id="add_endpoint"),
+        pytest.param(lambda: model_remove_endpoint({"slug": "no_such_provider", "label": "eu"}), id="remove_endpoint"),
+    ],
+)
+async def test_endpoint_handlers_reject_an_unknown_provider(fake_home: Path, call) -> None:
+    with pytest.raises(ConfigValidationError):
+        await call()
+
+
+@pytest.mark.parametrize("slug", ["azure_openai", "github_copilot"])
+async def test_add_endpoint_rejects_providers_that_cannot_rotate(slug: str, fake_home: Path) -> None:
+    """Mirrors ``make_provider``'s build-time rejection: a provider that
+    connects through one dedicated client/account, not several, must be
+    rejected here too, with a readable message rather than a bare traceback."""
+    with pytest.raises(ConfigValidationError, match="does not support multiple endpoints"):
+        await model_add_endpoint({"slug": slug, "label": "x", "api_key": "k"})
+
+
+async def test_endpoint_handlers_accept_session_id(fake_home: Path) -> None:
+    # The picker passes its session down like it does for every other model.*
+    # call; a strict param model would reject the key otherwise.
+    await model_add_endpoint({"slug": "deepseek", "label": "eu", "api_key": "sk-eu", "session_id": "tui:default"})
+    await model_endpoints({"slug": "deepseek", "session_id": "tui:default"})
+    result = await model_remove_endpoint({"slug": "deepseek", "label": "eu", "session_id": "tui:default"})
+
+    assert result["endpoints"] == []
+
+
+# ----------------------------------------------------------------------------
+# Dispatcher wiring
+# ----------------------------------------------------------------------------
+
+
+async def test_model_methods_registered_via_helper(fake_home: Path) -> None:
+    from raven.rpc.dispatcher import Dispatcher
+    from raven.rpc.methods.model import register_model_methods
+
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    d = Dispatcher()
+    register_model_methods(d)
+    resp = await d.dispatch({"jsonrpc": "2.0", "id": 1, "method": "model.options", "params": {}})
+    assert "error" not in resp
+    assert resp["result"]["model"] == "anthropic/claude-sonnet-4-5"
+
+    resp = await d.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "model.save_key",
+            "params": {"slug": "openai_codex", "api_key": "x"},
+        }
+    )
+    assert resp["error"]["code"] == -32012
+
+    resp = await d.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "model.endpoints",
+            "params": {"slug": "deepseek"},
+        }
+    )
+    assert "error" not in resp
+    assert resp["result"] == {"endpoints": []}
+
+
+# ----------------------------------------------------------------------------
+# Regressions (code review)
+# ----------------------------------------------------------------------------
+
+
+async def test_options_accepts_session_id(fake_home: Path) -> None:
+    # The picker calls model.options with {session_id: "tui:default"}; the param
+    # model must accept it (strict models reject unknown keys otherwise).
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+    result = await model_options({"session_id": "tui:default"})
+    assert "providers" in result
+
+
+async def test_save_key_custom_key_only_accepted(fake_home: Path) -> None:
+    """The spec ships a default address, so a bare key is a runnable submission --
+    the same answer `credential_status` gives; the picker must not refuse what
+    `raven provider set custom --api-key` accepts."""
+    result = await model_save_key({"slug": "custom", "api_key": "x"})
+    assert result["provider"]["authenticated"] is True
+
+
+async def test_save_key_azure_key_only_still_rejected(fake_home: Path) -> None:
+    """No spec default to fall back on: the address stays mandatory."""
+    with pytest.raises(ConfigValidationError) as excinfo:
+        await model_save_key({"slug": "azure_openai", "api_key": "x"})
+    assert excinfo.value.data["field"] == "api_base"
+
+
+# ----------------------------------------------------------------------------
+# common-model shortlist (curated defaults shown in the picker)
+# ----------------------------------------------------------------------------
+
+
+async def test_options_openrouter_seeds_common_models(fake_home: Path) -> None:
+    # A provider with a key but no explicitly configured models still lists the
+    # curated "common" shortlist, so the picker is never empty.
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "openrouter/anthropic/claude-opus-4.8"}},
+            "providers": {"openrouter": {"apiKey": "sk-or-xxx", "models": []}},
+        },
+    )
+    entry = _entry(await model_options({}), "openrouter")
+    curated = common_models_for("openrouter")
+    assert entry["models"][: len(curated)] == curated
+    assert entry["total_models"] > len(curated), "the catalogue tier added nothing"
+
+
+async def test_options_config_models_rank_before_common_and_dedup(fake_home: Path) -> None:
+    # Configured models come first; the common shortlist follows with duplicates
+    # removed (a configured id already in the shortlist is not listed twice).
+    dup = common_models_for("openrouter")[0]
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": dup}},
+            "providers": {"openrouter": {"apiKey": "sk-or-xxx", "models": ["my/custom-model", dup]}},
+        },
+    )
+    models = _entry(await model_options({}), "openrouter")["models"]
+    assert models[:2] == ["my/custom-model", dup]
+    assert models.count(dup) == 1
+    assert set(common_models_for("openrouter")).issubset(set(models))
+
+
+# Direct providers seeded for issue #100 (keyed provider, empty config models,
+# used to show an empty picker). ``prefix`` is the litellm-routing form each id
+# must carry so a picked id drops straight into ``agents.defaults.model``.
+_SEEDED_DIRECT_PROVIDERS = [
+    ("deepseek", "deepseek/"),
+    ("openai", "openai/"),
+    ("anthropic", "anthropic/"),
+    ("gemini", "gemini/"),
+    ("zai", "zai/"),
+    ("groq", "groq/"),
+    ("dashscope", "dashscope/"),
+]
+
+
+@pytest.mark.parametrize("slug, prefix", _SEEDED_DIRECT_PROVIDERS)
+def test_common_models_seeded_for_direct_providers(slug: str, prefix: str) -> None:
+    models = common_models_for(slug)
+    assert models, f"{slug} common-model shortlist is empty"
+    assert all(m.startswith(prefix) for m in models), models
+    assert len(models) == len(set(models)), "duplicate ids in shortlist"
+
+
+@pytest.mark.parametrize("slug, prefix", _SEEDED_DIRECT_PROVIDERS)
+async def test_options_direct_provider_lists_common_models_when_unconfigured(
+    fake_home: Path, slug: str, prefix: str
+) -> None:
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "openrouter/anthropic/claude-opus-4.8"}},
+            "providers": {slug: {"apiKey": "sk-test-xxxxxxx", "models": []}},
+        },
+    )
+    entry = _entry(await model_options({}), slug)
+    assert entry["total_models"] > 0
+    curated = common_models_for(slug)
+    assert entry["models"][: len(curated)] == curated, "the curated shortlist must stay at the top"
+    # And the tail is this provider's catalogue, not some other provider's:
+    # asserting only the prefix let the third tier be wired to a fixed slug.
+    from raven.providers.common_models import litellm_models_for
+
+    tail = entry["models"][len(curated) :]
+    assert set(tail) <= set(litellm_models_for(slug)), f"{slug}: tail holds models from elsewhere"
+
+
+async def test_save_key_accepts_a_provider_without_a_spec(fake_home: Path) -> None:
+    """The picker lists such a provider, so the key dialog has to serve it.
+
+    Four of the five model.* handlers already accepted one; refusing here left a
+    section the picker showed but nothing could finish configuring.
+    """
+    _write_config(fake_home, {"agents": {"defaults": {"model": "openai/gpt-4o"}}})
+
+    result = await model_save_key({"slug": "mistral", "api_key": "K-MISTRAL"})
+
+    assert result["provider"]["slug"] == "mistral"
+    assert result["provider"]["authenticated"] is True
+
+
+@pytest.mark.parametrize("slug", ["moonshot", "minimax", "volcengine", "ollama_chat", "github_copilot"])
+def test_litellm_catalogue_fills_providers_with_no_curated_shortlist(slug: str) -> None:
+    """The catalogue tier has to answer for a provider the shortlist does not.
+
+    Ollama is the case that proves the lookup has to go through every name the
+    provider answers to: LiteLLM files its models under "ollama" while the
+    section is "ollama_chat", so a lookup by section name alone finds none.
+
+    Upstream guarded this with ``not common_models_for(slug)``; this trunk
+    curates a shortlist for all five, so the premise is gone while the lookup it
+    was protecting is not. The catalogue tier is asked directly instead.
+    """
+    from raven.providers.common_models import litellm_models_for
+
+    models = litellm_models_for(slug)
+    assert models, f"{slug}: the catalogue tier found nothing"
+    assert all("/" in m for m in models), models[:3]
+
+
+def test_catalogue_ids_are_spelled_the_way_they_route() -> None:
+    """The catalogue is inconsistent about prefixes; the picker must not be.
+
+    Moonshot's entries carry their prefix and VolcEngine's do not. An id offered
+    bare would be routed by keyword instead of to the provider the user picked.
+    """
+    from raven.providers.common_models import litellm_models_for
+    from raven.providers.registry import find_by_model, find_by_name
+
+    for slug in ("moonshot", "volcengine", "ollama_chat"):
+        spec = find_by_name(slug)
+        assert spec is not None
+        models = litellm_models_for(slug)
+        assert models, f"{slug}: nothing to check"
+        for model in models:
+            # Exactly one prefix, not merely one at the front: `startswith` alone
+            # reads "moonshot/moonshot/x" as correct, so it could not tell a
+            # re-prefixed id from a right one.
+            head, _, rest = model.partition("/")
+            assert rest, f"{slug}: {model} has no id after the prefix"
+            # The outcome, not one spelling of it: a candidate has to resolve
+            # back to the provider it was offered for. Asserting the wire prefix
+            # instead tied this to how the id happens to be spelled, which is
+            # `stored_model_id`'s business and differs from the routing prefix
+            # for every underscore-named provider.
+            assert find_by_model(model) is spec, f"{slug}: {model} resolves elsewhere"
+            assert not rest.startswith(f"{head}/"), f"{slug}: double-prefixed {model}"
+
+
+def test_catalogue_offers_only_chat_models() -> None:
+    """Embeddings and speech share the catalogue and fail as a chat default."""
+    from raven.providers.common_models import litellm_models_for
+
+    offered = {m for slug in ("minimax", "volcengine") for m in litellm_models_for(slug)}
+    assert offered, "nothing to check"
+    assert not [m for m in offered if "embedding" in m or "speech" in m], sorted(offered)
+
+
+@pytest.mark.slow
+def test_the_catalogue_is_not_read_until_the_picker_is_opened() -> None:
+    """Reading it imports LiteLLM, which is two seconds Raven must not spend at
+    startup. Importing the module that offers it must stay free."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, json\n"
+        "import raven.rpc.methods.model  # noqa: F401\n"
+        "before = 'litellm' in sys.modules\n"
+        "from raven.providers.common_models import litellm_models_for\n"
+        "n = len(litellm_models_for('moonshot'))\n"
+        "print(json.dumps({'before': before, 'after': 'litellm' in sys.modules, 'n': n}))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    result = json.loads(out.stdout.strip().splitlines()[-1])
+    assert result["before"] is False, "importing the picker module pulled in litellm"
+    assert result["after"] is True, "reading the catalogue did not import litellm; is it still the source?"
+    assert result["n"] > 0
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda: model_options({}), id="options"),
+        pytest.param(lambda: model_save_key({"slug": "deepseek", "api_key": "sk-test-key"}), id="save_key"),
+        pytest.param(lambda: model_add_model({"slug": "deepseek", "model": "deepseek-chat"}), id="add_model"),
+        pytest.param(lambda: model_remove_model({"slug": "deepseek", "model": "deepseek-chat"}), id="remove_model"),
+        pytest.param(lambda: model_options({}), id="options_again"),
+    ],
+)
+async def test_no_handler_reads_the_catalogue_on_the_event_loop(fake_home: Path, monkeypatch, call) -> None:
+    """Reading it imports LiteLLM the first time, which takes seconds.
+
+    Only ``model.options`` warmed the cache off the loop; the three write
+    handlers built their response row inline. That is the stall the warm-up
+    exists to prevent, and it is reachable whenever the cache is cold -- a failed
+    read is deliberately not cached, and the client decides the call order.
+    """
+    import asyncio
+    import threading
+
+    _write_config(fake_home, {"providers": {"deepseek": {"api_key": "sk-existing"}}})
+
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    real = model_module.litellm_models_for
+
+    def _spy(slug: str):
+        seen.append(threading.get_ident())
+        return real(slug)
+
+    monkeypatch.setattr(model_module, "litellm_models_for", _spy)
+    await call()
+
+    assert seen, "the handler never consulted the catalogue, so this proves nothing"
+    on_loop = [t for t in seen if t == loop_thread]
+    assert not on_loop, f"{len(on_loop)}/{len(seen)} catalogue reads ran on the event loop"
+    assert asyncio.get_running_loop() is not None
+
+
+async def test_save_key_configures_a_local_deployment_by_address(fake_home: Path) -> None:
+    """It is reached by address and has no key; the handler demanded one.
+
+    `api_key` was a required field, and the picker reported every non-OAuth
+    provider as taking one, so a local deployment could not be configured from the
+    TUI at all -- and an empty key written into its section would have made it look
+    configured while nothing had been set.
+    """
+    # A host-only update must preserve an existing optional Ollama token.
+    _write_config(fake_home, {"providers": {"ollama_chat": {"api_key": "sk-leftover"}}})
+
+    result = await model_save_key({"slug": "ollama_chat", "api_base": "http://gpu-box:11434"})
+
+    assert result["provider"]["slug"] == "ollama_chat"
+    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    assert section.get("apiBase") == "http://gpu-box:11434"
+    assert section.get("apiKey") == "sk-leftover"
+
+
+async def test_save_key_refuses_a_key_for_an_address_only_deployment(fake_home: Path) -> None:
+    """A local deployment that declares no token is still endpoint-only.
+
+    Said out loud rather than dropped: storing a key such a section will never
+    send would look like it had been accepted. `hosted_vllm` rather than LM
+    Studio, which now declares that it takes one -- the rule is about what the
+    spec says, not about which provider happened to be the example.
+    """
+    with pytest.raises(ConfigValidationError) as excinfo:
+        await model_save_key({"slug": "hosted_vllm", "api_key": "sk-nope", "api_base": "http://x:8000/v1"})
+    assert "api_key" in str(excinfo.value)
+
+
+async def test_save_key_accepts_optional_lm_studio_key(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """LM Studio's server can be put behind a token, and a remote one usually is."""
+    monkeypatch.setattr("raven.config.update_providers.test_provider", lambda *a, **k: {"ok": True, "model_ids": []})
+    result = await model_save_key(
+        {"slug": "lm_studio", "api_key": "lms-token", "api_base": "http://remote-lms:1234/v1"}
+    )
+
+    assert result["provider"]["slug"] == "lm_studio"
+    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["lm_studio"]
+    assert section["apiKey"] == "lms-token"
+
+
+async def test_the_key_field_is_declared_by_the_registry_not_matched_by_slug(fake_home: Path) -> None:
+    """One answer, so the pane, the wizard and the save handler cannot disagree.
+
+    Three copies of a hardcoded slug list is how the second such provider gets
+    the field in one place and not another -- which is what happened when LM
+    Studio was added beside Ollama.
+    """
+    result = await model_options({})
+    shows = {p["slug"]: p["accepts_api_key"] for p in result["providers"]}
+
+    assert shows["lm_studio"] is True
+    assert shows["ollama_chat"] is True
+    assert shows["hosted_vllm"] is False, "address-only, so there is nothing to type"
+    assert shows["openai_codex"] is False, "an OAuth flow has no key to paste"
+    assert shows["anthropic"] is True
+
+
+async def test_save_key_accepts_optional_ollama_key(fake_home: Path) -> None:
+    result = await model_save_key(
+        {"slug": "ollama_chat", "api_key": "ollama-token", "api_base": "http://remote-ollama:11434"}
+    )
+
+    assert result["provider"]["slug"] == "ollama_chat"
+    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    assert section["apiKey"] == "ollama-token"
+
+
+async def test_save_key_ollama_host_update_preserves_existing_key(fake_home: Path) -> None:
+    _write_config(fake_home, {"providers": {"ollama_chat": {"apiKey": "existing-token"}}})
+
+    await model_save_key({"slug": "ollama_chat", "api_base": "http://remote-ollama:11434"})
+
+    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    assert section["apiKey"] == "existing-token"
+
+
+async def test_save_key_still_requires_a_key_for_a_keyed_provider(fake_home: Path) -> None:
+    """Relaxing the field for local deployments must not relax it for the rest."""
+    with pytest.raises(ConfigValidationError) as excinfo:
+        await model_save_key({"slug": "deepseek", "api_key": ""})
+    assert excinfo.value.data["field"] == "api_key"
+
+
+async def test_save_key_requires_an_address_for_a_local_deployment(fake_home: Path) -> None:
+    """Neither field given is not a configured provider."""
+    with pytest.raises(ConfigValidationError) as excinfo:
+        await model_save_key({"slug": "ollama_chat"})
+    assert excinfo.value.data["field"] == "api_base"
+
+
+async def test_options_lists_the_codex_models_the_account_reports(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the account knows: the registry default is refused by the backend and
+    LiteLLM's table carries slugs an account is not entitled to, which is why this
+    row used to offer nothing at all."""
+    monkeypatch.setattr(
+        "raven.providers.codex_catalog.account_models",
+        lambda: ("gpt-5.6-sol", "gpt-5.4"),
+    )
+    # Asked only of an account there is one for, so the row has to be signed in
+    # before the catalogue is reached at all.
+    auth = fake_home / ".raven" / "oauth" / "chatgpt"
+    auth.mkdir(parents=True, exist_ok=True)
+    (auth / "auth.json").write_text('{"access_token": "live"}', encoding="utf-8")
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+
+    entry = _entry(await model_options({}), "openai_codex")
+
+    assert entry["authenticated"] is True, "the credential this test wrote was not seen"
+    assert entry["models"] == ["openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.4"]
+
+
+async def test_the_picker_offers_what_the_vendor_last_named_with_its_kind(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vendor's own list outruns the bundled catalogue; once asked, the picker offers it."""
+    _write_config(fake_home, {"providers": {"openrouter": {"apiKey": "sk-or"}}})
+
+    def probe(name: str, **kwargs) -> dict:
+        return {
+            "ok": True,
+            "status": "valid",
+            "model_ids": ["zz-vendor/brand-new-model", "zz-vendor/new-embed"],
+            "implied_capabilities": {"zz-vendor/new-embed": "embedding"},
+        }
+
+    monkeypatch.setattr("raven.config.update_providers.test_provider", probe)
+    before = _entry(await model_options({}), "openrouter")
+    assert not any("brand-new-model" in m for m in before["models"])
+
+    await model_fetch_models({"slug": "openrouter", "verify": True})
+    after = _entry(await model_options({}), "openrouter")
+    new = next(m for m in after["models"] if m.endswith("brand-new-model"))
+    embed = next(m for m in after["models"] if m.endswith("new-embed"))
+    assert after["model_labels"][embed]["kind"] == "embedding"
+    assert after["model_labels"][new]["kind"] == "text"
+
+    await model_disconnect({"slug": "openrouter"})
+    _write_config(fake_home, {"providers": {"openrouter": {"apiKey": "sk-or"}}})
+    again = _entry(await model_options({}), "openrouter")
+    assert not any("brand-new-model" in m for m in again["models"])
+
+
+async def test_options_lists_lm_studio_models_from_the_local_server(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}},
+            "providers": {"lm_studio": {"apiBase": "http://localhost:1234/v1"}},
+        },
+    )
+    calls: list[tuple[str, int]] = []
+
+    def probe(name: str, *, timeout_s: int) -> dict:
+        calls.append((name, timeout_s))
+        return {"ok": True, "model_ids": ["qwen3-8b", "publisher/vision-model"]}
+
+    monkeypatch.setattr("raven.config.update_providers.test_provider", probe)
+    model_module._LIVE_MODEL_CACHE.clear()
+    # The cache's own lifetime is five seconds and one `model_options` call
+    # walks every provider in the catalogue, which takes most of that on an
+    # idle machine and all of it on a loaded one. Left alone, the second call
+    # below probes again on a busy CI runner and this reads as a caching bug.
+    # Expiry is a behaviour of its own and has a test of its own, below.
+    monkeypatch.setattr(model_module, "_LIVE_MODEL_CACHE_TTL_SECONDS", 3600.0)
+
+    first = _entry(await model_options({}), "lm_studio")
+    second = _entry(await model_options({}), "lm_studio")
+
+    # An address is the whole credential for a local deployment. Pinned as True
+    # because it read False for a while: `authenticated` briefly wanted a bearer
+    # token from a local provider, which files a working server under "not set
+    # up" in the TUI picker.
+    assert first["authenticated"] is True
+    assert first["api_base"] == "http://localhost:1234/v1"
+    assert first["models"] == ["lm-studio/qwen3-8b", "lm-studio/publisher/vision-model"]
+    assert second["models"] == first["models"]
+    assert calls == [("lm_studio", 2)]
+
+
+def test_the_live_model_cache_is_asked_again_once_it_has_expired(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the cache, on a clock this test owns.
+
+    The entry is meant to go stale so a server that has since loaded a model is
+    not reported from a reading taken minutes ago. That was only ever exercised
+    by accident -- by the test above outrunning its own five-second window on a
+    slow machine, which read as a caching bug rather than as this.
+
+    Through `_provider_models` rather than `model_options`, which is the whole
+    picker and walks every provider in the catalogue: three of those is six
+    seconds of doing something this test is not about, and the suite's idle-time
+    ceiling is right to refuse it. The cache lives on this call, so this is also
+    the narrower subject.
+    """
+    from raven.rpc.methods.model import _provider_models
+
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}},
+            "providers": {"lm_studio": {"apiBase": "http://localhost:1234/v1"}},
+        },
+    )
+    calls: list[tuple[str, int]] = []
+
+    def probe(name: str, *, timeout_s: int) -> dict:
+        calls.append((name, timeout_s))
+        return {"ok": True, "model_ids": ["qwen3-8b"]}
+
+    class _Clock:
+        """`time.monotonic` is read in one place in the module under test, so a
+        stub carrying only that is enough and cannot reach anything else."""
+
+        def __init__(self) -> None:
+            self.now = 1_000.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    monkeypatch.setattr("raven.config.update_providers.test_provider", probe)
+    monkeypatch.setattr(model_module, "time", clock)
+    model_module._LIVE_MODEL_CACHE.clear()
+
+    assert _provider_models("lm_studio", configured=True) == ["lm-studio/qwen3-8b"]
+    clock.now += model_module._LIVE_MODEL_CACHE_TTL_SECONDS - 0.1
+    assert _provider_models("lm_studio", configured=True) == ["lm-studio/qwen3-8b"]
+    assert calls == [("lm_studio", 2)], "an entry inside its lifetime is still the answer"
+
+    clock.now += 0.2
+    assert _provider_models("lm_studio", configured=True) == ["lm-studio/qwen3-8b"]
+
+    assert calls == [("lm_studio", 2), ("lm_studio", 2)]
+
+
+@pytest.mark.parametrize(
+    ("slug", "configured"),
+    [
+        pytest.param("deepseek", True, id="another-provider-the-static-tiers-serve"),
+        pytest.param("openai_codex", False, id="codex-with-nobody-signed-in"),
+    ],
+)
+def test_the_account_catalogue_is_asked_only_when_it_can_answer(
+    slug: str,
+    configured: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A network round trip that can only fail is still cached as a failure, which
+    is what left codex empty for half a minute after signing in to it."""
+    from raven.rpc.methods.model import _provider_models
+
+    monkeypatch.setattr(
+        "raven.providers.codex_catalog.account_models",
+        lambda: pytest.fail("the catalogue was asked when it had no account to answer for"),
+    )
+
+    models = _provider_models(slug, configured=configured)
+
+    if slug == "deepseek":
+        assert models, "other providers still list models"
+
+
+@pytest.mark.parametrize(
+    ("slug", "typed", "stored"),
+    [
+        pytest.param("openai_codex", "gpt-5.6-sol", "openai-codex/gpt-5.6-sol", id="codex-typed-bare"),
+        pytest.param("openai_codex", "openai-codex/gpt-5.4", "openai-codex/gpt-5.4", id="codex-typed-prefixed"),
+        pytest.param("minimax_global", "MiniMax-M2", "minimax-global/MiniMax-M2", id="minimax-typed-bare"),
+        pytest.param("deepseek", "deepseek-chat", "deepseek/deepseek-chat", id="a-provider-that-routes-on-it"),
+        pytest.param("azure_openai", "my-deployment", "azure-openai/my-deployment", id="azure-names-its-provider-too"),
+        pytest.param("zai", "zhipu/glm-4.6", "zai/glm-4.6", id="a-former-name-is-canonicalized"),
+        pytest.param("zai", "openrouter/z-ai/glm-4.6", "openrouter/z-ai/glm-4.6", id="a-declared-skip-prefix-is-left"),
+    ],
+)
+def test_a_typed_model_is_stored_the_way_it_resolves_back(slug: str, typed: str, stored: str) -> None:
+    """The add-model screen takes free text, and a bare id is claimed by keyword
+    matching rather than by the provider it was entered under: "gpt-5.6-sol"
+    resolves to OpenAI.
+
+    Every provider now stores a qualified id, not the three whose own client
+    strips the prefix back off. Azure included: its deployment comes off again in
+    the URL builder, which is where that belongs -- storing it bare was the one
+    thing that made Azure ids shaped unlike everyone else's.
+    """
+    from raven.rpc.methods.model import _stored_spelling
+
+    assert _stored_spelling(slug, typed) == stored
+
+
+@pytest.mark.parametrize("spec", PROVIDERS, ids=lambda s: s.name)
+def test_every_provider_stores_a_model_id_that_finds_it_again(spec) -> None:
+    """A sweep rather than a list of the cases we thought of: the id a provider
+    stores has to resolve back to that provider, or the request leaves for
+    whoever else claims the bare name. Providers that route on the prefix or use
+    the id verbatim are covered by resolving as themselves.
+    """
+    from raven.providers.registry import find_by_model
+    from raven.rpc.methods.model import _stored_spelling
+
+    stored = _stored_spelling(spec.name, "some-model")
+    resolved = find_by_model(stored)
+
+    assert resolved is not None and resolved.name == spec.name, f"{stored} resolves to {resolved and resolved.name}"
+
+
+async def test_options_reports_the_session_model_when_that_session_switched() -> None:
+    """The picker sits under the status bar; reading the global default here is
+    how they end up showing two models for one conversation.
+    """
+    from types import SimpleNamespace
+
+    from raven.rpc.methods.model import model_options
+
+    loop = SimpleNamespace(
+        has_session_binding=lambda key: key == "tui:a",
+        session_model=lambda key: "anthropic/claude-opus-4-8",
+    )
+
+    result = await model_options({"session_id": "tui:a"}, agent_loop_factory=lambda: loop)
+
+    assert result["model"] == "anthropic/claude-opus-4-8"
+    assert result["provider"] == "anthropic"
+
+
+async def test_options_reports_a_passthrough_vendor_from_the_id_it_stored(fake_home: Path) -> None:
+    """``find_by_model`` has no spec for a passthrough vendor, so falling through
+    to the configured default stars another vendor's row for a session running on
+    this one's key -- and the marked row is exactly what a user reads to answer
+    "whose key is paying for this". The id names its provider, because every
+    switch writes it there through ``stored_model_id``, so read it.
+    """
+    from types import SimpleNamespace
+
+    from raven.providers.registry import find_by_model
+    from raven.rpc.methods.model import model_options
+
+    assert find_by_model("deepinfra/Gryphe/MythoMax-L2-13b") is None, "fixture must be a vendor we have no spec for"
+
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-opus-4-5", "provider": "anthropic"}},
+            "providers": {"anthropic": {"apiKey": "sk-a"}, "deepinfra": {"apiKey": "sk-d"}},
+        },
+    )
+    loop = SimpleNamespace(
+        has_session_binding=lambda key: key == "tui:a",
+        session_model=lambda key: "deepinfra/Gryphe/MythoMax-L2-13b",
+    )
+
+    result = await model_options({"session_id": "tui:a"}, agent_loop_factory=lambda: loop)
+
+    assert result["model"] == "deepinfra/Gryphe/MythoMax-L2-13b"
+    assert result["provider"] == "deepinfra"
+    assert [p["slug"] for p in result["providers"] if p.get("is_current")] == ["deepinfra"]
+
+
+#: The vendors added alongside the ones Raven shipped with, and the shortlist
+#: entry each has to reach a picker with. Written out rather than derived from
+#: the registry: the point is that a settings page can offer these without the
+#: user typing an id, and a spec whose curated rows went missing still satisfies
+#: every assertion made off the registry alone.
+ADDED_VENDORS = {
+    "xai": "xai/grok-4.6",
+    "mistral": "mistral/mistral-large-latest",
+    "together_ai": "together-ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "fireworks_ai": "fireworks-ai/accounts/fireworks/models/kimi-k2-instruct",
+    "perplexity": "perplexity/sonar-pro",
+    "cerebras": "cerebras/gpt-oss-120b",
+    "huggingface": "huggingface/deepseek-ai/DeepSeek-V4-Pro",
+    "bigmodel": "bigmodel/glm-4.6",
+    "xiaomi_mimo": "xiaomi-mimo/mimo-v2.5",
+    "baidu_cloud": "baidu-cloud/ernie-5.1",
+    "stepfun": "stepfun/step-3.7-flash",
+    "longcat": "longcat/longcat-2.0",
+    "modelscope": "modelscope/Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "qiniu": "qiniu/deepseek-v3",
+}
+
+#: Deliberately absent from the table above. Nothing Raven bundles carries a
+#: catalogue row for any of them -- Baichuan publishes its own models and the
+#: rest resell other people's under their own spelling -- so a shortlist here
+#: would be ids nobody can check. Each reaches the page as a key field and an
+#: empty list, and its own /v1/models fills that in once a key is entered.
+#: Poe is here for the sharpest form of it: it serves the same models under bot
+#: names of its own, and only the outer "poe/" comes off on the way out, so a
+#: maker-spelled id reaches Poe as a model it does not have.
+NO_SHORTLIST_VENDORS = [
+    "baichuan",
+    "poe",
+    "ai302",
+    "dmxapi",
+    "burncloud",
+    "ocoolai",
+    "ppio",
+    "lanyun",
+    "alayanew",
+    "sophnet",
+    "tokenhub",
+    "xirang",
+    "ph8",
+    "aionly",
+    "radeon_cloud",
+]
+
+
+#: Self-hosted servers added alongside vLLM, LM Studio and Ollama. Reached by
+#: address, and each also takes a key -- a server on somebody else's machine
+#: usually sits behind one.
+ADDED_LOCAL_RUNTIMES = ["gpustack", "ovms"]
+
+
+@pytest.mark.parametrize("slug", ADDED_LOCAL_RUNTIMES)
+async def test_an_added_local_runtime_asks_for_an_address_and_takes_a_key(fake_home: Path, slug: str) -> None:
+    """The row a self-hosted deployment needs, which is not the key-only row.
+
+    A key alone must not read as configured: both borrow OpenAI's driver, whose
+    own default is api.openai.com, so a section holding a key and no address
+    would describe a provider that is ready and send its traffic to OpenAI.
+    """
+    from raven.providers.registry import SHAPE_LOCAL
+    from raven.rpc.methods.model import model_options
+
+    _write_config(fake_home, {"providers": {slug: {"apiKey": "sk-probe"}}})
+    row = next((p for p in (await model_options({}))["providers"] if p["slug"] == slug), None)
+
+    assert row is not None, f"{slug} is absent from the picker"
+    assert row["auth_type"] == SHAPE_LOCAL, f"{slug}: offered as {row['auth_type']}, not by address"
+    assert row["accepts_api_key"], f"{slug}: no key field, so a server behind a token cannot be reached"
+    assert not row["authenticated"], f"{slug}: a key with no address read as configured"
+
+    _write_config(fake_home, {"providers": {slug: {"apiKey": "sk-probe", "apiBase": "http://10.0.0.5:8080/v1"}}})
+    row = next((p for p in (await model_options({}))["providers"] if p["slug"] == slug), None)
+    assert row is not None and row["authenticated"], f"{slug}: an address did not complete the setup"
+
+
+@pytest.mark.parametrize("slug", NO_SHORTLIST_VENDORS)
+async def test_a_vendor_with_no_catalogue_still_reaches_the_page(fake_home: Path, slug: str) -> None:
+    """An empty model list is not a broken row.
+
+    The alternative to shipping nothing is shipping guesses, and a picker that
+    offers a model the vendor does not serve is worse than one that offers none
+    and asks. What must hold is the rest of the row: a key field, no address
+    prompt, and a section that reads back as configured once written.
+    """
+    from raven.providers.registry import SHAPE_KEY, find_by_name
+    from raven.rpc.methods.model import model_options
+
+    _write_config(fake_home, {"providers": {slug: {"apiKey": "sk-probe"}}})
+
+    result = await model_options({})
+    row = next((p for p in result["providers"] if p["slug"] == slug), None)
+
+    assert row is not None, f"{slug} is absent from the picker"
+    assert row["auth_type"] == SHAPE_KEY
+    assert not row["needs_api_base"]
+    assert row["authenticated"]
+    # And it states no default, so the wizard cannot write an unverifiable id.
+    spec = find_by_name(slug)
+    assert spec is not None and not spec.default_model
+
+
+@pytest.mark.parametrize(("slug", "shortlisted"), sorted(ADDED_VENDORS.items()))
+async def test_options_offers_an_added_vendor_as_a_key_and_a_shortlist(
+    fake_home: Path, slug: str, shortlisted: str
+) -> None:
+    """What "configurable from the settings page" actually requires of a spec.
+
+    The registry sweeps assert resolution, which a provider satisfies while
+    still being unreachable from a UI: the row has to arrive with a key field
+    rather than an address prompt, and with models to pick, or the only way in
+    is to type an id by hand.
+    """
+    from raven.providers.registry import SHAPE_KEY
+    from raven.rpc.methods.model import model_options
+
+    _write_config(fake_home, {"providers": {slug: {"apiKey": "sk-probe"}}})
+
+    result = await model_options({})
+    row = next((p for p in result["providers"] if p["slug"] == slug), None)
+
+    assert row is not None, f"{slug} is absent from the picker"
+    assert row["auth_type"] == SHAPE_KEY, f"{slug}: reached by {row['auth_type']}, not a key alone"
+    assert not row["needs_api_base"], f"{slug}: demands an address the vendor already publishes"
+    assert row["authenticated"], f"{slug}: a stored key did not read back as configured"
+    assert shortlisted in row["models"], f"{slug}: {shortlisted} is not offered; models={row['models'][:5]}"
+
+
+async def test_the_added_vendors_carry_a_default_the_wizard_can_write(fake_home: Path) -> None:
+    """The wizard writes ``default_model`` when a probe returns nothing, and the
+    id it writes has to name the provider it was picked for -- an id that
+    resolves elsewhere sends the first request to whoever the keyword names.
+    """
+    from raven.providers.registry import find_by_model, find_by_name
+
+    for slug in ADDED_VENDORS:
+        spec = find_by_name(slug)
+        assert spec is not None and spec.default_model, f"{slug}: no default for the wizard to write"
+        resolved = find_by_model(spec.default_model)
+        assert resolved is spec, f"{slug}: default {spec.default_model!r} resolves to {resolved and resolved.name}"
+
+
+async def test_options_stars_nothing_rather_than_the_wrong_row_for_an_unknown_head(fake_home: Path) -> None:
+    """A head naming no configured provider leaves nothing to mark. Marking a
+    vendor picked to fill the blank is the habit this PR retires everywhere else.
+    """
+    from types import SimpleNamespace
+
+    from raven.rpc.methods.model import model_options
+
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-opus-4-5", "provider": "anthropic"}},
+            "providers": {"anthropic": {"apiKey": "sk-a"}},
+        },
+    )
+    loop = SimpleNamespace(
+        has_session_binding=lambda key: key == "tui:a",
+        session_model=lambda key: "notavendor/some-model",
+    )
+
+    result = await model_options({"session_id": "tui:a"}, agent_loop_factory=lambda: loop)
+
+    assert result["model"] == "notavendor/some-model"
+    assert [p["slug"] for p in result["providers"] if p.get("is_current")] == []
+
+
+async def test_options_leaves_an_unswitched_session_on_the_configured_answer() -> None:
+    """``session_model`` falls back to the default, so asking it alone would
+    override a forced ``agents.defaults.provider`` for every session.
+    """
+    from types import SimpleNamespace
+
+    from raven.rpc.methods.model import _current_selection, model_options
+
+    configured_model, configured_provider = _current_selection()
+    loop = SimpleNamespace(
+        has_session_binding=lambda key: False,
+        session_model=lambda key: "anthropic/claude-opus-4-8",
+    )
+
+    result = await model_options({"session_id": "tui:b"}, agent_loop_factory=lambda: loop)
+
+    assert result["model"] == configured_model
+    assert result["provider"] == (configured_provider or "")
+
+
+async def test_the_production_registration_makes_model_options_session_aware(fake_home: Path) -> None:
+    """The picker asks ``model.options`` which model to show as current, and the
+    answer is per session.
+
+    Registered through the umbrella the production path uses, not by calling
+    the handler with a factory by hand: without the factory threaded here the
+    picker reports the configured default to every session, and calling
+    ``model_options`` directly would never notice.
+    """
+    from raven.rpc.dispatcher import Dispatcher
+    from raven.rpc.methods import register_aligned_methods_except_system
+
+    _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
+
+    class _Loop:
+        def has_session_binding(self, session_id: str) -> bool:
+            return session_id == "tui:switched"
+
+        def session_model(self, session_id: str) -> str:
+            return "anthropic/claude-opus-4-8"
+
+    d = Dispatcher()
+    register_aligned_methods_except_system(d, agent_loop_factory=lambda: _Loop())
+
+    switched = await d.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "model.options",
+            "params": {"session_id": "tui:switched"},
+        }
+    )
+    assert switched["result"]["model"] == "anthropic/claude-opus-4-8"
+
+    untouched = await d.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "model.options",
+            "params": {"session_id": "tui:never-switched"},
+        }
+    )
+    assert untouched["result"]["model"] == "anthropic/claude-sonnet-4-5", (
+        "a session that never switched still reports the configured default"
+    )
+
+
+@pytest.mark.parametrize("slug", ["moonshot", "minimax", "volcengine", "ollama_chat", "github_copilot"])
+def test_litellm_catalogue_resolves_for_the_providers_it_used_to_carry_alone(slug: str) -> None:
+    """These five were the catalogue tier's whole reason to exist, so it breaks here first.
+
+    Ollama is the case that proves the lookup has to go through every name the
+    provider answers to: LiteLLM files its models under "ollama" while the
+    section is "ollama_chat", so a lookup by section name alone finds none.
+
+    It no longer *fills* an empty shortlist for anyone -- each of these five was
+    curated once the WebUI needed them, because that service runs without LiteLLM
+    installed and so cannot reach this tier at all. What is left is widening a
+    curated head, which is why the shortlist is no longer asserted empty here.
+    """
+    from raven.providers.common_models import litellm_models_for
+
+    models = litellm_models_for(slug)
+    assert models, f"{slug}: the catalogue tier found nothing"
+    assert all("/" in m for m in models), models[:3]
+
+
+async def test_adding_a_model_stores_what_the_person_stated_about_it(fake_home: Path) -> None:
+    """The add-model drawer's whole point: a model no catalogue carries, tagged.
+
+    Written in the same edit as the list entry -- a model that landed in the
+    list while its tags failed to would show as a bare id with no way to tell
+    that anything was lost.
+    """
+    _write_config(fake_home, {"providers": {"hosted_vllm": {"apiBase": "http://localhost:8000/v1", "models": []}}})
+    result = await model_add_model(
+        {
+            "slug": "hosted_vllm",
+            "model": "my-finetune-v3",
+            "label": "Our finetune",
+            "capabilities": ["reasoning", "function-call"],
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"],
+        }
+    )
+    label = (result["provider"]["model_labels"] or {})["hosted-vllm/my-finetune-v3"]
+    assert label["label"] == "Our finetune"
+    assert label["capabilities"] == ["function-call", "reasoning"]
+    assert label["input_modalities"] == ["text", "image"]
+
+    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    overlay = stored["providers"]["hosted_vllm"]["modelOverlay"]["hosted-vllm/my-finetune-v3"]
+    assert overlay["capabilities"] == ["function-call", "reasoning"]
+
+
+async def test_a_tag_no_surface_can_draw_is_refused_rather_than_stored(fake_home: Path) -> None:
+    """The vocabulary is the contract, checked where it enters rather than where
+    it is drawn: a name nobody has an icon for renders as a gap, and a gap reads
+    as "cannot" -- a wrong fact instead of a missing one."""
+    _write_config(fake_home, {"providers": {"hosted_vllm": {"apiBase": "http://localhost:8000/v1", "models": []}}})
+    with pytest.raises(ConfigValidationError):
+        await model_add_model({"slug": "hosted_vllm", "model": "m", "capabilities": ["telepathy"]})
+
+    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    assert not stored["providers"]["hosted_vllm"].get("models")
+
+
+async def test_adding_an_id_alone_leaves_a_hand_written_overlay_alone(fake_home: Path) -> None:
+    """Adding without stating anything is "add this id", not "and forget the
+    rest": an overlay of empty lists would blank a description a person put in
+    the config by hand."""
+    _write_config(
+        fake_home,
+        {
+            "providers": {
+                "hosted_vllm": {
+                    "apiBase": "http://localhost:8000/v1",
+                    "models": [],
+                    "modelOverlay": {"hosted-vllm/mine": {"label": "Mine", "description": "tuned on tickets"}},
+                }
+            }
+        },
+    )
+    await model_add_model({"slug": "hosted_vllm", "model": "hosted-vllm/mine"})
+    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    overlay = stored["providers"]["hosted_vllm"]["modelOverlay"]["hosted-vllm/mine"]
+    assert overlay["label"] == "Mine"
+    assert overlay["description"] == "tuned on tickets"
+
+
+async def test_a_user_written_overlay_reaches_the_picker(fake_home: Path) -> None:
+    """A model the catalogues cannot describe still arrives with a name.
+
+    The list already let a model be added; naming one is what was missing, so a
+    self-hosted deployment reached the picker as a bare id with no description
+    line at all -- `_model_labels` skips every row nothing describes.
+    """
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"model": "hosted-vllm/my-finetune-v3"}},
+            "providers": {
+                "hosted_vllm": {
+                    "apiBase": "http://localhost:8000/v1",
+                    "models": ["hosted-vllm/my-finetune-v3"],
+                    "modelOverlay": {"my-finetune-v3": {"label": "Our finetune", "description": "tuned on tickets"}},
+                }
+            },
+        },
+    )
+    entry = _entry(await model_options({}), "hosted_vllm")
+    label = (entry.get("model_labels") or {}).get("hosted-vllm/my-finetune-v3")
+    assert label == {"label": "Our finetune", "description": "tuned on tickets", "kind": "text"}
+
+
+async def test_the_picker_gets_the_tags_it_draws_as_icons(fake_home: Path) -> None:
+    """Capabilities and modalities ride with the label, in the closed vocabulary.
+
+    The surfaces draw one icon per name and have no entry for a name they have
+    not been given, so an unknown tag reaching here renders as a gap the reader
+    reads as "cannot" -- a wrong fact rather than a missing one.
+    """
+    from raven.providers.registry_data import CAPABILITIES, MODALITIES
+
+    _write_config(fake_home, {"providers": {"anthropic": {"apiKey": "sk-ant-test"}}})
+    entry = _entry(await model_options({}), "anthropic")
+    label = (entry.get("model_labels") or {})["anthropic/claude-opus-5"]
+
+    assert "function-call" in label["capabilities"]
+    assert set(label["capabilities"]) <= set(CAPABILITIES)
+    assert set(label["input_modalities"]) <= set(MODALITIES)
+    assert "image" in label["input_modalities"]
+
+
+async def test_a_model_with_tags_and_no_name_still_reaches_the_picker(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row used to be dropped for having no label, and its icons with it.
+
+    A gateway lists models the vendor rows tag without naming; skipping those
+    left the picker with an id and nothing else, which is exactly the case the
+    icon row exists for.
+    """
+    from raven.providers import catalog
+    from raven.rpc.methods import model as model_methods
+
+    row = catalog.ModelRow(
+        ref="anthropic/whatever",
+        provider="anthropic",
+        label="whatever",
+        source=catalog.SOURCE_ID_ONLY,
+        capabilities=("reasoning",),
+    )
+    monkeypatch.setattr(catalog, "describe", lambda *a, **k: row)
+    labels = model_methods._model_labels("anthropic", ["anthropic/whatever"], section=None)
+    assert labels["anthropic/whatever"]["capabilities"] == ["reasoning"]
+
+
+async def test_the_context_window_a_picker_shows_is_the_one_a_request_is_sized_with(
+    fake_home: Path,
+) -> None:
+    """Not from the registry -- from the table that also routes.
+
+    Two sources for one number is how a picker ends up promising a window the
+    trimmer does not honour. The registry carries none by construction, so this
+    pins where the figure comes from rather than what it is.
+    """
+    from raven.providers.litellm_setup import import_litellm
+    from raven.providers.rates import resolve_context_window
+    from raven.rpc.methods.model import _model_labels
+
+    # Imported first, and asked about a model LiteLLM's own static table names:
+    # the OpenRouter tier answers from a disk cache this fixture's home does not
+    # have, so an openrouter id would compare None against None and prove
+    # nothing.
+    import_litellm()
+    labels = _model_labels("openai", ["openai/gpt-4o"], section=None)
+    shown = labels["openai/gpt-4o"].get("context_window")
+    assert shown, "no window resolved at all; the assertion below would be vacuous"
+    assert shown == resolve_context_window("openai/gpt-4o", allow_fetch=False)
+
+
+async def test_options_config_reads_do_not_scale_with_the_row_count(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_entries_off_loop` hoists the config read: one `load_config` for all
+    rows, one for the current selection, one raw read inside `list_providers`.
+    Without the hoist every row re-parsed the config from disk (the
+    `list_providers` mapping and `_configured_overlays` via `load_config`,
+    the curated models via `get_provider_config`'s raw read), so these counts
+    sat above the row count instead. An absolute bound because the row count
+    itself never varies -- the picker lists every registry provider whether
+    or not it is configured."""
+    import raven.config.loader as loader
+    import raven.config.update_providers as update_providers
+
+    _write_config(fake_home, {"providers": {"anthropic": {"api_key": "sk-1"}}})
+    real_load = loader.load_config
+    real_raw = update_providers.read_raw_or_raise
+    calls = {"load_config": 0, "raw_read": 0}
+
+    def counting_load(*args: object, **kwargs: object):
+        calls["load_config"] += 1
+        return real_load(*args, **kwargs)
+
+    def counting_raw(*args: object, **kwargs: object):
+        calls["raw_read"] += 1
+        return real_raw(*args, **kwargs)
+
+    monkeypatch.setattr(loader, "load_config", counting_load)
+    monkeypatch.setattr(update_providers, "read_raw_or_raise", counting_raw)
+    result = await model_options({})
+
+    assert len(result["providers"]) > 3, "too few rows for the bound to mean anything"
+    assert calls["load_config"] <= 2, f"{calls} for {len(result['providers'])} rows"
+    assert calls["raw_read"] <= 1, f"{calls} for {len(result['providers'])} rows"
+
+
+@pytest.mark.parametrize("override", [None, "anthropic"])
+async def test_direct_glm_picker_agrees_with_native_transport(fake_home, override):
+    from raven.config.loader import load_config
+    from raven.providers.factory import make_provider
+
+    section = {"apiKey": "test-key", "models": ["zai/glm-4.6"]}
+    if override:
+        section["modelProtocols"] = {"zai/glm-4.6": override}
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"provider": "zai", "model": "zai/glm-4.6"}},
+            "providers": {"zai": section},
+        },
+    )
+    entry = _entry(await model_options({}), "zai")
+    provider = make_provider(load_config())
+    assert entry["protocols"]["zai/glm-4.6"] == provider.api_protocol == (override or "chat")
+    assert provider.api_base == ("https://api.z.ai/api/anthropic" if override else None)
+    assert not entry["warning"]
+
+
+async def test_direct_provider_without_native_base_is_flagged_without_protocol_fallback(fake_home):
+    from raven.config.loader import load_config
+    from raven.providers.auth import MissingCredentialsError
+    from raven.providers.factory import make_provider
+
+    _write_config(
+        fake_home,
+        {
+            "agents": {"defaults": {"provider": "gemini", "model": "gemini/gemini-2.5-flash"}},
+            "providers": {
+                "gemini": {"apiKey": "test-key", "models": ["gemini/gemini-2.5-flash"], "protocol": "responses"}
+            },
+        },
+    )
+    entry = _entry(await model_options({}), "gemini")
+    assert entry["protocols"]["gemini/gemini-2.5-flash"] == "responses"
+    assert "Explicit API base required for responses" in entry["warning"]
+    with pytest.raises(MissingCredentialsError, match="requires an explicit API base"):
+        make_provider(load_config())
+
+
+async def test_a_gateway_that_renames_models_offers_only_what_it_answered(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Poe serves other vendors' models under bot names of its own.
+
+    The bundled registry files 137 models under Poe in the maker's spelling,
+    and unioning those into the answer put ids Poe does not accept in front of
+    the reader as things to add -- selectable, and a wrong-model error on the
+    first message. Removing the default and the shortlist closed two doors to
+    the same room; this is the third, and the one an ordinary Get model list
+    walks through.
+    """
+    from raven.providers.registry_data import catalogue_for
+
+    # The premise: the bundled rows exist and are the maker's spelling, so the
+    # assertion below is about suppressing them rather than about an empty file.
+    bundled = catalogue_for("poe")
+    assert len(bundled) > 100, "expected the bundled Poe catalogue this test exists to withhold"
+    assert any(row.startswith("anthropic/") for row in bundled)
+
+    _write_config(fake_home, {"providers": {"poe": {"apiKey": "k"}}})
+    monkeypatch.setattr(
+        "raven.config.update_providers.test_provider",
+        lambda *a, **k: {"ok": True, "status": "valid", "model_ids": ["Claude-Sonnet-4.6", "GPT-5.4"]},
+    )
+
+    out = await model_fetch_models({"slug": "poe"})
+
+    assert out["status"] == "ok"
+    assert [row["source"] for row in out["models"]] == ["live", "live"]
+    assert {row["id"] for row in out["models"]} == {"poe/Claude-Sonnet-4.6", "poe/GPT-5.4"}
+
+
+async def test_fetching_a_catalogue_dresses_what_the_vendor_answered(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ids come from the probe; everything a person reads comes from here.
+
+    The asking is `test_provider`, which already knows where each vendor's
+    catalogue lives and what opens it. What this adds is the name, the tags, the
+    bucket the filter row sorts by, and whether the id is already in the
+    provider's list -- none of which a raw id carries.
+    """
+    _write_config(fake_home, {"providers": {"anthropic": {"apiKey": "k", "models": ["anthropic/claude-opus-5"]}}})
+    monkeypatch.setattr(
+        "raven.config.update_providers.test_provider",
+        lambda *a, **k: {"ok": True, "status": "valid", "model_ids": ["claude-opus-5", "claude-sonnet-5"]},
+    )
+    out = await model_fetch_models({"slug": "anthropic"})
+
+    assert out["status"] == "ok"
+    rows = {row["id"]: row for row in out["models"]}
+    opus = rows["anthropic/claude-opus-5"]
+    assert opus["label"] == "Claude Opus 5"
+    assert opus["kind"] == "text"
+    assert "function-call" in opus["capabilities"]
+    # Already configured, so the list offers the way out rather than the way in.
+    assert opus["added"] is True
+    assert rows["anthropic/claude-sonnet-5"]["added"] is False
+
+
+async def test_a_refused_key_is_said_out_loud_beside_the_list_it_did_not_fill(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal travels even though the list is not empty.
+
+    Dropped, a bad key would look exactly like a successful fetch of the
+    bundled catalogue -- and a person would go on believing the credential
+    works. The rows are the registry's; the status says the vendor never
+    answered.
+    """
+    _write_config(fake_home, {"providers": {"anthropic": {"apiKey": "bad"}}})
+    monkeypatch.setattr(
+        "raven.config.update_providers.test_provider",
+        lambda *a, **k: {"ok": False, "status": "unauthorized", "error": "HTTP 401", "model_ids": None},
+    )
+    out = await model_fetch_models({"slug": "anthropic"})
+
+    assert out["status"] == "unauthorized"
+    assert out["error"] == "HTTP 401"
+    assert out["models"] and {row["source"] for row in out["models"]} == {"registry"}
+
+
+async def test_a_provider_with_no_key_still_lists_what_it_can_serve(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bundled catalogue needs no credential, so the list is not empty.
+
+    A provider being set up has no key yet, and that is exactly when a person
+    wants to see what it offers. Answering with the probe's refusal and nothing
+    else made the button useless until after the thing it helps with was done.
+    """
+    _write_config(fake_home, {"providers": {"deepseek": {}}})
+    monkeypatch.setattr(
+        "raven.config.update_providers.test_provider",
+        lambda *a, **k: {"ok": False, "status": "not_configured", "error": "api_key is empty", "model_ids": None},
+    )
+    out = await model_fetch_models({"slug": "deepseek"})
+
+    assert out["status"] == "not_configured"
+    assert out["models"], "the registry knows this provider's catalogue without asking it"
+    assert {row["source"] for row in out["models"]} == {"registry"}
+
+
+async def test_the_vendors_answer_and_the_bundled_one_are_unioned_not_chosen_between(
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each source knows something the other does not.
+
+    The live call carries a model released since the last registry refresh; the
+    registry carries the names and tags for everything, and answers at all when
+    the vendor cannot be reached. Taking either alone loses one of those.
+    """
+    _write_config(fake_home, {"providers": {"deepseek": {"apiKey": "k"}}})
+    monkeypatch.setattr(
+        "raven.config.update_providers.test_provider",
+        lambda *a, **k: {"ok": True, "status": "valid", "model_ids": ["deepseek-v4-pro", "deepseek-brand-new"]},
+    )
+    out = await model_fetch_models({"slug": "deepseek"})
+    rows = {row["id"]: row for row in out["models"]}
+
+    assert out["status"] == "ok"
+    # Named by the vendor and known to the registry: one row, not two.
+    assert rows["deepseek/deepseek-v4-pro"]["source"] == "live"
+    assert rows["deepseek/deepseek-v4-pro"]["label"] == "DeepSeek V4 Pro"
+    # Too new for the bundled files, and still offered.
+    assert rows["deepseek/deepseek-brand-new"]["source"] == "live"
+    # In the registry, not named just now -- still worth showing.
+    assert any(row["source"] == "registry" for row in out["models"])
+
+
+async def test_the_offer_and_the_configured_list_are_separate_answers(fake_home: Path) -> None:
+    """A settings page manages a list; a picker offers one. Not the same list.
+
+    The offer folds in a curated shortlist so a provider nobody has configured
+    still has something to choose from -- which, read as the configured list,
+    said seven models had been added to a provider with no key and no models.
+    """
+    _write_config(fake_home, {"providers": {"anthropic": {"apiKey": "sk-ant-test"}}})
+    entry = _entry(await model_options({}), "anthropic")
+
+    assert entry["configured_models"] == []
+    assert entry["models"], "the picker still offers the curated shortlist"
+
+    _write_config(
+        fake_home,
+        {"providers": {"anthropic": {"apiKey": "sk-ant-test", "models": ["anthropic/claude-opus-5"]}}},
+    )
+    entry = _entry(await model_options({}), "anthropic")
+    assert entry["configured_models"] == ["anthropic/claude-opus-5"]
+
+
+async def test_options_carries_the_vendor_key_url(fake_home: Path) -> None:
+    _write_config(fake_home, {"agents": {"defaults": {"model": "deepseek-chat"}}})
+    result = await model_options({})
+    assert _entry(result, "deepseek")["key_url"] == "https://platform.deepseek.com/api_keys"
+    assert _entry(result, "hosted_vllm")["key_url"] is None
+
+
+# ----------------------------------------------------------------------------
+# model.set_fields / model.add_models / add_model description
+# ----------------------------------------------------------------------------
+
+
+def _read_config(home: Path) -> dict:
+    return json.loads((home / ".raven" / "config.json").read_text(encoding="utf-8"))
+
+
+async def test_set_fields_patches_headers_one_at_a_time_and_masks_the_reply(fake_home: Path) -> None:
+    from raven.rpc.methods.model import model_set_fields
+
+    await model_save_key({"slug": "moonshot", "api_key": "sk-moon"})
+    await model_set_fields({"slug": "moonshot", "fields": {"extra_headers": {"X-App": "alpha"}}})
+    await model_set_fields({"slug": "moonshot", "fields": {"extra_headers": {"X-Env": "beta"}}})
+    assert _read_config(fake_home)["providers"]["moonshot"]["extraHeaders"] == {"X-App": "alpha", "X-Env": "beta"}
+    reply = await model_set_fields({"slug": "moonshot", "fields": {"extra_headers": {"X-App": None}}})
+    assert _read_config(fake_home)["providers"]["moonshot"]["extraHeaders"] == {"X-Env": "beta"}
+    assert "alpha" not in json.dumps(reply) and "beta" not in json.dumps(reply)
+    assert _read_config(fake_home)["providers"]["moonshot"]["apiKey"] == "sk-moon"
+
+
+async def test_set_fields_refuses_the_key_and_unknown_fields(fake_home: Path) -> None:
+    from raven.rpc.methods.model import model_set_fields
+
+    with pytest.raises(ConfigValidationError):
+        await model_set_fields({"slug": "moonshot", "fields": {"api_key": "x"}})
+    with pytest.raises(ConfigValidationError):
+        await model_set_fields({"slug": "moonshot", "fields": {}})
+    with pytest.raises(ConfigValidationError):
+        await model_set_fields({"slug": "moonshot", "fields": {"extra_headers": {"X": ""}}})
+
+
+async def test_set_fields_changes_the_address_without_the_key(fake_home: Path) -> None:
+    from raven.rpc.methods.model import model_set_fields
+
+    await model_save_key({"slug": "moonshot", "api_key": "sk-moon"})
+    await model_set_fields({"slug": "moonshot", "fields": {"api_base": "https://api.moonshot.cn/v1"}})
+    section = _read_config(fake_home)["providers"]["moonshot"]
+    assert section["apiBase"] == "https://api.moonshot.cn/v1"
+    assert section["apiKey"] == "sk-moon"
+
+
+async def test_set_fields_writes_azure_deployment_and_api_version(fake_home: Path) -> None:
+    from raven.rpc.methods.model import model_set_fields
+
+    await model_set_fields({"slug": "azure_openai", "fields": {"deployment": "gpt-4o-eu", "api_version": "2024-10-21"}})
+    providers = _read_config(fake_home)["providers"]
+    section = providers.get("azure_openai") or providers["azureOpenai"]
+    assert (section["deployment"], section["apiVersion"]) == ("gpt-4o-eu", "2024-10-21")
+
+
+async def test_add_model_description_and_empty_string_clears(fake_home: Path) -> None:
+    await model_save_key({"slug": "deepseek", "api_key": "sk-deep"})
+    await model_add_model({"slug": "deepseek", "model": "deepseek-v4-flash", "label": "Flash", "description": "cheap"})
+
+    def overlay() -> dict:
+        return _read_config(fake_home)["providers"]["deepseek"].get("modelOverlay", {})
+
+    def named() -> dict:
+        row = next(v for k, v in overlay().items() if k.endswith("deepseek-v4-flash"))
+        return {k: row[k] for k in ("label", "description") if row.get(k)}
+
+    assert named() == {"label": "Flash", "description": "cheap"}
+    await model_add_model({"slug": "deepseek", "model": "deepseek-v4-flash", "label": ""})
+    assert named() == {"description": "cheap"}
+    await model_add_model({"slug": "deepseek", "model": "deepseek-v4-flash", "description": ""})
+    assert not any(k.endswith("deepseek-v4-flash") for k in overlay())
+
+
+async def test_add_models_appends_all_in_one_write_and_skips_duplicates(fake_home: Path, monkeypatch) -> None:
+    from raven.config import update_providers
+    from raven.rpc.methods.model import model_add_models
+
+    await model_save_key({"slug": "deepseek", "api_key": "sk-deep"})
+    writes = []
+    real = update_providers.atomic_update
+    monkeypatch.setattr(update_providers, "atomic_update", lambda path, fn: writes.append(path) or real(path, fn))
+    result = await model_add_models({"slug": "deepseek", "models": ["deepseek-a", "deepseek-b", "deepseek-a"]})
+    stored = _read_config(fake_home)["providers"]["deepseek"]["models"]
+    assert [m for m in stored if m.endswith("deepseek-a")] and [m for m in stored if m.endswith("deepseek-b")]
+    assert len([m for m in stored if m.endswith("deepseek-a")]) == 1
+    assert len(writes) == 1
+    assert any(m.endswith("deepseek-b") for m in result["provider"]["models"])
+    with pytest.raises(ConfigValidationError):
+        await model_add_models({"slug": "deepseek", "models": ["  "]})
+
+
+# ----------------------------------------------------------------------------
+# model.oauth_login
+# ----------------------------------------------------------------------------
+
+
+async def test_oauth_login_hands_the_pair_from_the_starter(fake_home: Path, monkeypatch) -> None:
+    from raven.providers import oauth_login
+    from raven.rpc.methods.model import model_oauth_login
+
+    async def fake_start(slug: str) -> dict:
+        assert slug == "minimax_global"
+        return {
+            "verification_uri": "https://platform.minimax.io/oauth-authorize",
+            "user_code": "ABCD",
+            "expires_in": 42,
+        }
+
+    monkeypatch.setattr(oauth_login, "start", fake_start)
+    assert await model_oauth_login({"slug": "minimax_global"}) == {
+        "verification_uri": "https://platform.minimax.io/oauth-authorize",
+        "user_code": "ABCD",
+        "expires_in": 42,
+    }
+
+
+async def test_oauth_login_refuses_a_key_provider_and_a_failed_start(fake_home: Path, monkeypatch) -> None:
+    from raven.providers import oauth_login
+    from raven.rpc.methods.model import model_oauth_login
+
+    with pytest.raises(NotSupportedError):
+        await model_oauth_login({"slug": "deepseek"})
+
+    async def refused(slug: str) -> dict:
+        raise RuntimeError("vendor refused the device code")
+
+    monkeypatch.setattr(oauth_login, "start", refused)
+    with pytest.raises(ConfigValidationError):
+        await model_oauth_login({"slug": "openai_codex"})
+
+
+# ----------------------------------------------------------------------------
+# model.oauth_code
+# ----------------------------------------------------------------------------
+
+
+async def test_oauth_code_hands_the_pasted_code_to_the_waiting_sign_in(fake_home: Path, monkeypatch) -> None:
+    from raven.providers import oauth_login
+    from raven.rpc.methods.model import model_oauth_code
+
+    typed: list[tuple[str, str]] = []
+    monkeypatch.setattr(oauth_login, "submit_code", lambda slug, code: typed.append((slug, code)))
+    assert await model_oauth_code({"slug": "claude_subscription", "code": "abc123"}) == {"submitted": True}
+    assert typed == [("claude_subscription", "abc123")]
+
+
+async def test_oauth_code_refuses_when_nothing_waits_or_the_sign_in_ended(fake_home: Path, monkeypatch) -> None:
+    from raven.providers import oauth_login
+    from raven.rpc.methods.model import model_oauth_code
+
+    # A code with no sign-in waiting for it is a page that outlived its sign-in.
+    with pytest.raises(NotSupportedError):
+        await model_oauth_code({"slug": "claude_subscription", "code": "abc123"})
+
+    def ended(slug: str, code: str) -> None:
+        raise RuntimeError("the sign-in has already ended; start it again")
+
+    monkeypatch.setattr(oauth_login, "submit_code", ended)
+    with pytest.raises(ConfigValidationError):
+        await model_oauth_code({"slug": "claude_subscription", "code": "abc123"})
+
+
+async def test_oauth_code_needs_a_code(fake_home: Path) -> None:
+    from raven.rpc.methods.model import model_oauth_code
+
+    with pytest.raises(ConfigValidationError):  # the params model refuses an empty code before the method runs
+        await model_oauth_code({"slug": "claude_subscription", "code": ""})
+
+
+async def test_options_lists_extra_headers_by_name_only(fake_home: Path) -> None:
+    """The advanced card removes headers by name and must never see a value."""
+    _write_config(
+        fake_home,
+        {
+            "providers": {
+                "openai": {
+                    "apiKey": "sk-x",
+                    "extraHeaders": {"X-Auth": "secret-1234", "APP-Code": "code-5678"},
+                }
+            },
+        },
+    )
+    result = await model_options({})
+    entry = _entry(result, "openai")
+    assert set(entry["extra_headers"]) == {"X-Auth", "APP-Code"}
+    for value in entry["extra_headers"].values():
+        assert value and "secret" not in value and "code-5678" not in value
+    assert _entry(result, "anthropic")["extra_headers"] == {}
+
+
+async def test_add_models_and_set_fields_name_an_unknown_provider(fake_home: Path) -> None:
+    _write_config(fake_home, {"providers": {}})
+    with pytest.raises(ConfigValidationError):
+        await model_module.model_add_models({"slug": "nobody_home", "models": ["m"]})
+    with pytest.raises(ConfigValidationError):
+        await model_module.model_set_fields({"slug": "nobody_home", "fields": {"api_base": "https://x"}})
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected", "text"),
+    [
+        (LookupError("no device flow"), NotSupportedError, "no device flow"),
+        (RuntimeError("vendor refused the device code"), ConfigValidationError, "vendor refused"),
+        (ValueError("vendor said no"), ConfigValidationError, "could not start"),
+    ],
+)
+async def test_oauth_login_maps_each_failure_to_the_pages_vocabulary(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, raised: Exception, expected: type, text: str
+) -> None:
+    from raven.providers import oauth_login
+
+    async def failing(slug: str) -> dict:
+        raise raised
+
+    monkeypatch.setattr(oauth_login, "start", failing)
+    with pytest.raises(expected, match=text):
+        await model_module.model_oauth_login({"slug": "minimax_global"})
+
+
+# ----------------------------------------------------------------------------
+# A credential edited here has to reach the memory service
+# ----------------------------------------------------------------------------
+
+
+class TestEverosFollowsACredentialChange:
+    """EverOS holds the key it booted with; these handlers are where it changes.
+
+    The four memory roles store a pin -- a model and a provider -- and resolve
+    the address and key from that provider when the server is spawned. Editing
+    the credential here therefore changes what the *next* spawn would hand the
+    server while the running one keeps the old value, and nothing says so:
+    EverOS's /health never touches a model, so a revoked key reads as healthy
+    until memory fails in EverOS's own log.
+    """
+
+    @pytest.fixture
+    def pinned(self, fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """A config where the llm role runs on deepseek, and a recorded restart."""
+        _write_config(
+            fake_home,
+            {
+                "providers": {
+                    "deepseek": {"apiKey": "old-key", "apiBase": "https://api.deepseek.com/v1"},
+                    "openai": {"apiKey": "sk-openai"},
+                },
+                "plugins": {"config": {"everos-memory": {"llm": {"model": "deepseek-chat", "provider": "deepseek"}}}},
+            },
+        )
+        restarts: list[str] = []
+        monkeypatch.setattr(
+            "raven.rpc.methods.console._everos_applied",
+            lambda factory, cost="": restarts.append("restart") or {"applied": True},
+        )
+        return restarts
+
+    async def test_rotating_the_key_of_a_pinned_provider_restarts_memory(self, pinned: list[str]) -> None:
+        """The reported bug: the key moved in raven and never reached EverOS."""
+        await model_save_key({"slug": "deepseek", "api_key": "new-key"})
+        assert pinned == ["restart"]
+
+    async def test_a_provider_no_role_uses_does_not_restart_memory(self, pinned: list[str]) -> None:
+        """Restarting memory over an unrelated vendor costs a session its memory."""
+        await model_save_key({"slug": "openai", "api_key": "sk-new"})
+        assert pinned == []
+
+    async def test_moving_the_address_restarts_memory(self, pinned: list[str]) -> None:
+        """EverOS is handed a base_url too, resolved from the same provider."""
+        await model_module.model_set_fields({"slug": "deepseek", "fields": {"api_base": "https://moved.test/v1"}})
+        assert pinned == ["restart"]
+
+    async def test_a_field_everos_never_sees_does_not_restart_memory(self, pinned: list[str]) -> None:
+        """Only the model, the address and the key travel; headers stay in raven."""
+        await model_module.model_set_fields({"slug": "deepseek", "fields": {"extra_headers": {"X-A": "1"}}})
+        assert pinned == []
+
+    async def test_disconnecting_a_pinned_provider_restarts_memory(self, pinned: list[str]) -> None:
+        await model_disconnect({"slug": "deepseek"})
+        assert pinned == ["restart"]
+
+    async def test_endpoint_edits_restart_memory(self, pinned: list[str]) -> None:
+        """EverOS is handed the first endpoint holding a key, so the list matters."""
+        await model_add_endpoint(
+            {"slug": "deepseek", "label": "backup", "api_key": "k2", "api_base": "https://b.test/v1"}
+        )
+        assert pinned == ["restart"]
+        await model_remove_endpoint({"slug": "deepseek", "label": "backup"})
+        assert pinned == ["restart", "restart"]
+
+    async def test_an_install_without_everos_saves_normally(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The plugin is optional; a save must not fail because it is absent."""
+        _write_config(fake_home, {"providers": {"deepseek": {"apiKey": "old-key"}}})
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_everos(name: str, *args, **kwargs):
+            if name.startswith("raven_everos"):
+                raise ImportError("no everos here")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_everos)
+        result = await model_save_key({"slug": "deepseek", "api_key": "new-key"})
+        assert result["provider"]["slug"] == "deepseek"
+
+
+async def test_add_model_preserves_metadata_under_a_bare_id(fake_home: Path) -> None:
+    _write_config(
+        fake_home,
+        {
+            "providers": {
+                "hosted_vllm": {
+                    "apiBase": "http://localhost:9999/v1",
+                    "models": ["team-model"],
+                    "modelOverlay": {"team-model": {"label": "Team model", "description": "Keep this description"}},
+                }
+            }
+        },
+    )
+
+    result = await model_add_model({"slug": "hosted_vllm", "model": "team-model", "capabilities": ["reasoning"]})
+
+    row = result["provider"]["model_labels"]["team-model"]
+    assert row["label"] == "Team model"
+    assert row["description"] == "Keep this description"
+    assert row["capabilities"] == ["reasoning"]

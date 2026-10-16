@@ -1,0 +1,407 @@
+"""PG-1 — PluginManifest parsing + schema validation."""
+
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from raven.plugins import (
+    Contributes,
+    MemoryBackendContribution,
+    PluginManifest,
+)
+
+# ---------------------------------------------------------------------------
+# Round-trip: minimal valid manifest
+# ---------------------------------------------------------------------------
+
+
+class TestMinimalManifest:
+    def test_parses_id_and_version(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "everos-memory"
+            version = "0.1.0"
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert mf.id == "everos-memory"
+        assert mf.version == "0.1.0"
+        # Defaults
+        assert mf.bundled is False
+        assert mf.contributes.memory_backends == []
+        assert mf.config_schema == {}
+
+    def test_id_required(self) -> None:
+        toml = '[plugin]\nversion = "0.1.0"\n'
+        with pytest.raises(ValidationError):
+            PluginManifest.from_toml_str(toml)
+
+    def test_version_required(self) -> None:
+        toml = '[plugin]\nid = "x"\n'
+        with pytest.raises(ValidationError):
+            PluginManifest.from_toml_str(toml)
+
+    def test_id_must_be_non_empty(self) -> None:
+        toml = '[plugin]\nid = ""\nversion = "0.1"\n'
+        with pytest.raises(ValidationError):
+            PluginManifest.from_toml_str(toml)
+
+
+# ---------------------------------------------------------------------------
+# Top-level [plugin] table required
+# ---------------------------------------------------------------------------
+
+
+class TestTopLevelTable:
+    def test_missing_plugin_table_rejected(self) -> None:
+        toml = 'id = "x"\nversion = "0.1"\n'
+        with pytest.raises(ValueError, match=r"top-level \[plugin\]"):
+            PluginManifest.from_toml_str(toml)
+
+
+# ---------------------------------------------------------------------------
+# memory_backends contributions
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryBackends:
+    def test_single_contribution(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "everos-memory"
+            version = "0.1.0"
+
+            [[plugin.contributes.memory_backends]]
+            name = "everos"
+            factory = "raven_everos.backend:make_backend"
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert len(mf.contributes.memory_backends) == 1
+        c = mf.contributes.memory_backends[0]
+        assert c.name == "everos"
+        assert c.factory == "raven_everos.backend:make_backend"
+
+    def test_factory_format_rejected_without_colon(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "x"
+            factory = "raven_everos.backend.make_backend"
+        """)
+        with pytest.raises(ValidationError, match="module.path:callable"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_factory_format_rejected_with_empty_callable(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "x"
+            factory = "raven_everos.backend:"
+        """)
+        with pytest.raises(ValidationError):
+            PluginManifest.from_toml_str(toml)
+
+    def test_duplicate_contribution_name_rejected(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "everos"
+            factory = "a.b:c"
+            [[plugin.contributes.memory_backends]]
+            name = "everos"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="duplicate memory_backend"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_duplicate_service_name_rejected(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.services]]
+            name = "watcher"
+            factory = "a.b:c"
+            [[plugin.contributes.services]]
+            name = "watcher"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="duplicate service"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_duplicate_tool_gate_name_rejected(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.tool_gates]]
+            name = "gate"
+            factory = "a.b:c"
+            [[plugin.contributes.tool_gates]]
+            name = "gate"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="duplicate tool_gate"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_duplicate_session_observer_name_rejected(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.session_observers]]
+            name = "release"
+            factory = "a.b:c"
+            [[plugin.contributes.session_observers]]
+            name = "release"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="duplicate session_observer"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_onboard_contribution_parses(self) -> None:
+        mf = PluginManifest.from_toml_str(
+            textwrap.dedent("""
+                [plugin]
+                id = "p"
+                version = "1"
+                [[plugin.contributes.memory_backends]]
+                name = "p"
+                factory = "mod.path:make_backend"
+                [[plugin.contributes.onboard]]
+                name = "p"
+                factory = "mod.path:make_onboard_step"
+            """)
+        )
+        assert mf.contributes.onboard[0].factory == "mod.path:make_onboard_step"
+
+    def test_duplicate_onboard_name_rejected(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "everos"
+            factory = "a.b:c"
+            [[plugin.contributes.onboard]]
+            name = "everos"
+            factory = "a.b:c"
+            [[plugin.contributes.onboard]]
+            name = "everos"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="duplicate onboard"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_onboard_without_matching_backend_rejected(self) -> None:
+        """An onboard screen configures the backend it is named after; a
+        manifest with no memory_backend of that same name is refused."""
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.onboard]]
+            name = "shared"
+            factory = "a.b:c"
+        """)
+        with pytest.raises(ValidationError, match="no memory_backend of the same name"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_onboard_matching_backend_in_same_manifest_accepted(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "shared"
+            factory = "a.b:c"
+            [[plugin.contributes.onboard]]
+            name = "shared"
+            factory = "a.b:d"
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert mf.contributes.onboard[0].name == "shared"
+
+    def test_onboard_matching_a_different_manifests_backend_still_rejected(self) -> None:
+        """The rule is checked within one manifest only -- naming another
+        plugin's backend is not enough, each manifest owns its own screen."""
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "other"
+            factory = "a.b:c"
+            [[plugin.contributes.onboard]]
+            name = "shared"
+            factory = "a.b:d"
+        """)
+        with pytest.raises(ValidationError, match="no memory_backend of the same name"):
+            PluginManifest.from_toml_str(toml)
+
+    def test_multiple_contributions_different_names(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "primary"
+            factory = "a.b:c"
+            [[plugin.contributes.memory_backends]]
+            name = "fallback"
+            factory = "a.b:d"
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert [c.name for c in mf.contributes.memory_backends] == [
+            "primary",
+            "fallback",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# memory_backend name constraints -- the name is a skill-source namespace
+# (`<name>/<id>`, skill_hub.py), so it must be a bare token and must not
+# shadow the built-in `local` / `hub` sources.
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryBackendNameConstraints:
+    @staticmethod
+    def _manifest_toml(name: str) -> str:
+        return textwrap.dedent(f"""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            [[plugin.contributes.memory_backends]]
+            name = "{name}"
+            factory = "a.b:c"
+        """)
+
+    def test_slash_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="skill-source namespace"):
+            PluginManifest.from_toml_str(self._manifest_toml("acme/v2"))
+
+    def test_reserved_hub_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="reserved"):
+            PluginManifest.from_toml_str(self._manifest_toml("hub"))
+
+    def test_reserved_local_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="reserved"):
+            PluginManifest.from_toml_str(self._manifest_toml("local"))
+
+    def test_alnum_dot_dash_underscore_accepted(self) -> None:
+        mf = PluginManifest.from_toml_str(self._manifest_toml("acme-mem_v2.1"))
+        assert mf.contributes.memory_backends[0].name == "acme-mem_v2.1"
+
+
+# ---------------------------------------------------------------------------
+# Bundled / config_schema passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestFlagsAndSchema:
+    def test_bundled_flag(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "everos-memory"
+            version = "0.1.0"
+            bundled = true
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert mf.bundled is True
+
+    def test_a_legacy_enabled_by_default_key_still_parses(self) -> None:
+        """``extra="ignore"`` lets an old manifest with the removed key
+        keep working: the key is dropped, not stored as an attribute."""
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "everos-memory"
+            version = "0.1.0"
+            enabled_by_default = true
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert not hasattr(mf, "enabled_by_default")
+
+    def test_config_schema_passthrough(self) -> None:
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "everos-memory"
+            version = "0.1.0"
+
+            [plugin.config_schema]
+            mode = "string"
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert mf.config_schema == {"mode": "string"}
+
+    def test_extra_top_level_fields_silently_dropped(self) -> None:
+        # Forward-compat: a newer manifest with extra fields should
+        # still parse against the older host.
+        toml = textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+            future_field = "ignored"
+            another_field = 42
+        """)
+        mf = PluginManifest.from_toml_str(toml)
+        assert mf.id == "x"  # parsed cleanly
+
+
+# ---------------------------------------------------------------------------
+# File-on-disk parsing
+# ---------------------------------------------------------------------------
+
+
+class TestFromTomlPath:
+    def test_reads_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "raven-plugin.toml"
+        path.write_text(
+            textwrap.dedent("""
+            [plugin]
+            id = "x"
+            version = "0.1"
+        """),
+            encoding="utf-8",
+        )
+        mf = PluginManifest.from_toml_path(path)
+        assert mf.id == "x"
+
+    def test_missing_file_raises_filenotfound(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            PluginManifest.from_toml_path(tmp_path / "nope.toml")
+
+
+# ---------------------------------------------------------------------------
+# Direct model construction (for tests that don't go through TOML)
+# ---------------------------------------------------------------------------
+
+
+class TestDirectConstruction:
+    def test_construct_with_contributes_dataclass_style(self) -> None:
+        mf = PluginManifest(
+            id="x",
+            version="0.1",
+            contributes=Contributes(
+                memory_backends=[
+                    MemoryBackendContribution(name="x", factory="a.b:c"),
+                ],
+            ),
+        )
+        assert mf.contributes.memory_backends[0].name == "x"
+
+    def test_frozen_model(self) -> None:
+        # frozen=True on the base class — assignment after construction
+        # must fail. Catches accidental mutation in registry code.
+        mf = PluginManifest(id="x", version="0.1")
+        with pytest.raises(ValidationError):
+            mf.id = "y"  # type: ignore[misc]

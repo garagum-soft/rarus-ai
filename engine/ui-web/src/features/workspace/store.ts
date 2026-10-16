@@ -1,0 +1,536 @@
+import { createRoot } from 'react-dom/client'
+
+import { t } from '../../i18n/t'
+import { copy } from '../../lib/clipboard'
+import { md } from '../../lib/prose'
+import { current as currentSession } from '../../lib/session'
+import { ds } from '../../state/sources'
+import { makeStore } from '../../state/store'
+import { pane } from '../../state/wsPane'
+import * as browser from '../browser/mount'
+import * as agents from '../subagents/mount'
+import * as deliveries from './deliveries'
+
+import type { DeliveryRow, WorkspaceSnapshot, WorkspaceSource, WsFile, WsShared } from './types'
+import type { ReactElement } from 'react'
+import type { Root } from 'react-dom/client'
+
+/* Pane state, outside React on purpose: the callers that drive this pane are
+ * not React. The pane's own chrome dispatches every repaint (state/ws.ts's
+ * draw calls `mount` below), the session pipeline writes the record as a turn
+ * runs (state/session/{registry,residency,runtime,stages}.ts) and the shared
+ * drawer opens a file through it -- so the state lives where those can reach
+ * it and the component subscribes. The workspace record lives here as well,
+ * and the accessors below are what the page reads it through.
+ */
+
+export type WsRoute = 'launch' | 'diff' | 'file'
+
+export interface WsIslandState {
+  route: WsRoute
+}
+
+const store = makeStore<WsIslandState>({ route: 'launch' })
+
+const workspace: WsShared = { changes: [], urls: [], file: null, turn: 0, unseen: 0 }
+
+export const shared = (): WsShared => workspace
+export const currentTurn = (): number => workspace.turn
+export const changes = (): WsShared['changes'] => workspace.changes
+export const urls = (): WsShared['urls'] => workspace.urls
+
+export function advanceTurn(): number {
+  workspace.turn += 1
+  return workspace.turn
+}
+
+export function snapshot(): WorkspaceSnapshot {
+  return {
+    changes: workspace.changes,
+    urls: workspace.urls,
+    file: workspace.file,
+    turn: workspace.turn,
+    unseen: workspace.unseen,
+    deliveries: deliveries.snapshot(),
+  }
+}
+
+export function restore(next: WorkspaceSnapshot): void {
+  workspace.changes = next.changes
+  workspace.urls = next.urls
+  workspace.file = next.file
+  workspace.turn = next.turn
+  workspace.unseen = next.unseen
+  deliveries.restore(next.deliveries || [])
+}
+
+function resetShared(): void {
+  restore({ changes: [], urls: [], file: null, turn: 0, unseen: 0, deliveries: [] })
+}
+
+export const { get, subscribe } = store
+
+/** A patch, merged into the page's state. */
+export function set(patch: Partial<WsIslandState>): void {
+  store.set((prev) => ({ ...prev, ...patch }))
+}
+
+export const source = (): WorkspaceSource => ds('workspace')
+
+export function copyToClip(text: string, done: string): void {
+  copy(text, done)
+}
+
+/* Straight to the renderer: prose.ts is a pure function in this same bundle,
+   so a verb here that went out through a seam and back would hide the file
+   viewer from anyone auditing md()'s callers. */
+export const mdHtml = (src: string): string => md(src)
+export const hostPlatform = (): string => source().hostPlatform()
+
+/* A language flip changes nothing in this state, but every visible string
+   comes from t(), so a re-render is the whole redraw. */
+export function redraw(): void {
+  set({})
+}
+
+/* Which view the pane's own body shows, minus the two tabs with islands of
+   their own: agents and browser are dispatched by `mount` before this runs.
+   Marking the changes seen happens HERE, synchronously, because the header
+   badge is re-counted (state/ws.ts's bump) right after the repaint and counts
+   on the render having marked them -- the React render itself lands later. */
+export function sync(): void {
+  const view = pane().view()
+  const ws = shared()
+  const bare = !ws.changes.length && !ws.urls.length
+  const route: WsRoute = bare && !view.picked ? 'launch' : view.tab === 'file' ? 'file' : 'diff'
+  if (route === 'diff') ws.changes.forEach((c) => { c.seen = true })
+  set({ route })
+}
+
+let renderEl: (() => ReactElement) | null = null
+export function setRenderer(f: () => ReactElement): void {
+  renderEl = f
+}
+
+let root: Root | null = null
+
+/* Where the pane's React roots are mounted and unmounted, on every repaint
+   state/ws.ts's draw asks for. The island owns #wsBody for its own views; the
+   agents tab belongs to the subagents island and the browser tab to the
+   browser island, so this root steps aside (unmounts) and hands them the
+   cleared box -- the same box, no wrapper, because .ws-body[data-view] styles
+   its direct children. */
+export function mount(): void {
+  const host = document.getElementById('wsBody')
+  if (!host) return
+  const view = pane().view()
+  /* Each tab island's root must leave while the DOM it owns is intact --
+     BEFORE any wipe -- and the browser's frame watch must drop whenever this
+     lands anywhere but a visible browser view, which is why detach() runs
+     before the branch rather than inside it. */
+  browser.detach()
+  agents.detach()
+  if (view.tab === 'browser' || view.tab === 'agents') {
+    if (root) {
+      root.unmount()
+      root = null
+    }
+    host.innerHTML = ''
+    delete host.dataset.view
+    if (view.tab === 'agents') {
+      host.dataset.view = 'agents'
+      agents.draw(host)
+      browser.hidden()
+    } else {
+      browser.draw(host)
+      if (!view.open) browser.hidden()
+    }
+    return
+  }
+  browser.hidden()
+  sync()
+  if (get().route === 'file' && source().canBrowse) host.dataset.view = 'file'
+  else delete host.dataset.view
+  if (!root && renderEl) {
+    host.innerHTML = ''
+    root = createRoot(host)
+    root.render(renderEl())
+  }
+}
+
+export function pick(tab: string): void {
+  pane().pick(tab)
+}
+
+/* ── file viewing ──────────────────────────────────────────────────── */
+
+export const fileURL = (p: string): string => {
+  const path = String(p)
+  const session = currentSession()
+  return '/file?path=' + encodeURIComponent(path) + (session ? '&session=' + encodeURIComponent(session) : '')
+}
+
+/* The same route asked for a PDF rendering of the file instead of its bytes:
+   the page cannot draw a deck, so it frames what LibreOffice makes of it. */
+export const renderURL = (p: string): string => fileURL(p) + '&render=pdf'
+/* The first page of a deck as a picture, for a tile that has room for one
+   picture and not for a viewer. */
+export const thumbURL = (p: string): string => fileURL(p) + '&render=thumb'
+/* A picture the document has drawn from one URL is drawn again from memory
+   for that URL without asking -- the HTML list of available images, which no
+   Cache-Control reaches. So a file rewritten under the same path needs a URL
+   the document has not drawn yet, or the old picture comes back. `version` is
+   whatever moves when the bytes may have, riding along as a query the gateway
+   ignores. */
+export const versioned = (url: string, version?: number | string | null): string =>
+  url + (version ? '&v=' + encodeURIComponent(String(version)) : '')
+/* One page of the rendering as a picture. The viewer draws a PDF this way
+   rather than framing the document: Safari does not draw a framed PDF served
+   under the sandbox policy these files carry, and that policy is what keeps an
+   agent's document away from the page's cookie and its socket, so it stays.
+   Pictures need no policy, look the same in every browser, and run nothing.
+
+   `version` rides along as a query the gateway ignores, so a deck delivered
+   again under the same path is fetched again rather than shown from cache. */
+export const pageURL = (p: string, n: number, version?: number | string | null): string =>
+  versioned(fileURL(p) + '&render=page&p=' + n, version)
+
+/* The same route, asked to serve the file under a policy that lets its scripts
+   run. One view of one file: the route remembers nothing, so the next request
+   is read-only again unless it asks too. */
+export const runURL = (p: string): string => fileURL(p) + '&run=1'
+
+const TEXT_EXT = new Set(['c', 'cfg', 'conf', 'cpp', 'css', 'diff', 'env', 'go', 'h', 'ini', 'java',
+  'js', 'json', 'jsonl', 'jsx', 'kt', 'log', 'lua', 'patch', 'php', 'pl', 'py', 'pyi', 'rb', 'rs',
+  'sh', 'sql', 'swift', 'toml', 'ts', 'tsx', 'txt', 'vue', 'yaml', 'yml', 'zsh'])
+const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'])
+/* What the gateway can turn into a PDF with LibreOffice, and so what the
+   viewer draws as pictures of pages: raven/rpc/pdf_preview.py's
+   RENDERABLE_SUFFIXES, which is the list to change first. */
+const OFFICE_EXT = new Set(['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx', 'odp', 'odt', 'ods', 'rtf'])
+/* Names that are never text, so opening one does not first read its head to
+   find that out. Anything else the kinds above do not claim is read and
+   looked at (sniffFile). */
+const BIN_EXT = new Set(['7z', 'a', 'aac', 'ai', 'avi', 'bin', 'bz2', 'ckpt', 'class', 'db', 'dll', 'dmg',
+  'dylib', 'eot', 'exe', 'flac', 'gguf', 'gz', 'heic', 'iso', 'jar', 'key', 'm4a', 'mkv', 'mov', 'mp3',
+  'mp4', 'npy', 'npz', 'numbers', 'o', 'ogg', 'onnx', 'otf', 'pages', 'parquet', 'pkl', 'psd', 'pt',
+  'pth', 'pyc', 'rar', 'safetensors', 'so', 'sqlite', 'tar', 'tgz', 'tif', 'tiff', 'ttf', 'wasm', 'wav',
+  'webm', 'woff', 'woff2', 'xz', 'zip', 'zst'])
+
+/* Whether a change to this path can be shown as a diff at all.
+
+   A file tool hands over its own patch, but a command hands over only a
+   before-and-after listing of its directory (`file_written` /
+   `file_removed`), so what the panel can draw for one of those is a count and
+   nothing else. That is true of every file a listing found, and it matters
+   only for the ones with no text in them: a picture or a deck has no lines to
+   number, so a reader who opens it gets an empty pane, while a script the
+   same command wrote can be shown in full.
+
+   Composed from the three extension tables the viewer already keeps rather
+   than a fourth list of its own -- the question is the same one `BIN_EXT` was
+   written for, so a format added there is known here too. */
+export const NON_TEXT_EXT = new Set([...IMG_EXT, ...OFFICE_EXT, ...BIN_EXT, 'pdf'])
+
+export const hasDiffBody = (p: string): boolean =>
+  !NON_TEXT_EXT.has((String(p).split('.').pop() || '').toLowerCase())
+
+export function fileKind(p: string): string {
+  const ext = (String(p).split('.').pop() || '').toLowerCase()
+  if (ext === 'md' || ext === 'mdx' || ext === 'markdown') return 'md'
+  if (IMG_EXT.has(ext)) return 'img'
+  if (ext === 'svg') return 'svg'
+  if (ext === 'pdf') return 'pdf'
+  if (OFFICE_EXT.has(ext)) return 'office'
+  if (ext === 'html' || ext === 'htm') return 'html'
+  if (ext === 'csv' || ext === 'tsv') return 'csv'
+  if (ext === 'json') return 'json'
+  if (ext === 'diff' || ext === 'patch') return 'diff'
+  if (TEXT_EXT.has(ext)) return 'code'
+  return 'bin'
+}
+
+/* Whether a file of kind `bin` is worth reading the head of: a name the
+   tables do not know (`x.model`, `Makefile`, `.gitignore`) is as often text as
+   not, and a name that is known to be binary is not worth the request. */
+export const sniffable = (p: string): boolean => !BIN_EXT.has(extOf(p))
+
+/* A NUL byte never appears in text, and a decoder that had to replace more
+   than a sliver of what it read was not reading UTF-8. It reads all it is
+   given: the sniff hands it the head, and the text view the whole file, so a
+   binary whose first 8 KB happen to read as text is still caught. */
+export function looksBinary(text: string): boolean {
+  if (text.includes('\u0000')) return true
+  let bad = 0
+  for (let i = text.indexOf('\ufffd'); i !== -1; i = text.indexOf('\ufffd', i + 1)) bad += 1
+  return bad > text.length * 0.02
+}
+export const RENDERED: Record<string, 1> = { md: 1, img: 1, svg: 1, pdf: 1, html: 1, csv: 1, json: 1, office: 1 }
+/* The kinds with two ways to be read, the rendered form and the text under it,
+   and so the only ones the bar offers the pair on. A picture and a deck draw
+   the same in either position, and a PDF read as text is its bytes as lines.
+   Offering them the pair anyway kept one bar for every rendered kind, at the
+   price of a control that did nothing or showed noise; the three still share
+   one bar without it. */
+export const TWO_VIEWS: Record<string, 1> = { md: 1, svg: 1, html: 1, csv: 1, json: 1 }
+
+/* ── which application gets a file the page cannot render ──────────────
+   Per EXTENSION, not one global default, because that is the shape of the
+   want: code in an editor, a deck in a presentation app. Front-end get()
+   mirrored to localStorage -- the gateway is told the name on each call
+   rather than holding the map, so nothing about this preference has to be
+   valid on another machine.
+
+   An application NAME only, matching the server's own rule. The check is
+   here as well as there because a value read back out of storage is input
+   too: a page that saved something else, or somebody editing the key by
+   hand, must not put it on a command line. */
+const APP_KEY = 'raven.openWith'
+const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}$/
+
+function readApps(): Record<string, string> {
+  let raw = ''
+  try {
+    raw = localStorage.getItem(APP_KEY) || ''
+  } catch {
+    return {}
+  }
+  if (!raw) return {}
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [ext, app] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof app === 'string' && APP_NAME.test(app)) out[ext.toLowerCase()] = app
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+let apps: Record<string, string> | null = null
+const appMap = (): Record<string, string> => (apps ??= readApps())
+
+export const extOf = (path: string): string => {
+  const name = String(path).split('/').pop() || ''
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+/* The application chosen for this file's kind, or null for the host default. */
+export const appFor = (path: string): string | null => appMap()[extOf(path)] || null
+
+export function setAppFor(path: string, app: string | null): void {
+  const ext = extOf(path)
+  if (!ext) return
+  const next = { ...appMap() }
+  if (app && APP_NAME.test(app)) next[ext] = app
+  else delete next[ext]
+  apps = next
+  try {
+    localStorage.setItem(APP_KEY, JSON.stringify(next))
+  } catch {
+    /* Private mode throws on write. Losing the preference is the whole cost. */
+  }
+}
+
+/* Whether handing a file to an application is worth offering at all: the
+   source has the verb, and the host it would run on is this desktop. A remote
+   serve would start the program on somebody else's screen, which is worse than
+   not offering -- so an unknown answer counts as no. */
+export const canOpenInApp = (): boolean => {
+  const src = source()
+  return !!src.openIn && !!src.hostIsLocal && src.hostIsLocal()
+}
+
+export function openInApp(path: string, app?: string | null): Promise<unknown> {
+  const src = source()
+  if (!src.openIn) return Promise.resolve(null)
+  return src.openIn(path, app || undefined)
+}
+
+/* Test seam only: the island roots this module made, and the state behind
+   them, both outlive a case's DOM. */
+export function _resetForTests(): void {
+  store._resetForTests()
+  apps = null
+}
+
+export function relToWorkspace(p: string): string | null {
+  const s = String(p || '')
+  const m = s.match(/(?:^|\/)(?:\.raven\/)?workspace\/(.+)$/)
+  if (m) return m[1] ?? null
+  if (s.startsWith('/') || s.startsWith('~')) return null
+  return s.replace(/^\.\//, '')
+}
+
+/* The desk's file opener, handed in by src/main.tsx for the same reason the
+   subagents panel takes its pane opener that way: features/desk/store
+   imports this module back. Null leaves the panel path below, which is what a
+   page without a desk has. */
+let deskFile: ((path: string) => void) | null = null
+
+export function setDeskOpener(fn: ((path: string) => void) | null): void {
+  deskFile = fn
+}
+
+let fileSeq = 0
+
+export function makeFile(p: string): WsFile {
+  return {
+    path: String(p), kind: fileKind(p), raw: false, text: null,
+    err: null, size: null, loading: false, seq: ++fileSeq,
+  }
+}
+
+export function showFile(p: string): void {
+  if (deskFile) {
+    deskFile(p)
+    return
+  }
+  const ws = shared()
+  ws.file = makeFile(p)
+  pane().show('file')
+}
+
+/* Everything the island opens goes through the real viewer when the source
+   can browse; the fixture source keeps the demo's honest toast instead. */
+export function openPath(p: string): void {
+  const src = source()
+  if (src.canBrowse) showFile(p)
+  else src.openPath?.(p)
+}
+
+export function openDelivery(p: string): void {
+  const src = source()
+  if (src.canBrowse) showFile(p)
+  else src.openPath?.(p)
+}
+
+/* Re-exported so the viewer does not have to know where the registry lives;
+   the store is what it already talks to. */
+export const markDeliveryMissing = (path: string): void => deliveries.markMissing(path)
+
+/* For the kinds that never read text: an <img> or a frame that failed to load
+   says nothing about WHY, and "gone" is one of several answers -- the viewer
+   caps a render at 25 MB and refuses a path outside what the agent may read,
+   and a file served 200 that the browser cannot decode fails here too. So the
+   status is asked for, and only 404 marks the shelf. The transcript's tile
+   probes the same way. */
+export async function probeDeliveryMissing(path: string): Promise<number | null> {
+  const probed = deliveries.byPath(path)
+  try {
+    const r = await fetch(fileURL(path), { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' })
+    if (r.status === 404) markProbedMissing(path, probed)
+    return r.status
+  } catch {
+    /* No answer at all is not an answer about the file. */
+    return null
+  }
+}
+
+function markProbedMissing(path: string, probed: DeliveryRow | null): void {
+  if (deliveries.byPath(path) === probed) deliveries.markMissing(path)
+}
+
+/* Fill the shelf from the gateway's registry for this conversation. Called when
+   a conversation is opened -- including the re-open a reconnect does, which is
+   the case that used to empty the shelf: the transcript comes back from disk,
+   and a turn still in flight has not been written to it yet, so its deliveries
+   were in the page's memory and nowhere else. */
+export async function loadDeliveries(sessionKey: string): Promise<void> {
+  const src = source()
+  if (!src.deliverables || !sessionKey) return
+  try {
+    const files = await src.deliverables(sessionKey)
+    /* Asked for one conversation, answered into whichever is open now: the
+       reader can click another session while this is in flight, and the
+       registry it would seed is that one's. `seed` cannot catch it -- it skips
+       a path only when a turn row already claims it, and A's paths are not
+       among B's -- so B's shelf would list files B never delivered, bubble them
+       as new, and park them under B on the way out. The same guard the agents
+       lists and the desk replay use. */
+    if (currentSession() === sessionKey) deliveries.seed(files)
+  } catch {
+    /* A registry that cannot be read leaves the shelf with whatever the turn
+       events gave it, which is what it had before this existed. */
+  }
+}
+
+/* Only 404 says the file is gone. A refusal (403) or a file too big to render
+   (413) is the viewer's limit, not the file's absence, and marking a
+   deliverable missing for either would put a lie on the shelf. */
+function refused(f: WsFile, status: number, probed: DeliveryRow | null): Error {
+  if (status === 404) markProbedMissing(f.path, probed)
+  return new Error(status === 403 ? t('gui.ws.file_denied')
+    : status === 404 ? t('gui.ws.file_gone')
+      : status === 413 ? t('gui.ws.file_big') : `HTTP ${status}`)
+}
+
+export async function loadFileText(f: WsFile): Promise<void> {
+  const probed = deliveries.byPath(f.path)
+  f.loading = true
+  try {
+    const r = await fetch(fileURL(f.path), { credentials: 'same-origin' })
+    if (!r.ok) throw refused(f, r.status, probed)
+    f.text = await r.text()
+  } catch (e) {
+    f.err = (e as Error).message || String(e)
+  } finally {
+    f.loading = false
+    redraw()
+  }
+}
+
+const SNIFF_BYTES = 8192
+
+/* Read the head of a file whose name did not say what it is, and decide from
+   the bytes. The route is a FileResponse, which answers a Range with 206 and
+   the file's whole size in Content-Range -- so the note gets its size from the
+   same request. Text sets `raw`, and the text view takes it from there; a file
+   the head covered whole is kept rather than fetched a second time. A file
+   over the view ceiling (413) cannot be read as text either way, so it stays
+   the note, and so does an answer that is no answer at all. */
+export async function sniffFile(f: WsFile): Promise<void> {
+  const probed = deliveries.byPath(f.path)
+  f.loading = true
+  try {
+    const r = await fetch(fileURL(f.path), {
+      credentials: 'same-origin', headers: { Range: `bytes=0-${SNIFF_BYTES - 1}` },
+    })
+    if (r.status === 403 || r.status === 404) throw refused(f, r.status, probed)
+    /* An empty file has no first byte to ask for; it is empty text. */
+    if (r.status === 416) {
+      f.raw = true
+      f.text = ''
+      f.size = 0
+      return
+    }
+    if (!r.ok) return
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    const total = Number((r.headers.get('Content-Range') || '').split('/')[1] || bytes.length)
+    if (Number.isFinite(total) && total >= 0) f.size = total
+    /* `stream` holds back a character the range cut in half, so the cut is not
+       counted against the file as a byte it could not decode. */
+    const whole = bytes.length >= total
+    const text = new TextDecoder('utf-8').decode(bytes, { stream: !whole })
+    if (looksBinary(text)) return
+    f.raw = true
+    if (whole) f.text = text
+  } catch (e) {
+    f.err = (e as Error).message || String(e)
+  } finally {
+    f.sniffed = true
+    f.loading = false
+    redraw()
+  }
+}
+
+/* A fresh record, for a page that has no saved one to put back. Nothing on the
+   page calls it -- leaving a conversation restores the snapshot kept for the
+   one being opened instead (state/session/residency.ts) -- and what reaches it
+   is the desk's cases, which need the empty record a first-ever session has. */
+export function reset(): void {
+  resetShared()
+}

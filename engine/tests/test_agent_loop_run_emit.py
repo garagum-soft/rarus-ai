@@ -1,0 +1,1607 @@
+"""Tests pinning AgentLoop's spine-native ``run_turn(req, emit)`` output behavior.
+
+run_turn fans the agent's output (streamed token deltas, reasoning, tool events,
+notices, media) onto a single ``emit`` and returns a TurnOutcome. These pin that
+observable behavior per category, plus origin gating and metadata reconstruction.
+Driven against a real AgentLoop with only the LLM provider + sandbox edges faked
+(never the output path itself).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass, field
+
+import pytest
+
+from raven.agent.hook import AgentHook, HookDecision
+from raven.agent.hook.adapters import DecisionConsumerAdapter
+from raven.agent.loop import AgentLoop
+from raven.agent.loop._shared import _MID_TURN_HEADER
+from raven.agent.loop.bundles import HostWiring
+from raven.contracts.llm_provider import ChatDelta, LLMResponse, ToolCallRequest
+from raven.contracts.loop_hooks import AgentHook, HookDecision
+from raven.contracts.tool import Tool, ToolResult
+from raven.providers.base import ErrorClassification
+from raven.sandbox import SandboxInitError
+from raven.spine.events import EpisodeStart as EvEpisodeStart
+from raven.spine.events import MediaOut as EvMediaOut
+from raven.spine.events import Notice as EvNotice
+from raven.spine.events import NoticeKind, ToolPhase
+from raven.spine.events import Reasoning as EvReasoning
+from raven.spine.events import StreamDelta as EvStreamDelta
+from raven.spine.events import Text as EvText
+from raven.spine.events import ToolEvent as EvToolEvent
+from raven.spine.message import ChatType, Media, Source
+from raven.spine.turn import Origin, TurnRequest
+
+
+@dataclass
+class _Reply:
+    channel: str
+    chat_id: str
+    content: str
+    media: list[str] = field(default_factory=list)
+
+
+class _FakeTool(Tool):
+    """Minimal no-sandbox tool so a tool-call turn can dispatch + fire events."""
+
+    @property
+    def name(self) -> str:
+        return "faketool"
+
+    @property
+    def description(self) -> str:
+        return "characterization fake tool"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs) -> str:
+        return "tool-ran"
+
+
+class _SplitTool(Tool):
+    """Returns ToolResult so the loop's unwrap branch is actually exercised."""
+
+    MODEL_TEXT = 'User answered: "Which base?" -> "main". Continue.'
+    DISPLAY_TEXT = "Which base? -> main"
+
+    @property
+    def name(self) -> str:
+        return "splittool"
+
+    @property
+    def description(self) -> str:
+        return "fake tool with distinct model-facing and display-facing text"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    def display_call(self, args: dict) -> str | None:
+        return "Which base?"
+
+    async def execute(self, **kwargs) -> ToolResult:
+        return ToolResult(model_text=self.MODEL_TEXT, display_text=self.DISPLAY_TEXT)
+
+
+class _FakeChatProvider:
+    """Non-streaming path: ``chat_with_retry`` returns scripted LLMResponses."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self._responses = list(responses)
+        self._i = 0
+
+    async def chat_with_retry(self, **kwargs) -> LLMResponse:
+        r = self._responses[min(self._i, len(self._responses) - 1)]
+        self._i += 1
+        return r
+
+    def get_default_model(self) -> str:
+        return "fake/model"
+
+
+class _FakeStreamProvider:
+    """Yields scripted stream chunks via ``chat_stream`` (the streaming path that
+    ``run(req, emit)`` takes when emitting ChatDelta tokens)."""
+
+    def __init__(self, chunks: list[ChatDelta]) -> None:
+        self._chunks = chunks
+
+    async def chat_stream(self, **kwargs):
+        for chunk in self._chunks:
+            yield chunk
+
+    def get_default_model(self) -> str:
+        return "fake/model"
+
+
+class _FakeStreamToolProvider:
+    """``chat_stream`` yields a fresh scripted chunk-list per call, so a
+    tool-call iteration works under run() (call 1 -> tool_call_delta, call 2 ->
+    final content). run() always wires on_token_delta, so every turn streams."""
+
+    def __init__(self, scripts: list[list[ChatDelta]]) -> None:
+        self._scripts = scripts
+        self._i = 0
+
+    async def chat_stream(self, **kwargs):
+        script = self._scripts[min(self._i, len(self._scripts) - 1)]
+        self._i += 1
+        for chunk in script:
+            yield chunk
+
+    def get_default_model(self) -> str:
+        return "fake/model"
+
+
+class _EmitCollector:
+    """Records every RunnerEvent run() emits, in order."""
+
+    def __init__(self) -> None:
+        self.events: list = []
+
+    async def __call__(self, ev) -> None:
+        self.events.append(ev)
+
+
+def _drain() -> list:
+    return []
+
+
+def _req(text: str, *, media=(), origin: Origin = Origin.USER) -> TurnRequest:
+    return TurnRequest(
+        origin=origin,
+        source=Source(channel="cli", chat_id="c", sender_id="u", chat_type=ChatType.DM),
+        text=text,
+        media=media,
+    )
+
+
+def _stub_edges(loop: AgentLoop) -> None:
+    """No-op the sandbox/MCP bring-up so a text-only turn runs without a VM."""
+
+    async def _noop(**_kw) -> None:
+        return None
+
+    loop._start_executor = _noop
+    loop._connect_mcp = _noop
+
+
+async def test_help_slash_returns_command_list_at_outbound_layer(tmp_path):
+    # Slash exit (:1294) pinned at the _process_message reply layer
+    # (media-capable; the old str-returning path would project metadata away).
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    _stub_edges(loop)
+
+    out = await loop._process_message(_req("/help"))
+
+    assert out is not None
+    content, _media = out
+    assert "Raven commands" in content
+
+
+async def test_hook_short_circuit_preserves_media_at_outbound_layer(tmp_path):
+    # MediaOut category: a before_user_inbound short-circuit (:1199) returns a
+    # reply that can carry media. Pinned at the reply layer —
+    # the old str-returning path would project media away, so collapse-drops-media would
+    # be untestable otherwise.
+    async def _decision(req: TurnRequest):
+        return _Reply(
+            channel=req.source.channel,
+            chat_id=req.source.chat_id,
+            content="short",
+            media=["/tmp/x.png"],
+        )
+
+    loop = AgentLoop(
+        provider=_FakeChatProvider([]), workspace=tmp_path, host=HostWiring(hooks=[DecisionConsumerAdapter(_decision)])
+    )
+    _stub_edges(loop)
+
+    out = await loop._process_message(_req("hi"))
+
+    assert out is not None
+    content, media = out
+    assert media == ["/tmp/x.png"]  # media survives the short-circuit return
+    assert content == "short"
+
+
+# ── run(req, emit) collapse — emit sequence per category ────────────
+
+
+async def test_run_streams_then_dissolves_main_response(tmp_path):
+    # Streaming main response: each non-empty chunk -> emit(ChatDelta); the
+    # return dissolves (b2) -> no trailing Text. Usage rides TurnOutcome.
+    chunks = [
+        ChatDelta(content="Hel"),
+        ChatDelta(content="lo", usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}),
+    ]
+    loop = AgentLoop(provider=_FakeStreamProvider(chunks), workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain)
+
+    # The turn opens with an episode boundary, then the two streamed deltas.
+    assert isinstance(sink.events[0], EvEpisodeStart) and sink.events[0].index == 0
+    deltas = [e for e in sink.events if isinstance(e, EvStreamDelta)]
+    assert [e.delta for e in deltas] == ["Hel", "lo"]
+    assert not any(isinstance(e, EvText) for e in sink.events)  # dissolved, no double
+    assert outcome.usage.total_tokens == 5
+    assert outcome.explicit_reply is True
+
+
+class _Announce(AgentHook):
+    """An after_send hook of the kind a deck engine installs: it appends to the reply."""
+
+    async def after_send(self, ctx):
+        return HookDecision(modified_content=f"{ctx.outbound_content}\n\nDeck: /out/deck.pptx")
+
+
+async def test_what_after_send_appends_reaches_a_streaming_sink_as_one_more_delta(tmp_path):
+    """The reply left as deltas before the hook ran; the tail is sent after it.
+
+    Measured on five test homes: the deck engine's "Deck: / Preview: / MEDIA:" lines
+    never reached the host over ACP, because a streamed turn's returned text was
+    dropped at the emit boundary and the hook only ever changed that text.
+    """
+    chunks = [ChatDelta(content="Hel"), ChatDelta(content="lo")]
+    loop = AgentLoop(provider=_FakeStreamProvider(chunks), workspace=tmp_path, host=HostWiring(hooks=[_Announce()]))
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    deltas = [e.delta for e in sink.events if isinstance(e, EvStreamDelta)]
+    assert deltas == ["Hel", "lo", "\n\nDeck: /out/deck.pptx"]
+    assert not any(isinstance(e, EvText) for e in sink.events)
+
+
+class _Rewrite(AgentHook):
+    """An after_send hook that replaces the reply wholesale rather than appending to it."""
+
+    async def after_send(self, ctx):
+        return HookDecision(modified_content="Completely different reply")
+
+
+async def test_what_after_send_rewrites_wholesale_is_not_sent_after_a_streamed_reply(tmp_path):
+    """The one branch of `_appended_by_hook` whose failure a user sees: the client has
+    the streamed "Hello" already, and a rewrite forwarded as if it were an append would
+    arrive as one more delta -- two replies on screen. Nothing is sent instead, and the
+    non-streamed path, which has sent nothing yet, carries the rewrite whole."""
+    from raven.agent.loop._shared import _appended_by_hook
+
+    assert _appended_by_hook("Hello", "Hello\n\nDeck: /out/d.pptx") == "\n\nDeck: /out/d.pptx"
+    assert _appended_by_hook("Hello", "Completely different reply") == ""
+    assert _appended_by_hook("Hello", "Hello") == ""
+    assert _appended_by_hook(None, "Deck: /out/d.pptx") == "Deck: /out/d.pptx"
+
+    chunks = [ChatDelta(content="Hel"), ChatDelta(content="lo")]
+    loop = AgentLoop(provider=_FakeStreamProvider(chunks), workspace=tmp_path, host=HostWiring(hooks=[_Rewrite()]))
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert [e.delta for e in sink.events if isinstance(e, EvStreamDelta)] == ["Hel", "lo"]
+    assert not any(isinstance(e, EvText) for e in sink.events)
+
+
+async def test_what_after_send_appends_is_not_sent_twice_on_the_non_streamed_path(tmp_path):
+    loop = AgentLoop(
+        provider=_FakeChatProvider([LLMResponse(content="Hello", finish_reason="stop")]),
+        workspace=tmp_path,
+        host=HostWiring(hooks=[_Announce()]),
+    )
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain, stream=False)
+
+    texts = [e.content for e in sink.events if isinstance(e, EvText)]
+    assert texts == ["Hello\n\nDeck: /out/deck.pptx"]
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)
+
+
+async def test_run_emits_reasoning_then_stream(tmp_path):
+    chunks = [
+        ChatDelta(content=None, reasoning_content="think"),
+        ChatDelta(content="answer"),
+    ]
+    loop = AgentLoop(provider=_FakeStreamProvider(chunks), workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert isinstance(sink.events[0], EvEpisodeStart)
+    reasoning = next(e for e in sink.events if isinstance(e, EvReasoning))
+    assert reasoning.content == "think"
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "answer" for e in sink.events)
+    assert not any(isinstance(e, EvText) for e in sink.events)
+
+
+async def test_run_tool_call_emits_tool_events_and_notice(tmp_path):
+    # Tool-call turn under run(): emit(ToolEvent start) + emit(Notice tool_hint) +
+    # emit(ToolEvent complete), then the final answer streams + dissolves.
+    # The ToolEvent schema: start carries tool_call_id/name/
+    # arguments, complete carries tool_call_id/result_preview/truncated.
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "faketool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    tool_events = [e for e in sink.events if isinstance(e, EvToolEvent)]
+    start = next(e for e in tool_events if e.phase == ToolPhase.START)
+    assert start.tool_call_id == "t1" and start.name == "faketool" and start.arguments == {}
+    complete = next(e for e in tool_events if e.phase == ToolPhase.COMPLETE)
+    assert complete.tool_call_id == "t1" and complete.result_preview == "tool-ran"
+    assert complete.truncated is False
+    # The tool-call hint rides NoticeKind.TOOL_HINT (kept distinct from PROGRESS so
+    # an outlet gates it on send_tool_hints), not merged into PROGRESS.
+    assert any(isinstance(e, EvNotice) and e.kind is NoticeKind.TOOL_HINT for e in sink.events)
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "done" for e in sink.events)
+    assert not any(isinstance(e, EvText) for e in sink.events)  # streamed final dissolves
+
+
+@pytest.mark.parametrize("blocking", [True, False])
+async def test_tool_start_event_carries_the_registry_blocking_verdict(tmp_path, blocking):
+    """ToolEvent(START).blocking must mirror the registered tool's own flag.
+
+    This is the whole chain the web channel depends on: registry -> loop payload
+    -> ToolEvent -> wire. A blocking tool runs a sub-agent with no automatic
+    deadline and emits nothing until it finishes, so a client that clocks the
+    stream has to learn from this field that the silence is expected.
+    """
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "faketool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    tool = _FakeTool()
+    tool.blocking_interaction = blocking
+    loop.tools.register(tool)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    start = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase == ToolPhase.START)
+    assert start.blocking is blocking
+
+
+async def test_tool_result_splits_model_text_from_display_preview(tmp_path):
+    # The ToolResult branch: the model's context gets model_text while the UI
+    # event's preview carries display_text. Every other fake tool in this file
+    # returns a bare str, so without this the unwrap branch never runs.
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t9", "function": {"name": "splittool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_SplitTool())
+
+    recorded: list[tuple[str, str, str]] = []
+    original_add = loop.context.add_tool_result
+
+    def _record(messages, tool_call_id, tool_name, result, *, trusted_note=""):
+        recorded.append((tool_call_id, tool_name, result))
+        return original_add(messages, tool_call_id, tool_name, result)
+
+    loop.context.add_tool_result = _record  # type: ignore[method-assign]
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    # What the model reads.
+    assert recorded and recorded[0][:2] == ("t9", "splittool")
+    assert recorded[0][2] == _SplitTool.MODEL_TEXT
+    # What the transcript shows -- display_text, not the model sentence.
+    complete = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.COMPLETE)
+    assert complete.result_preview == _SplitTool.DISPLAY_TEXT
+    assert complete.truncated is False
+    # display_call rides tool.start so the row can label itself.
+    start = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.START)
+    assert start.display == "Which base?"
+
+
+async def test_run_emits_one_episode_start_per_model_call(tmp_path):
+    # Episode boundary: run() emits one EpisodeStart per model call, 0-based and
+    # increasing. This turn has two calls (a tool-call iteration, then a stop
+    # iteration), so indices are [0, 1], and the first boundary precedes the
+    # first tool event of that call.
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "faketool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    episodes = [e for e in sink.events if isinstance(e, EvEpisodeStart)]
+    assert [e.index for e in episodes] == [0, 1]
+    first_ep = next(i for i, e in enumerate(sink.events) if isinstance(e, EvEpisodeStart))
+    first_tool = next(i for i, e in enumerate(sink.events) if isinstance(e, EvToolEvent))
+    assert first_ep < first_tool
+
+
+async def test_inject_message_merged_before_next_iteration(tmp_path):
+    # BusyPolicy.INJECT: a message injected mid-turn is drained at the next
+    # iteration's top and appended as a user message before that LLM call.
+    class _RecordingStreamToolProvider:
+        def __init__(self, scripts):
+            self._scripts = scripts
+            self._i = 0
+            self.calls: list[list[dict]] = []
+
+        async def chat_stream(self, **kwargs):
+            self.calls.append(list(kwargs.get("messages") or []))
+            script = self._scripts[min(self._i, len(self._scripts) - 1)]
+            self._i += 1
+            for chunk in script:
+                yield chunk
+
+        def get_default_model(self) -> str:
+            return "fake/model"
+
+    provider = _RecordingStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "faketool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    injects: list[list] = [[], [_req("also check the logs")]]
+    n = 0
+
+    def _drain_inject() -> list:
+        nonlocal n
+        out = injects[n] if n < len(injects) else []
+        n += 1
+        return out
+
+    await loop.run_turn(_req("start"), _EmitCollector(), _drain_inject, stream=True)
+
+    assert len(provider.calls) >= 2  # the tool call drove a second iteration
+    second = provider.calls[1]
+    assert any(m.get("role") == "user" and "also check the logs" in str(m.get("content", "")) for m in second), (
+        f"injected message not merged into the second iteration: {second}"
+    )
+
+
+class _RecordingStreamProvider:
+    """Plays one scripted stream per iteration and keeps every call's messages."""
+
+    def __init__(self, scripts):
+        self._scripts = scripts
+        self._i = 0
+        self.calls: list[list[dict]] = []
+
+    async def chat_stream(self, **kwargs):
+        self.calls.append(list(kwargs.get("messages") or []))
+        script = self._scripts[min(self._i, len(self._scripts) - 1)]
+        self._i += 1
+        for chunk in script:
+            yield chunk
+
+    def get_default_model(self) -> str:
+        return "fake/model"
+
+
+def _stream_scripts(gaps: int) -> list[list[ChatDelta]]:
+    """A tool call per gap -- each one drives another iteration -- then the answer."""
+    tool_calls = [
+        [
+            ChatDelta(
+                content=None,
+                tool_call_delta={
+                    "tool_calls": [{"index": 0, "id": f"t{i}", "function": {"name": "faketool", "arguments": "{}"}}]
+                },
+            )
+        ]
+        for i in range(gaps)
+    ]
+    return [*tool_calls, [ChatDelta(content="done")]]
+
+
+def _labelled(messages: list[dict]) -> list[dict]:
+    return [m for m in messages if str(m.get("content") or "").startswith(_MID_TURN_HEADER)]
+
+
+def _gap_drain(gaps: list[list]):
+    """A drain that answers one gap's arrivals per iteration, in order."""
+    state = {"n": 0}
+
+    def _drain_inject() -> list:
+        out = gaps[state["n"]] if state["n"] < len(gaps) else []
+        state["n"] += 1
+        return out
+
+    return _drain_inject
+
+
+async def test_mid_turn_messages_reach_the_model_as_one_labelled_message(tmp_path):
+    # Two corrections typed into one gap are one user message on the wire, under
+    # the header: as two bare user messages the model reads the second as a new
+    # question and answers that instead of steering the work it is doing.
+    provider = _RecordingStreamProvider(_stream_scripts(1))
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    drain = _gap_drain([[], [_req("wait, skip the 2023 numbers"), _req("Q4 only")]])
+    await loop.run_turn(_req("summarise the report"), _EmitCollector(), drain, stream=True)
+
+    second = provider.calls[1]
+    labelled = _labelled(second)
+    assert len(labelled) == 1, second
+    assert labelled[0]["role"] == "user"
+    # In the order they arrived, joined by a blank line, under the one header.
+    assert labelled[0]["content"] == f"{_MID_TURN_HEADER}\n\nwait, skip the 2023 numbers\n\nQ4 only"
+    assert len([m for m in second if m.get("role") == "user"]) == 2, "the question, and the two arrivals as one"
+
+
+async def test_a_single_mid_turn_message_is_labelled_too(tmp_path):
+    # The header is what says "this arrived while you worked", so it is not an
+    # artifact of there being two: one correction needs it just as much.
+    provider = _RecordingStreamProvider(_stream_scripts(1))
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    drain = _gap_drain([[], [_req("only the last quarter")]])
+    await loop.run_turn(_req("summarise the report"), _EmitCollector(), drain, stream=True)
+
+    assert [m["content"] for m in _labelled(provider.calls[1])] == [f"{_MID_TURN_HEADER}\n\nonly the last quarter"]
+
+
+async def test_a_mid_turn_attachment_the_message_already_names_is_not_named_twice(tmp_path):
+    # The page bakes its own attachment note into the text and derives `media`
+    # from it, so the drain's note repeated the path -- and the reader, whose
+    # live bubble showed the bare sentence, came back from a reload to an
+    # absolute path written into their own words.
+    provider = _RecordingStreamProvider(_stream_scripts(1))
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    typed = "please look at the attached note\n\n[attachments]\n- /tmp/rt_note.txt"
+    drain = _gap_drain([[], [_req(typed, media=(Media(path="/tmp/rt_note.txt", mime="text/plain", kind="file"),))]])
+    await loop.run_turn(_req("summarise the report"), _EmitCollector(), drain, stream=True)
+
+    assert [m["content"] for m in _labelled(provider.calls[1])] == [f"{_MID_TURN_HEADER}\n\n{typed}"]
+
+
+async def test_a_mid_turn_attachment_the_message_does_not_name_is_still_named(tmp_path):
+    # The other half: a sender that hands over a file without naming it -- a
+    # channel's own intake -- must still have it reach the model.
+    provider = _RecordingStreamProvider(_stream_scripts(1))
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    drain = _gap_drain(
+        [[], [_req("look at this", media=(Media(path="/tmp/rt_note.txt", mime="text/plain", kind="file"),))]]
+    )
+    await loop.run_turn(_req("summarise the report"), _EmitCollector(), drain, stream=True)
+
+    assert [m["content"] for m in _labelled(provider.calls[1])] == [
+        f"{_MID_TURN_HEADER}\n\nlook at this\n[injected message; attached files: /tmp/rt_note.txt]"
+    ]
+
+
+async def test_mid_turn_messages_from_different_gaps_stay_apart(tmp_path):
+    # Folding is per adjacent run, not per turn: the work between two gaps is
+    # what the second correction is about, so merging across it would present
+    # the two as one thought and place them both before that work.
+    provider = _RecordingStreamProvider(_stream_scripts(2))
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_FakeTool())
+
+    drain = _gap_drain([[], [_req("skip the 2023 numbers")], [_req("Q4 only")]])
+    await loop.run_turn(_req("summarise the report"), _EmitCollector(), drain, stream=True)
+
+    third = provider.calls[2]
+    assert [m["content"] for m in _labelled(third)] == [
+        f"{_MID_TURN_HEADER}\n\nskip the 2023 numbers",
+        f"{_MID_TURN_HEADER}\n\nQ4 only",
+    ]
+
+
+async def test_autofill_rows_are_written_in_as_a_tool_call(tmp_path):
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    messages: list[dict] = []
+    loop._flush_autofill(
+        messages,
+        [
+            {
+                "agent": "raven-code",
+                "instance": "a1b2",
+                "summary": "Which branch? -> feat/x (answered for you)",
+            }
+        ],
+    )
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["tool_calls"][0]["function"]["name"] == "answer_for_user"
+    assert messages[1]["role"] == "tool"
+    # The pairing the Chat Completions transport rejects when it is broken.
+    assert messages[1]["tool_call_id"] == messages[0]["tool_calls"][0]["id"]
+    assert "feat/x" in messages[1]["content"]
+    # Host-minted fields only. The sub-agent's own wording would arrive here
+    # unfenced -- nothing wraps an assistant message's arguments, while the
+    # summary above went through `add_tool_result` and is wrapped.
+    arguments = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])
+    assert arguments == {"agent": "raven-code", "instance": "a1b2"}
+
+
+async def test_no_rows_writes_nothing(tmp_path):
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    messages: list[dict] = []
+    loop._flush_autofill(messages, [])
+    assert messages == []
+
+
+class _RecordingAutofill:
+    """Stands in for the turn's Autofill.
+
+    ``set_snapshot`` keeps a copy rather than the live reference the real one
+    stores, so a test can tell what the list held at publish time.
+    """
+
+    def __init__(self) -> None:
+        self._rows: list[dict] = []
+        self.snapshots: list[list[dict]] = []
+
+    def record(self, row: dict) -> None:
+        self._rows.append(row)
+
+    def pending_rows(self) -> list[dict]:
+        rows, self._rows = self._rows, []
+        return rows
+
+    def set_snapshot(self, messages: list[dict]) -> None:
+        self.snapshots.append(list(messages))
+
+
+async def test_a_row_recorded_during_a_tool_call_reaches_the_next_llm_call(tmp_path):
+    # The seam: a sub-agent's question is answered while its spawn tool is still
+    # running, which is why the row can only be written at the next iteration's
+    # top -- splicing it in mid-batch would orphan the running tool_call.
+    from raven.acp_client.asker import start_ask_turn
+
+    auto = _RecordingAutofill()
+
+    class _AskingTool(_FakeTool):
+        """A spawn stand-in: its sub-agent asks while the tool is still running."""
+
+        async def execute(self, **kwargs) -> str:
+            auto.record(
+                {
+                    "agent": "raven-code",
+                    "instance": "a1b2",
+                    "summary": "Which branch? -> feat/x (answered for you)",
+                }
+            )
+            return "spawned"
+
+    class _RecordingStreamToolProvider:
+        def __init__(self, scripts):
+            self._scripts = scripts
+            self._i = 0
+            self.calls: list[list[dict]] = []
+
+        async def chat_stream(self, **kwargs):
+            self.calls.append(list(kwargs.get("messages") or []))
+            script = self._scripts[min(self._i, len(self._scripts) - 1)]
+            self._i += 1
+            for chunk in script:
+                yield chunk
+
+        def get_default_model(self) -> str:
+            return "fake/model"
+
+    provider = _RecordingStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "faketool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_AskingTool())
+    start_ask_turn(None, auto, conversation_id="tui:c1")
+
+    await loop.run_turn(_req("start"), _EmitCollector(), _drain, stream=True)
+
+    def _row(messages: list[dict]) -> dict | None:
+        return next((m for m in messages if m.get("role") == "tool" and m.get("name") == "answer_for_user"), None)
+
+    assert _row(provider.calls[0]) is None  # nothing had been answered yet
+    row = _row(provider.calls[1])
+    assert row is not None, f"autofill row not written into the second iteration: {provider.calls[1]}"
+    assert "feat/x" in row["content"]
+    # Published on every iteration, not once, and after the flush -- so the
+    # second publish carries what the first turn's questions were answered with.
+    assert len(auto.snapshots) == 2
+    assert _row(auto.snapshots[0]) is None
+    assert _row(auto.snapshots[1]) is not None
+
+
+async def test_run_slash_emits_text_not_streamed(tmp_path):
+    # /help is an early return (no LLM stream) -> streamed=False -> emit(Text).
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("/help"), sink, _drain)
+
+    texts = [e for e in sink.events if isinstance(e, EvText)]
+    assert len(texts) == 1 and "Raven commands" in texts[0].content
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)
+    assert outcome.explicit_reply is True
+
+
+async def test_run_short_circuit_emits_media_before_text(tmp_path):
+    # MediaOut category: a hook short-circuit returns media + content. MediaOut is
+    # independent of the stream and precedes Text.
+    async def _decision(req: TurnRequest):
+        return _Reply(
+            channel=req.source.channel,
+            chat_id=req.source.chat_id,
+            content="short",
+            media=["/tmp/x.png"],
+        )
+
+    loop = AgentLoop(
+        provider=_FakeChatProvider([]), workspace=tmp_path, host=HostWiring(hooks=[DecisionConsumerAdapter(_decision)])
+    )
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    kinds = [type(e).__name__ for e in sink.events]
+    assert kinds == ["MediaOut", "Text"]  # media first, then text
+    assert sink.events[0].media[0].path == "/tmp/x.png"
+    assert sink.events[1].content == "short"
+
+
+async def test_run_propagates_sandbox_error_not_error_string(tmp_path):
+    # Unlike the old string-returning path (returned "[Sandbox error]"), run() lets the exception
+    # propagate so the lane turns it into TurnFailed.
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+
+    async def _boom() -> None:
+        raise SandboxInitError("test: sandbox down")
+
+    loop._start_executor = _boom
+    sink = _EmitCollector()
+
+    with pytest.raises(SandboxInitError):
+        await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert not any(isinstance(e, EvText) for e in sink.events)
+
+
+async def test_run_propagates_mid_turn_error_not_sorry_text(tmp_path):
+    # N-TURNFAILED second source: a mid-turn provider error propagates out of
+    # _process_message (the "Sorry" catch lives in _dispatch, the bus wrapper run()
+    # does not use) -> run() re-raises -> the lane makes TurnFailed, not a Text.
+    class _BoomStreamProvider:
+        async def chat_stream(self, **kwargs):
+            raise RuntimeError("mid-turn boom")
+            yield  # unreachable; makes this an async generator
+
+        def get_default_model(self) -> str:
+            return "fake/model"
+
+    loop = AgentLoop(provider=_BoomStreamProvider(), workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    with pytest.raises(RuntimeError):
+        await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert not any(isinstance(e, EvText) for e in sink.events)
+
+
+def _message_tool_call(arguments: str) -> ChatDelta:
+    return ChatDelta(
+        content=None,
+        tool_call_delta={
+            "tool_calls": [{"index": 0, "id": "m1", "function": {"name": "message", "arguments": arguments}}]
+        },
+    )
+
+
+async def test_run_message_tool_text_streams_and_dissolves(tmp_path):
+    # The message tool's reply routes through on_token -> ChatDelta (b2), then
+    # _process_message returns None -> no trailing Text. explicit_reply is still
+    # True (the agent did reply via the tool).
+    provider = _FakeStreamToolProvider(
+        [
+            [_message_tool_call('{"content": "hi via tool"}')],
+            [ChatDelta(content="")],  # second iteration: nothing more, finish
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "hi via tool" for e in sink.events)
+    assert not any(isinstance(e, EvText) for e in sink.events)  # tool reply dissolves
+    assert outcome.explicit_reply is True
+
+
+async def test_run_message_tool_reply_outlives_a_failed_follow_up_call(tmp_path):
+    # The tool delivered the reply; the model call after it failed for good. The
+    # turn is answered, so it ends as it always has -- no AnswerlessTurnError, no
+    # error text delivered as a second reply.
+    provider = _FakeStreamToolProvider(
+        [
+            [_message_tool_call('{"content": "hi via tool"}')],
+            [
+                ChatDelta(
+                    content="Error calling LLM (network@fake): boom",
+                    finish_reason="error",
+                    error_classification=ErrorClassification("network", retryable=False),
+                )
+            ],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain)
+
+    assert outcome.explicit_reply is True
+    assert not any(isinstance(e, EvText) for e in sink.events)
+    assert not any(isinstance(e, EvStreamDelta) and "Error calling LLM" in e.delta for e in sink.events)
+
+
+async def test_run_message_tool_media_is_not_dropped(tmp_path):
+    # Regression guard: a message-tool reply carrying media must emit MediaOut
+    # (media is independent of the token stream). The tool path returns None from
+    # _process_message, so the return boundary never sees it — _route_to_stream
+    # must emit the media itself, matching what the bus path delivers.
+    provider = _FakeStreamToolProvider(
+        [
+            [_message_tool_call('{"content": "see this", "media": ["/tmp/pic.png"]}')],
+            [ChatDelta(content="")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain)
+
+    media = [e for e in sink.events if isinstance(e, EvMediaOut)]
+    assert media and media[0].media[0].path == "/tmp/pic.png"
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "see this" for e in sink.events)
+    assert outcome.explicit_reply is True
+
+
+# ── stream=False (REPL assembly): reply is one Text, no ChatDelta ──
+
+
+async def test_run_stream_false_main_reply_is_one_text(tmp_path):
+    # build_one_shot_spine wires stream=False -> non-streaming chat_with_retry -> the reply
+    # is one Text (CliOutlet renders it), never a ChatDelta.
+    provider = _FakeChatProvider([LLMResponse(content="full reply", finish_reason="stop")])
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain, stream=False)
+
+    texts = [e for e in sink.events if isinstance(e, EvText)]
+    assert len(texts) == 1 and texts[0].content == "full reply"
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)
+    assert outcome.explicit_reply is True
+
+
+async def test_run_stream_false_message_tool_emits_text(tmp_path):
+    # The message-tool reply under stream=False must emit Text, not ChatDelta —
+    # else a non-streaming outlet (CliOutlet) would eat the delta and the REPL
+    # would go silent for tool replies.
+    provider = _FakeChatProvider(
+        [
+            LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="m1", name="message", arguments={"content": "hi via tool"})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="", finish_reason="stop"),
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    outcome = await loop.run_turn(_req("hi"), sink, _drain, stream=False)
+
+    assert any(isinstance(e, EvText) and e.content == "hi via tool" for e in sink.events)
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)
+    assert outcome.explicit_reply is True
+
+
+# ── origin gates the user-inbound hook (engagement); magic-key fallback ──
+
+
+def _hook_loop(tmp_path):
+    """An AgentLoop whose decision_consumer short-circuits with 'hook-fired' when
+    the user-inbound hook runs; otherwise the (streaming) LLM reply 'llm' streams.
+    So the hook firing vs being skipped is observable from the output."""
+
+    async def _decision(req: TurnRequest):
+        return _Reply(
+            channel=req.source.channel,
+            chat_id=req.source.chat_id,
+            content="hook-fired",
+        )
+
+    loop = AgentLoop(
+        provider=_FakeStreamProvider([ChatDelta(content="llm")]),
+        workspace=tmp_path,
+        host=HostWiring(hooks=[DecisionConsumerAdapter(_decision)]),
+    )
+    _stub_edges(loop)
+    return loop
+
+
+async def test_run_turn_user_origin_fires_user_inbound_hook(tmp_path):
+    sink = _EmitCollector()
+    await _hook_loop(tmp_path).run_turn(_req("hi", origin=Origin.USER), sink, _drain)
+    # USER -> hook fires -> short-circuits, the LLM is never reached.
+    assert any(isinstance(e, EvText) and e.content == "hook-fired" for e in sink.events)
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)
+
+
+async def test_run_turn_cron_origin_fires_hook_like_user(tmp_path):
+    # D-ENGAGE replicate: cron is NOT proactive-suppressed -> hook fires (as today).
+    sink = _EmitCollector()
+    await _hook_loop(tmp_path).run_turn(_req("tick", origin=Origin.CRON), sink, _drain)
+    assert any(isinstance(e, EvText) and e.content == "hook-fired" for e in sink.events)
+
+
+async def test_run_turn_sentinel_origin_suppresses_user_inbound_hook(tmp_path):
+    sink = _EmitCollector()
+    await _hook_loop(tmp_path).run_turn(_req("nudge", origin=Origin.SENTINEL), sink, _drain)
+    # SENTINEL -> hook suppressed -> proceeds to the LLM (no short-circuit).
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "llm" for e in sink.events)
+    assert not any(isinstance(e, EvText) and e.content == "hook-fired" for e in sink.events)
+
+
+async def test_run_turn_subagent_origin_suppresses_user_inbound_hook(tmp_path):
+    sink = _EmitCollector()
+    await _hook_loop(tmp_path).run_turn(_req("result", origin=Origin.SUBAGENT), sink, _drain)
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "llm" for e in sink.events)
+    assert not any(isinstance(e, EvText) and e.content == "hook-fired" for e in sink.events)
+
+
+async def _process_via_chat(loop, msg):
+    # _process_message with no callbacks -> non-streaming chat_with_retry path.
+    return await loop._process_message(msg)
+
+
+async def test_process_message_origin_none_plain_fires_hook(tmp_path):
+    # The legacy path passed origin=None; the safe default
+    # (origin not in _SKIP_*) treats it as a user inbound and fires the hook.
+    async def _decision(req: TurnRequest):
+        return _Reply(
+            channel=req.source.channel,
+            chat_id=req.source.chat_id,
+            content="hook-fired",
+        )
+
+    loop = AgentLoop(
+        provider=_FakeChatProvider([LLMResponse(content="llm", finish_reason="stop")]),
+        workspace=tmp_path,
+        host=HostWiring(hooks=[DecisionConsumerAdapter(_decision)]),
+    )
+    _stub_edges(loop)
+    out = await _process_via_chat(loop, _req("hi"))
+    assert out is not None
+    content, _media = out
+    assert content == "hook-fired"
+
+
+async def test_run_turn_reconstructs_metadata_from_source_extras(tmp_path):
+    # channel metadata rides Source.extras; run_turn reconstructs it into
+    # the turn metadata so consumers (here _set_tool_context, which reads
+    # message_id for reply threading) still see it.
+    loop = AgentLoop(
+        provider=_FakeChatProvider([LLMResponse(content="ok", finish_reason="stop", tool_calls=[])]),
+        workspace=tmp_path,
+    )
+    _stub_edges(loop)
+    seen: dict = {}
+    real = loop._set_tool_context
+
+    def _spy(channel, chat_id, message_id=None, session_key=None):
+        seen["message_id"] = message_id
+        return real(channel, chat_id, message_id, session_key=session_key)
+
+    loop._set_tool_context = _spy
+
+    req = TurnRequest(
+        origin=Origin.USER,
+        source=Source(
+            channel="tg",
+            chat_id="c",
+            sender_id="u",
+            chat_type=ChatType.DM,
+            extras={"message_id": "m1"},
+        ),
+        text="hi",
+    )
+    await loop.run_turn(req, _EmitCollector(), _drain, stream=False)
+    assert seen.get("message_id") == "m1"  # extras -> metadata -> _set_tool_context
+
+
+# ── deliver_text: verbatim background delivery, skips the model (2b) ──
+
+
+async def test_run_turn_deliver_text_emits_verbatim_skips_model_and_indexes(tmp_path):
+    # A background task pushes a finished result back via deliver_text: run_turn
+    # emits it as one Text verbatim, records it to the session, and hands it to
+    # the backend index — and never touches the model.
+    class _NoCallProvider:
+        async def chat_stream(self, **kwargs):
+            raise AssertionError("model must not be called for a deliver_text turn")
+            yield  # unreachable; keeps this an async generator
+
+        async def chat_with_retry(self, **kwargs):
+            raise AssertionError("model must not be called for a deliver_text turn")
+
+        def get_default_model(self) -> str:
+            return "fake/model"
+
+    stored: list = []
+
+    class _FakeBackend:
+        async def store(self, key, messages, *, metadata=None) -> None:
+            stored.append((key, messages))
+
+    loop = AgentLoop(provider=_NoCallProvider(), workspace=tmp_path)
+    _stub_edges(loop)
+    loop.backend = _FakeBackend()
+    sink = _EmitCollector()
+
+    req = TurnRequest(
+        origin=Origin.SUBAGENT,
+        source=Source(channel="weixin", chat_id="c", sender_id="subagent", chat_type=ChatType.DM),
+        text="",
+        conversation="weixin:c",
+        deliver_text="FULL REPORT [1]",
+    )
+    outcome = await loop.run_turn(req, sink, _drain, stream=False)
+
+    texts = [e for e in sink.events if isinstance(e, EvText)]
+    assert len(texts) == 1 and texts[0].content == "FULL REPORT [1]"
+    assert not any(isinstance(e, EvStreamDelta) for e in sink.events)  # not streamed through the model
+    assert outcome.explicit_reply is True
+
+    session = loop.sessions.get_or_create("weixin:c")
+    assert any(m.get("role") == "assistant" and m.get("content") == "FULL REPORT [1]" for m in session.messages)
+    await loop.drain_backend_stores(timeout=5.0)
+    assert stored and stored[0][0] == "weixin:c"
+    assert stored[0][1][0]["content"] == "FULL REPORT [1]"
+
+
+async def test_run_turn_deliver_text_persists_before_emit(tmp_path):
+    # save-then-send order: if the session save fails, nothing was emitted, so
+    # the user is never left with a delivered message that no turn recorded.
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    _stub_edges(loop)
+
+    def _boom(_session) -> None:
+        raise RuntimeError("save failed")
+
+    loop.sessions.save = _boom
+    sink = _EmitCollector()
+
+    req = TurnRequest(
+        origin=Origin.SUBAGENT,
+        source=Source(channel="weixin", chat_id="c", sender_id="subagent", chat_type=ChatType.DM),
+        text="",
+        conversation="weixin:c",
+        deliver_text="REPORT",
+    )
+    with pytest.raises(RuntimeError):
+        await loop.run_turn(req, sink, _drain, stream=False)
+    assert not any(isinstance(e, EvText) for e in sink.events)  # save failed -> nothing delivered
+
+
+async def test_run_turn_empty_extras_reconstructs_empty_metadata(tmp_path):
+    # No-regression: a host source carries no extras -> metadata={} ->
+    # _set_tool_context sees message_id=None.
+    loop = AgentLoop(
+        provider=_FakeChatProvider([LLMResponse(content="ok", finish_reason="stop", tool_calls=[])]),
+        workspace=tmp_path,
+    )
+    _stub_edges(loop)
+    seen: dict = {"message_id": "sentinel"}
+
+    def _spy(channel, chat_id, message_id=None, session_key=None):
+        seen["message_id"] = message_id
+
+    loop._set_tool_context = _spy
+    await loop.run_turn(_req("hi"), _EmitCollector(), _drain, stream=False)
+    assert seen["message_id"] is None  # empty extras -> metadata={} -> no message_id
+
+
+async def test_a_failing_display_call_costs_the_label_not_the_turn(tmp_path):
+    """``display_call`` gets the model's raw arguments -- the registry's cast and
+    validation run later, on the execute path -- so it sees shapes the schema
+    forbids. It only labels a transcript row, yet an exception from it used to
+    leave the emit and end the turn with no reply at all: that is how a
+    JSON-encoded array argument took a turn down.
+
+    Driven through ``run_turn`` rather than against the helper, so that inlining
+    the guard back into the call site fails here instead of passing quietly.
+    """
+
+    class _ExplodingLabel(Tool):
+        @property
+        def name(self) -> str:
+            return "exploding"
+
+        @property
+        def description(self) -> str:
+            return "raises from display_call"
+
+        @property
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}}
+
+        def display_call(self, args: dict) -> str | None:
+            raise AttributeError("'str' object has no attribute 'get'")
+
+        async def execute(self, **kwargs) -> str:
+            return "tool-ran"
+
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "exploding", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_ExplodingLabel())
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    start = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.START)
+    assert start.display is None  # the label is what was lost
+    complete = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.COMPLETE)
+    assert complete.result_preview == "tool-ran"  # the tool still ran
+    assert any(isinstance(e, EvStreamDelta) and e.delta == "done" for e in sink.events)  # the turn finished
+
+
+async def test_a_working_display_call_still_labels_the_row(tmp_path):
+    class _LabelledTool(Tool):
+        @property
+        def name(self) -> str:
+            return "labelled"
+
+        @property
+        def description(self) -> str:
+            return "labels its row"
+
+        @property
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}}
+
+        def display_call(self, args: dict) -> str | None:
+            return "the label"
+
+        async def execute(self, **kwargs) -> str:
+            return "tool-ran"
+
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t1", "function": {"name": "labelled", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_LabelledTool())
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    start = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.START)
+    assert start.display == "the label"
+
+
+async def test_run_turn_hands_the_mcp_connect_off_instead_of_awaiting_it(tmp_path):
+    """The call site, not just the mechanism.
+
+    This replaces a test that asserted the turn passed a 90s bound. The bound is
+    gone with the wait: a server parked at the browser-authorization step blocks
+    on a human, and a turn that waits on it at all is the defect (measured once at
+    10m35s). The turn must reach ``prewarm_mcp`` and must not await a connect.
+    """
+    prewarms = 0
+    awaited = 0
+
+    loop = AgentLoop(provider=_FakeStreamProvider([ChatDelta(content="hi")]), workspace=tmp_path)
+    _stub_edges(loop)
+
+    def _prewarm() -> None:
+        nonlocal prewarms
+        prewarms += 1
+
+    async def _connect() -> None:  # pragma: no cover - reaching this is the failure
+        nonlocal awaited
+        awaited += 1
+
+    loop.prewarm_mcp = _prewarm
+    loop._connect_mcp = _connect
+
+    await loop.run_turn(_req("hi"), _EmitCollector(), _drain)
+
+    assert prewarms == 1
+    assert awaited == 0
+
+
+# ── run_turn releases the conversation's foreground DAG runs when it ends ────────
+
+
+class _ReleaseRecorder(Tool):
+    """Stands in for run_subagent_dag: records release_turn calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool]] = []
+
+    @property
+    def name(self) -> str:
+        return "run_subagent_dag"
+
+    @property
+    def description(self) -> str:
+        return "records releases"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs) -> str:
+        return "unused"
+
+    async def release_turn(self, conversation: str, *, flush: bool) -> None:
+        self.calls.append((conversation, flush))
+
+
+def _loop_with_recorder(tmp_path):
+    from raven.agent.loop._shared import LoopOutcome
+
+    loop = AgentLoop(provider=_FakeChatProvider([]), workspace=tmp_path)
+    _stub_edges(loop)
+    recorder = _ReleaseRecorder()
+    loop.tools.register(recorder)
+
+    async def _ends_normally(req, emit, drain, **kwargs):
+        return LoopOutcome()
+
+    loop._run_turn = _ends_normally
+    return loop, recorder
+
+
+async def test_run_turn_releases_the_conversations_dag_runs_when_it_ends(tmp_path):
+    loop, recorder = _loop_with_recorder(tmp_path)
+
+    await loop.run_turn(_req("hi"), _EmitCollector(), _drain)
+
+    assert recorder.calls == [("cli:c", True)]
+
+
+async def test_a_cancelled_turn_releases_without_flushing(tmp_path):
+    import asyncio
+
+    loop, recorder = _loop_with_recorder(tmp_path)
+
+    async def _cancelled(req, emit, drain, **kwargs):
+        raise asyncio.CancelledError()
+
+    loop._run_turn = _cancelled
+
+    with pytest.raises(asyncio.CancelledError):
+        await loop.run_turn(_req("hi"), _EmitCollector(), _drain)
+
+    assert recorder.calls == [("cli:c", False)]
+
+
+async def test_a_turn_that_raises_still_releases_and_still_flushes(tmp_path):
+    """The exit the other three left out, and the one the design doc names.
+
+    An ordinary error is not the user stopping the agent: the turn is over and its
+    graph's open questions are still worth re-sending, so this exit flushes exactly
+    as the normal one does. Only cancellation drops them.
+
+    Without it, an `except BaseException` that sets `flush = False` -- the plausible
+    way someone widens the cancellation arm -- turns every failed turn into a silent
+    drop with nothing red.
+    """
+    loop, recorder = _loop_with_recorder(tmp_path)
+
+    async def _raises(req, emit, drain, **kwargs):
+        raise RuntimeError("the turn blew up")
+
+    loop._run_turn = _raises
+
+    with pytest.raises(RuntimeError, match="the turn blew up"):
+        await loop.run_turn(_req("hi"), _EmitCollector(), _drain)
+
+    assert recorder.calls == [("cli:c", True)], "an error end releases, and flushes: only a cancel drops"
+
+
+async def test_a_direct_chat_turn_releases_nothing(tmp_path):
+    loop, recorder = _loop_with_recorder(tmp_path)
+    req = TurnRequest(
+        origin=Origin.USER,
+        source=Source(channel="cli", chat_id="c", sender_id="u", chat_type=ChatType.DM),
+        text="hi",
+        direct_target=("echo", "h1"),
+    )
+
+    await loop.run_turn(req, _EmitCollector(), _drain)
+
+    assert recorder.calls == []
+
+
+# ── a rolled-back draft must not reach the stream ───────────────────
+
+
+class _RollsBackTheFirstAnswer(AgentHook):
+    """Sends the first tool-call-free response back once, as an engine hook does."""
+
+    rolls_back_iterations = True
+
+    def __init__(self) -> None:
+        self.rolled = 0
+
+    @property
+    def name(self) -> str:
+        return "rollback_probe"
+
+    async def after_iteration(self, ctx):
+        response = ctx.response
+        if response is None or getattr(response, "tool_calls", None):
+            return HookDecision()
+        if self.rolled or not str(getattr(response, "content", "") or "").strip():
+            return HookDecision()
+        self.rolled += 1
+        return HookDecision(rollback=True, rollback_inject=[{"role": "user", "content": "try again"}])
+
+
+async def test_a_rolled_back_draft_never_reaches_the_stream(tmp_path):
+    """`rollback` pops history, and the stream has already left.
+
+    An `after_iteration` hook decides from state the response does not carry, so
+    it can only speak after the content has streamed. Popping the messages then
+    leaves the reader holding text the turn no longer has -- and on the ACP lane
+    the collector concatenates every chunk, so the rejected draft and its
+    replacement arrive as one answer. The deltas are held until something keeps
+    the response, which is what this pins.
+    """
+    provider = _FakeStreamToolProvider([[ChatDelta(content="FIRST DRAFT")], [ChatDelta(content="FINAL REPLY")]])
+    hook = _RollsBackTheFirstAnswer()
+    loop = AgentLoop(
+        provider=provider,
+        workspace=tmp_path,
+        host=HostWiring(hooks=[hook]),
+    )
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    deltas = [e.delta for e in sink.events if isinstance(e, EvStreamDelta)]
+    assert hook.rolled == 1, "the hook never rolled anything back, so this proves nothing"
+    assert deltas == ["FINAL REPLY"], f"the caller saw the rejected draft: {deltas}"
+
+
+class _PassThroughObserver(AgentHook):
+    """`eval_engine`'s judge shape: overrides the phase, awaits inside it, never
+    sends anything back -- and says so, by leaving `rolls_back_iterations` alone."""
+
+    def __init__(self) -> None:
+        self.entered = 0
+        self.finished = 0
+
+    @property
+    def name(self) -> str:
+        return "observer_probe"
+
+    async def after_iteration(self, ctx):
+        self.entered += 1
+        await asyncio.sleep(0)  # an await inside the phase, as a judge call is
+        self.finished += 1
+        return HookDecision()
+
+
+async def test_an_observer_that_cannot_roll_back_keeps_the_chunks(tmp_path):
+    """The other half of holding, and the reason it is declared not inferred.
+
+    Overriding `after_iteration` says a hook watches the phase, not that it can
+    send the response back. `eval_engine`'s judge overrides it, awaits an LLM
+    call inside it, and its own contract says an evaluator never interrupts the
+    reply -- so inferring the capability from the override took the answer away
+    from the reader until the judge returned, for a draft that was never going
+    to be rejected.
+    """
+    provider = _FakeStreamProvider([ChatDelta(content="Hel"), ChatDelta(content="lo")])
+    observer = _PassThroughObserver()
+    loop = AgentLoop(provider=provider, workspace=tmp_path, host=HostWiring(hooks=[observer]))
+    _stub_edges(loop)
+    sink = _EmitCollector()
+
+    await loop.run_turn(_req("hi"), sink, _drain)
+
+    # Both counters, because CompositeHook swallows a hook exception: a body that
+    # raised past the await would leave the entered count alone and still pass.
+    assert observer.entered > 0, "the observer never ran, so this proves nothing"
+    assert observer.finished == observer.entered, "the observer raised inside the phase"
+    deltas = [e.delta for e in sink.events if isinstance(e, EvStreamDelta)]
+    assert deltas == ["Hel", "lo"], f"an observer that cannot roll back lost the reader the chunks: {deltas}"
+
+
+class _LeakyTool(Tool):
+    """Prints a key Raven holds, the way `cat ~/.raven/config.json` would."""
+
+    KEY = "sk-or-held-0123456789"
+
+    @property
+    def name(self) -> str:
+        return "leakytool"
+
+    @property
+    def description(self) -> str:
+        return "fake tool whose output carries a held credential"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs) -> ToolResult:
+        return ToolResult(model_text=f'"apiKey": "{self.KEY}"', display_text=f"apiKey {self.KEY}")
+
+
+async def test_a_held_key_reaches_neither_the_log_the_page_nor_the_model(tmp_path, monkeypatch):
+    """The scrub used to run only where the model's message is built, after the
+    preview had been logged and sent to the page as `result_preview`."""
+    from loguru import logger
+
+    monkeypatch.setattr(
+        "raven.config.held_secrets.held_secrets", lambda: [(_LeakyTool.KEY, "providers.openrouter.apiKey")]
+    )
+    provider = _FakeStreamToolProvider(
+        [
+            [
+                ChatDelta(
+                    content=None,
+                    tool_call_delta={
+                        "tool_calls": [{"index": 0, "id": "t7", "function": {"name": "leakytool", "arguments": "{}"}}]
+                    },
+                )
+            ],
+            [ChatDelta(content="done")],
+        ]
+    )
+    loop = AgentLoop(provider=provider, workspace=tmp_path)
+    _stub_edges(loop)
+    loop.tools.register(_LeakyTool())
+    recorded: list[str] = []
+    original_add = loop.context.add_tool_result
+
+    def _record(messages, tool_call_id, tool_name, result, *, trusted_note=""):
+        recorded.append(result)
+        return original_add(messages, tool_call_id, tool_name, result)
+
+    loop.context.add_tool_result = _record  # type: ignore[method-assign]
+    logged: list[str] = []
+    handle = logger.add(lambda message: logged.append(str(message)), level="INFO")
+    try:
+        sink = _EmitCollector()
+        await loop.run_turn(_req("hi"), sink, _drain)
+    finally:
+        logger.remove(handle)
+
+    complete = next(e for e in sink.events if isinstance(e, EvToolEvent) and e.phase is ToolPhase.COMPLETE)
+    assert _LeakyTool.KEY not in complete.result_preview
+    assert "[redacted: providers.openrouter.apiKey]" in complete.result_preview
+    assert any("Tool result: leakytool" in line for line in logged)
+    assert not any(_LeakyTool.KEY in line for line in logged)
+    assert recorded and _LeakyTool.KEY not in recorded[0]

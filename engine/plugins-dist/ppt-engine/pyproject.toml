@@ -1,0 +1,105 @@
+[project]
+name = "ppt-engine"
+version = "0.2.0"
+description = "Raven-PPT deck engine as a standalone raven plugin: eleven deck tools and the material/identity turn hook"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    {name = "EverMind"}
+]
+keywords = ["raven", "raven-plugin", "ppt", "deck"]
+
+dependencies = [
+    "raven",
+    # The fork's raven[ppt] extra, carried by the wheel itself -- dependency
+    # delivery is why the engine ships as its own distribution (ppt verdict,
+    # section three, option ii). Pins are the fork's own where the fork pinned.
+    "python-pptx>=0.6.21,<2",
+    "lxml>=5.0,<7",
+    # Reading the source material: a PDF's text with its layout, the figures and
+    # tables embedded in its pages, and the type sizes a render resolved. pdfium
+    # cannot reach the last three, and reading the sources is what this engine is
+    # for, so this is a hard dependency rather than an optional one.
+    #
+    # The only AGPL-3.0 dependency in the distribution (Artifex also sells a
+    # commercial licence). It is imported, not modified and not redistributed --
+    # see NOTICES.md; the obligation stays on this wheel, and the host's
+    # dependency face keeps zero fitz (D10).
+    "pymupdf>=1.24,<2",
+    # Brand marks ship as SVG and python-pptx places rasters only, so a fetched
+    # logo is a document until something draws it. Optional at runtime -- `ppt_fetch`
+    # keeps an SVG it cannot rasterise as the text it is -- but a deck without this
+    # cannot show a company its own mark, which is most of what "find a logo" means.
+    "cairosvg>=2.7,<3",
+    # The fork's raven[render] half: page rasterisation deliberately walks
+    # pdfium (Apache-2.0), keeping the AGPL surface to reading source documents.
+    "pillow>=11.3,<13",
+    "pypdfium2>=4.30,<5",
+    # Not imported here. The design lane launches a browser and declares
+    # playwright in an extra, and an extra is one more thing an installer has to
+    # know to ask for; this distribution is already fetched unconditionally, so
+    # carrying the pin is what puts a browser in every install that renders.
+    "playwright>=1.58,<2",
+    # ppt_fetch / ppt_generate_image / ppt_image_search speak HTTP themselves.
+    "httpx>=0.28.0,<1.0.0",
+    "matplotlib>=3.11.1",
+]
+
+# The one line that makes this package findable: PluginDiscovery._scan_entry_points
+# reads this group, takes the value as a bare package name, and loads
+# raven-plugin.toml out of that package with importlib.resources.
+[project.entry-points."raven.plugins"]
+ppt-engine = "raven_ppt"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["raven_ppt"]
+
+# raven-plugin.toml is package data, not a stray file: discovery resolves it
+# through importlib.resources inside the installed package, so a wheel that
+# ships the modules without it installs a plugin nothing can find. The engine's
+# own assets ride the same way: shape/icon data and the DejaVu measuring fonts
+# under services/assets, the deck-authoring skill, the fork's three drifted
+# identity prompts, and the ten bundled templates, which are tracked so that
+# any checkout builds a wheel that can build a deck. release.yml asserts all
+# ten are in the built wheel and match their pins.
+[tool.hatch.build]
+include = [
+    "raven_ppt/**/*.py",
+    "raven_ppt/raven-plugin.toml",
+    "raven_ppt/prompts/*.md",
+    "raven_ppt/assets/templates/*.pptx",
+    # What each template's stand-in copy says in a language other than the one it
+    # ships in. Kilobytes beside fifty megabytes of pptx: a second set of files
+    # would be the same pictures again for the sake of the words on top of them.
+    "raven_ppt/assets/templates/i18n/*.json",
+    # The picker's pictures, one per template per language, rendered from the
+    # templates above by scripts/bake_deck_template_covers.py at release time.
+    # Four hundred kilobytes is what keeps every installed raven from running
+    # LibreOffice once per template to draw them itself.
+    "raven_ppt/assets/templates/covers/*.jpg",
+    "raven_ppt/services/assets/data/*.json",
+    "raven_ppt/services/assets/fonts/*.ttf",
+    "raven_ppt/services/assets/fonts/*.txt",
+    "raven_ppt/skill/**/*.md",
+]
+
+# The covers are generated, so the repository ignores them, and Hatch excludes
+# what the VCS ignores. Only the ignore file at THIS project's root is read, and
+# the rule lives at the repository root, so the include above is what ships them
+# today; this is what keeps them shipping if that rule ever moves down here.
+artifacts = ["raven_ppt/assets/templates/covers/*.jpg"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "raven_ppt/",
+    "pyproject.toml",
+    "NOTICES.md",
+    "LICENSES/",
+]
+
+[tool.uv.sources]
+raven = { workspace = true }

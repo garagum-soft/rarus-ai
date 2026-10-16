@@ -1,0 +1,673 @@
+/* The settings dialog's state and verbs.
+ *
+ * Page state, outside React on purpose: three of the callers that drive this
+ * dialog are not React. The platform's settings shortcut opens it
+ * (state/globalListeners.ts), the whole-page language repaint bumps its epoch
+ * (state/lang/effects.ts) and the boot repaints it once the gateway answers
+ * (app/boot.ts) -- so the state lives in a plain store those three can call,
+ * and the component subscribes.
+ *
+ * The open section is synced from the shared slot (state/settings.ts) on
+ * every draw: the chrome jumps the dialog to a section by writing that slot
+ * before asking for the repaint.
+ */
+import { t } from '../../i18n/t'
+import { settingsTab } from '../../state/settings'
+import * as settingsDialog from '../../state/settings'
+import { ds } from '../../state/sources'
+import { makeStore } from '../../state/store'
+import { show as toast } from '../../state/toast'
+import { statedTags } from '../model/types'
+
+import type { Kind } from '../model/types'
+import type {
+  ArchivedSession,
+  ConnectProbe,
+  InstrFile,
+  InstrOpen,
+  McpClient,
+  ModelCandidate,
+  SettingsSnapshot,
+  SettingsSource,
+  SkillDetail,
+  UsageRange,
+  UsageStats,
+} from './types'
+
+export type SectionId =
+  | 'general' | 'usage' | 'provider' | 'model' | 'skills' | 'tools' | 'plugins' | 'workflows' | 'team'
+  | 'connect' | 'cron' | 'memory' | 'instructions' | 'archive' | 'about'
+
+/* The nav's order, which is also the reading: what the dialog is about first
+   (the page itself, what it cost), then what it is made of (the accounts, the
+   models each role takes, skills, tools, plugins), then the two surfaces a
+   reader sets up once and leaves alone, then the record and the version.
+   Channels were a third and are a page on the rail now (state/pages.ts). */
+export const SECTIONS: SectionId[] = [
+  'general', 'usage', 'provider', 'model', 'skills', 'tools', 'plugins', 'workflows', 'team',
+  'connect', 'cron', 'memory', 'instructions', 'archive', 'about',
+]
+
+/* The two sections another domain's island fills, as the box it fills.
+ *
+ * Schedules and memory were module pages of their own and are sections here
+ * now. Their islands did not move with them: each still mounts
+ * into a box of its own (features/<domain>/manifest.ts's host, rendered by
+ * src/App.tsx inside the dialog), because a React root inside this island's
+ * tree would be unmounted the moment the reader picked another section. So
+ * this island draws nothing for these two -- the pane beside it is theirs --
+ * and the stylesheet shows whichever box the open section names. */
+export const HOSTED: Partial<Record<SectionId, string>> = {
+  cron: 'cronBody',
+  memory: 'memoryBody',
+}
+
+/* The catalogue column's six. `direct` is the remainder: not a reseller, not an
+   OAuth sign-in, not something you run yourself. */
+export type ProvFilter = 'all' | 'on' | 'direct' | 'gateway' | 'oauth' | 'local'
+
+/* The vendor-list sheet under a provider's models card: what the vendor
+   answered, what is ticked, and the typed filter. Kept here rather than in
+   the component because every write remounts the page. */
+export interface Sheet {
+  slug: string
+  q: string
+  state: 'loading' | 'ready' | 'failed'
+  items: ModelCandidate[]
+  /* The kind tab in force, or every kind. */
+  kind: 'all' | Kind
+  /* Ticked and not yet added, by model id. Kept across a search or a kind
+     tab, so narrowing the list to find the next one does not drop the last. */
+  picked: string[]
+  /* What a typed id would be added as, once the reader has said; null means
+     the guess from its name still stands. */
+  typed: Kind | null
+}
+
+/* A device flow in progress: the code the vendor's page asks for, and when
+   it stops being valid. */
+export interface Oauth {
+  slug: string
+  uri: string
+  code: string
+  until: number
+  expired: boolean
+}
+
+export interface SettingsState {
+  tab: SectionId
+  snap: SettingsSnapshot
+  loaded: boolean
+  /* Remounts the page subtree on every draw, so uncontrolled inputs restart
+     from the freshly loaded values. */
+  epoch: number
+  /* The page-side refusal under the current page, or ''. */
+  err: string
+  /* Writes in flight, by a key the row chooses; drawn as "connecting". */
+  busy: string[]
+  /* A model write said the gateway has to restart before it can chat on it:
+     it started with no model to build a loop from. Set once and kept -- the
+     restart that clears it reloads the page. The onboarding wizard reads it
+     to say so before the reader goes to chat. */
+  needsRestart: boolean
+  range: UsageRange & { kind: string }
+  /* undefined = never answered (drawn as loading), null = the counter did not
+     answer. */
+  usage: UsageStats | null | undefined
+  /* The provider whose detail pane is drawn, or null for the page's own
+     default (the one serving the chat model). */
+  provider: string | null
+  /* The catalogue column's search term and filter. */
+  provQ: string
+  provFilt: ProvFilter
+  /* The slug picked in the add-provider block, or null when it is closed. */
+  provAdd: string | null
+  /* The last credential check per provider, this session only: what a
+     connect or a "check again" heard back. A provider with none was connected
+     before this page loaded, and says nothing it has not asked. */
+  probes: Record<string, ConnectProbe>
+  sheet: Sheet | null
+  hdrAdd: string | null
+  /* Which provider has its advanced fold open. One at a time, and closed by
+     default: the overrides behind it are not what a reader opened the page for. */
+  adv: string | null
+  ovlAdd: string | null
+  chatCfg: boolean
+  oauth: Oauth | null
+  skill: string | null
+  detail: SkillDetail | null
+  skq: string
+  toolOpen: string | null
+  plugOpen: string | null
+  /* The provider whose model list is shown in full rather than folded. Here,
+     not in the list's own state: a removal redraws the page from a new
+     snapshot, and a fold kept in the component snapped shut on every one. */
+  modelsAll: string | null
+  archived: ArchivedSession[] | null
+  /* The clients an outside agent connects from: undefined = never asked (drawn
+     as loading), null = the gateway did not answer. */
+  clients: McpClient[] | null | undefined
+  /* The client picked on that page, or null for the first one. */
+  client: string | null
+  /* The instructions editor. The file list (null = never asked), the file
+     open in the editor, and the text typed over it: the draft lives here,
+     not in the textarea, so a page remount (the epoch) does not drop it.
+     `instrConflict` is a save the server refused because the file moved on;
+     `instrPeek` an older revision shown beside the editor. */
+  instrFiles: InstrFile[] | null
+  instrKey: string | null
+  instrOpen: InstrOpen | null
+  instrDraft: string | null
+  instrConflict: boolean
+  instrPeek: { rev: number; text: string } | null
+}
+
+const emptySnap = (): SettingsSnapshot => ({
+  raw: {}, configPath: '~/.raven/config.json', everos: null, providers: [],
+  curProvider: '', model: '', tools: [], skills: [], mcp: [],
+})
+
+const initial = (): SettingsState => ({
+  tab: 'general',
+  snap: emptySnap(),
+  loaded: false,
+  epoch: 0,
+  err: '',
+  busy: [],
+  needsRestart: false,
+  range: { kind: '30', ...lastDays(30) },
+  usage: undefined,
+  provider: null,
+  provQ: '',
+  provFilt: 'all',
+  provAdd: null,
+  probes: {},
+  sheet: null,
+  hdrAdd: null,
+  adv: null,
+  ovlAdd: null,
+  chatCfg: false,
+  oauth: null,
+  skill: null,
+  detail: null,
+  skq: '',
+  toolOpen: null,
+  plugOpen: null,
+  modelsAll: null,
+  archived: null,
+  clients: undefined,
+  client: null,
+  instrFiles: null,
+  instrKey: null,
+  instrOpen: null,
+  instrDraft: null,
+  instrConflict: false,
+  instrPeek: null,
+})
+
+const store = makeStore<SettingsState>(initial())
+let lazy = false
+let oauthTimer: ReturnType<typeof setInterval> | null = null
+
+export const { get, subscribe } = store
+
+/** A patch, merged into the page's state. */
+export function set(patch: Partial<SettingsState>): void {
+  store.set((prev) => ({ ...prev, ...patch }))
+}
+
+export const source = (): SettingsSource => ds('settings')
+
+/* ISO day, local time: the range the usage page asks for is the reader's
+   calendar, and the server reads the same wall clock. */
+export function isoDay(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+/** Today and the n-1 days before it. */
+export function lastDays(n: number): UsageRange {
+  const to = new Date()
+  const from = new Date(to)
+  from.setDate(to.getDate() - (n - 1))
+  return { from: isoDay(from), to: isoDay(to) }
+}
+
+const curTab = (): SectionId => {
+  const id = settingsTab.id ?? get().tab
+  return (SECTIONS as string[]).includes(id) ? (id as SectionId) : 'general'
+}
+
+/* A reload coalesced over a burst of pushes -- an MCP sync reports one status
+   per server -- and skipped while the dialog is down: nothing is looking. */
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+export const REFRESH_SOON_MS = 300
+export function refreshSoon(): void {
+  if (!settingsDialog.isOpen() || !get().loaded) return
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => { refreshTimer = null; void refresh() }, REFRESH_SOON_MS)
+}
+
+/* One load at a time: the dialog opens before its values are in, so the open
+   and the deferred first draw can both ask, and `model.options` is seconds of
+   work on a home with many providers. */
+let loading: Promise<void> | null = null
+
+/* Whether a reload brought anything new. The epoch remounts the whole page,
+   and a reopen draws the values it already has and reloads behind them: a
+   reload that answered the same values still remounted everything about half
+   a second in, so a click landing then pressed on one button and released on
+   its replacement, and the browser fired no click at all -- the first pick of
+   a language after opening the dialog did nothing. A background reload (an
+   MCP push, the open) now remounts only when there is something new to seed
+   the inputs from. Serialised rather than walked: the snapshot is plain JSON
+   off the wire, and a key order that differs only costs the old remount. */
+const sameSnap = (a: SettingsSnapshot, b: SettingsSnapshot): boolean => {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+export async function refresh(): Promise<void> {
+  if (loading) return loading
+  loading = (async () => {
+    try {
+      const snap = await source().load()
+      const cur = get()
+      if (cur.loaded && sameSnap(cur.snap, snap)) return
+      set({ snap, loaded: true, epoch: cur.epoch + 1 })
+    } catch (e) {
+      /* Loaded stays what it was: a failed load leaves the pages on the last
+         values rather than on a shell that says nothing -- and leaves them
+         mounted, so a reader mid-way through a field keeps what they typed. */
+      toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+    } finally {
+      loading = null
+    }
+  })()
+  return loading
+}
+
+/* Where the boot's own draw step and the language repaint land (app/boot.ts,
+   state/lang/effects.ts). The first draw schedules the load on a task boundary
+   rather than inline: the boot list draws before every source is on the seam,
+   and the deferral lets the real one win it before anything is fetched. */
+export function redraw(): void {
+  set({ tab: curTab(), epoch: get().epoch + 1 })
+  if (!lazy) {
+    lazy = true
+    setTimeout(() => {
+      if (!get().loaded) void refresh()
+    }, 0)
+  }
+}
+
+/* The veil first, the values after: `settings.get` is quick but the model
+   catalogue is not -- on a home with many providers `model.options` spends
+   seconds, and awaiting it here left the click with nothing on screen for that
+   whole time. The dialog goes up on the section it opens, showing the loading
+   line until the snapshot lands (SettingsApp reads `loaded` for that), and a
+   reopen shows the values it already has while the reload runs. */
+export async function open(): Promise<void> {
+  redraw()
+  /* The two the pages fetch for themselves are not in the snapshot, so the
+     reload below cannot freshen them: a dialog opened once held its archive
+     list and its usage totals for the life of the page, and a session archived
+     from the rail in between never showed up. Dropping them here is what makes
+     each page ask again -- their own lazy loads already key off these two. */
+  /* The file list is asked again too; an open file and its draft are kept. */
+  set({ usage: undefined, archived: null, clients: undefined, instrFiles: null })
+  settingsDialog.open()
+  await refresh()
+}
+
+/* "Nothing is connected, go and connect something" and "this provider has no
+   model added, go and add one" both land on Model providers: since the split
+   that is where a key is entered and a model list is built, and the Model
+   settings page these used to open holds only the roles card. */
+export async function openModels(): Promise<void> {
+  settingsTab.id = 'provider'
+  await open()
+}
+
+export async function openProviderModels(slug: string): Promise<void> {
+  settingsTab.id = 'provider'
+  set({ provider: slug })
+  await open()
+}
+
+/* A section pick closes every drawer of the section it leaves -- this island's
+   own below, and the two a hosted section raises over the dialog through the
+   slots state/settings.ts holds for them. */
+export function setTab(id: string): void {
+  const moved = settingsTab.id !== id
+  if (moved) settingsDialog.leaveSection()
+  settingsTab.id = id
+  set({
+    tab: curTab(), err: '', provider: null, provQ: '', provFilt: 'all', provAdd: null, sheet: null, hdrAdd: null, ovlAdd: null, adv: null,
+    skill: null, detail: null, toolOpen: null, plugOpen: null, modelsAll: null,
+  })
+  if (moved) settingsDialog.enterSection(id)
+}
+
+/* Every write the pages make: the row's key is busy while it runs, a fresh
+   snapshot lands when it resolves, and a refusal the source already toasted
+   (its { handled } tag) only redraws. Resolves to whether it went through. */
+export async function run(key: string, work: () => Promise<SettingsSnapshot | void>): Promise<boolean> {
+  set({ busy: [...get().busy, key], err: '' })
+  try {
+    const snap = await work()
+    if (snap) set({ snap, epoch: get().epoch + 1 })
+    return true
+  } catch (e) {
+    if (!(e as { handled?: boolean }).handled) {
+      toast(t('gui.plug.op_failed', { err: (e as Error).message || String(e) }))
+    }
+    return false
+  } finally {
+    set({ busy: get().busy.filter((k) => k !== key) })
+  }
+}
+
+export const write = (key: string, value: unknown): Promise<boolean> =>
+  run(`set:${key}`, () => source().set(key, value))
+
+export const isBusy = (key: string): boolean => get().busy.includes(key)
+
+/* A page-side refusal: nothing is written, the page says why. */
+export function refuse(msg: string): void {
+  set({ err: msg })
+}
+
+export async function usageLoad(range: UsageRange & { kind: string }): Promise<void> {
+  set({ range, usage: undefined })
+  let u: UsageStats | null = null
+  try {
+    u = await source().usage(range)
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+  }
+  if (get().range === range) set({ usage: u })
+}
+
+/* The connect page's list, asked once per opening of the dialog: the command
+   it names follows the gateway's own install, which does not move while the
+   dialog is open. */
+export async function clientsLoad(): Promise<void> {
+  let clients: McpClient[] | null = null
+  try {
+    clients = await source().mcpClients()
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+  }
+  set({ clients })
+}
+
+export async function archivedLoad(): Promise<void> {
+  try {
+    set({ archived: await source().archived() })
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+    set({ archived: [] })
+  }
+}
+
+/* -- the instructions editor ------------------------------------------------ */
+
+export async function instrLoad(): Promise<void> {
+  try {
+    set({ instrFiles: await source().instrList() })
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+    set({ instrFiles: [] })
+  }
+}
+
+/* Open a file in the editor. `keepDraft` is the conflict's "keep my edit":
+   the newer text becomes the base, and what the reader typed stays on top of it. */
+export async function instrPick(key: string | null, keepDraft = false): Promise<void> {
+  const draft = keepDraft ? get().instrDraft : null
+  set({ instrKey: key, instrOpen: keepDraft ? get().instrOpen : null, instrDraft: draft, instrConflict: false, instrPeek: null })
+  if (key === null) return
+  try {
+    const file = await source().instrGet(key)
+    if (get().instrKey === key) set({ instrOpen: file })
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+  }
+}
+
+export function instrEdit(text: string): void {
+  const open = get().instrOpen
+  set({ instrDraft: open && text === open.text ? null : text })
+}
+
+/* After a write: the file again (its new hash and history) and the list (sizes, counts). */
+async function instrAfter(key: string): Promise<void> {
+  await Promise.all([instrPick(key), instrLoad()])
+}
+
+export async function instrSave(): Promise<boolean> {
+  const { instrOpen: open, instrDraft: draft } = get()
+  if (!open || draft === null) return false
+  let conflict = false
+  const ok = await run('instr:save', async () => {
+    const r = await source().instrSave(open.key, draft, open.sha256)
+    if (r === 'conflict') {
+      conflict = true
+      return
+    }
+    await instrAfter(open.key)
+  })
+  if (conflict) set({ instrConflict: true })
+  return ok && !conflict
+}
+
+export async function instrPeek(rev: number | null): Promise<void> {
+  const open = get().instrOpen
+  if (!open || rev === null) {
+    set({ instrPeek: null })
+    return
+  }
+  try {
+    const text = await source().instrRevision(open.key, rev)
+    if (get().instrOpen === open) set({ instrPeek: { rev, text } })
+  } catch (e) {
+    toast(t('gui.op.load_failed', { detail: (e as Error).message || String(e) }))
+  }
+}
+
+export async function instrRollback(rev: number): Promise<boolean> {
+  const open = get().instrOpen
+  if (!open) return false
+  let conflict = false
+  const ok = await run('instr:rollback', async () => {
+    const r = await source().instrRollback(open.key, rev, open.sha256)
+    if (r === 'conflict') {
+      conflict = true
+      return
+    }
+    await instrAfter(open.key)
+  })
+  if (conflict) set({ instrConflict: true })
+  return ok && !conflict
+}
+
+export async function skillOpen(name: string): Promise<void> {
+  set({ skill: name, detail: null })
+  try {
+    const detail = await source().inspectSkill(name)
+    if (get().skill === name) set({ detail })
+  } catch {
+    /* toasted by the source; the detail stays on its loading note */
+  }
+}
+
+const setProbe = (slug: string, probe: ConnectProbe | null): void => {
+  const probes = { ...get().probes }
+  if (probe) probes[slug] = probe
+  else delete probes[slug]
+  set({ probes })
+}
+
+/* Store a credential, then test it on the side. The save is the connect: a
+   check can be wrong -- a public catalogue, a proxy, a vendor that is down --
+   so its answer never holds the key back. The row says "testing" until the
+   verdict lands, and a failed one is marked and offers a retry. */
+export async function connect(key: string, slug: string, params: Record<string, unknown>): Promise<boolean> {
+  /* A header carries ASCII only: a key with anything else in it is text pasted
+     from the wrong place and could never be sent, so it is refused here rather
+     than stored for the test to trip over. */
+  if (typeof params.api_key === 'string' && /[^\x20-\x7e]/.test(params.api_key)) {
+    refuse(t('gui.settings.providers.key_not_ascii'))
+    return false
+  }
+  const stored = await run(key, () => source().provider('save_key', params))
+  if (stored) void recheck(slug)
+  return stored
+}
+
+/* A live read that succeeded wrote what the vendor serves to the server's
+   cache, which the offer every picker draws from unions in; reloaded so the
+   role slots and the composer's picker list it without a page reload. */
+const reloadOffer = (): void => {
+  void source().reloadProviders().then(
+    (snap) => set({ snap, epoch: get().epoch + 1 }),
+    () => { /* the pickers keep the list they have */ },
+  )
+}
+
+export const dropProbe = (slug: string): void => { if (get().probes[slug]) setProbe(slug, null) }
+
+/* Ask a connected provider again, through the same read the model sheet
+   makes; "ok" there is the vendor answering the stored credential. */
+export async function recheck(slug: string): Promise<void> {
+  await run(`probe:${slug}`, async () => {
+    const r = await source().fetchModels(slug, true)
+    setProbe(slug, r.status === 'ok'
+      ? { ok: true, status: 'valid', models_count: (r.models || []).filter((m) => m.source === 'live').length }
+      : { ok: false, status: r.status, error: r.error ?? null })
+    if (r.status === 'ok') reloadOffer()
+  })
+}
+
+/* Open the vendor-list sheet for a provider and ask what it serves. A vendor
+   with no list endpoint answers a status other than ok, and the sheet then
+   takes a typed id alone. */
+export async function sheetOpen(slug: string): Promise<void> {
+  set({ sheet: { slug, q: '', state: 'loading', items: [], kind: 'all', picked: [], typed: null } })
+  let items: ModelCandidate[] = []
+  let ok = false
+  try {
+    const r = await source().fetchModels(slug)
+    items = r.models || []
+    ok = r.status === 'ok'
+  } catch {
+    ok = false
+  }
+  const sheet = get().sheet
+  if (sheet && sheet.slug === slug) set({ sheet: { ...sheet, state: ok ? 'ready' : 'failed', items } })
+  if (ok) reloadOffer()
+}
+
+/* One row, one write. `add_model` states the kind for a typed id the
+   catalogues cannot describe; a listed row states nothing, because the reply
+   that listed it already carried one.
+   The "a role runs on this model" refusal belongs to the caller, not here: the
+   roles table lives in a component that reads this store, so reaching it from
+   this side closes a cycle -- and hiding that behind a dynamic import only
+   hides it from the gate that checks for one. The tag list beside the popover
+   refuses the same way, in the same place. */
+export async function sheetToggleModel(slug: string, id: string, listed: boolean, kind?: Kind): Promise<void> {
+  const src = source()
+  if (listed) {
+    await run(`prov:${slug}`, () => src.provider('remove_model', { slug, model: id }))
+    return
+  }
+  const stated = kind && kind !== 'text' ? statedTags(kind) : {}
+  await run(`prov:${slug}`, () => src.provider('add_model', { slug, model: id, ...stated }))
+}
+
+export function sheetPatch(patch: Partial<Sheet>): void {
+  const sheet = get().sheet
+  if (sheet) set({ sheet: { ...sheet, ...patch } })
+}
+
+/* Start a device flow and watch for it to land: the provider turns connected
+   on a later `model.options`, so the page polls that read until it does or the
+   code expires. */
+export async function oauthStart(slug: string): Promise<void> {
+  let r
+  try {
+    r = await source().oauthLogin(slug)
+  } catch {
+    /* A code already out stays watched: it is still on screen, and still the
+       one the reader will type. */
+    return
+  }
+  oauthStop()
+  /* `expires_in` is the time the code has left, and a second start can be
+     answered with seconds: watching any longer draws a dead code as live. */
+  const until = Date.now() + r.expires_in * 1000
+  set({ oauth: { slug, uri: r.verification_uri, code: r.user_code, until, expired: false } })
+  oauthTimer = setInterval(() => { void oauthPoll() }, OAUTH_POLL_MS)
+}
+
+export const OAUTH_POLL_MS = 3000
+
+/* The code a sign-in page showed, typed back into the sign-in waiting for it.
+   The poll that is already running sees the provider turn connected, so this
+   only hands the code over. False when it was refused and the reader should
+   correct it; the refusal itself is already on screen. */
+export async function oauthSubmit(code: string): Promise<boolean> {
+  const o = get().oauth
+  if (!o) return false
+  try {
+    await source().oauthCode(o.slug, code)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function oauthPoll(): Promise<void> {
+  const o = get().oauth
+  if (!o) { oauthStop(); return }
+  await refresh()
+  const p = get().snap.providers.find((x) => x.id === o.slug)
+  if (p && p.on) {
+    oauthStop()
+    /* The add form that started this flow is done with it: left pointing at a
+       slug that is now connected, it silently redrew itself for the next
+       unconnected vendor. */
+    set({ oauth: null, provAdd: get().provAdd === o.slug ? null : get().provAdd })
+    /* The one provider write that does not go through this store, so no
+       write's reload carries it to the pickers: onboarding's role slots read
+       the provider as signed out and said it had no model added. */
+    reloadOffer()
+    return
+  }
+  if (Date.now() > o.until) { oauthStop(); set({ oauth: { ...o, expired: true } }) }
+}
+
+function oauthStop(): void {
+  if (oauthTimer) clearInterval(oauthTimer)
+  oauthTimer = null
+}
+
+export function _resetForTests(): void {
+  oauthStop()
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = null
+  /* A case that mounts the dialog on a load it never resolves leaves this
+     holding that promise, and `refresh` hands the same one to every later
+     caller -- so one failed assertion turned the four cases after it into
+     timeouts inside `open()`. */
+  loading = null
+  store._resetForTests()
+  store.set(initial())
+  lazy = false
+}

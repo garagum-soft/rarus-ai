@@ -1,0 +1,798 @@
+import { useEffect, useState, useSyncExternalStore } from 'react'
+
+import { PaneHead, PaneHeadSeg, usePaneHead } from '../../components/PaneHead'
+import { t } from '../../i18n/t'
+import { toUnified } from '../../lib/hunks'
+import * as lang from '../../state/lang'
+import { show as menuAt } from '../../state/menu'
+import { show as toast } from '../../state/toast'
+import * as deliveries from './deliveries'
+import { useLiveFile } from './liveFile'
+import {
+  RENDERED, TWO_VIEWS, appFor, canOpenInApp, copyToClip, extOf, fileURL, pageURL,
+  hostPlatform, looksBinary, mdHtml, openInApp, runURL, setAppFor, versioned,
+} from './store'
+import * as store from './store'
+import './styles.css'
+
+import type { MenuItem } from '../../state/menu'
+import type { WsChange, WsFile, WsShared } from './types'
+import type { JSX, PointerEvent as ReactPointerEvent } from 'react'
+
+/* The icon paths this view draws with. The island carries its own strings the
+   same way the cron island carries its FREQ table, rather than reading a
+   shared table: every one of them is used here and nowhere else. */
+const ICO = {
+  diff: 'M4 4h16v16H4zM12 8.5v7M8.5 12h7',
+  file: 'M4 7.5c0-1.1.9-2 2-2h3.5l2 2.5H18c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-9.5Z',
+  web: 'M4.5 12h15M12 4.5c-4.5 4.5-4.5 10.5 0 15M12 4.5c4.5 4.5 4.5 10.5 0 15',
+  ext: 'M10 6H6.5A2.5 2.5 0 0 0 4 8.5v9A2.5 2.5 0 0 0 6.5 20h9a2.5 2.5 0 0 0 2.5-2.5V14M14 4h6v6M20 4l-9 9',
+  doc: 'M7 3.5h7L18.5 8v10.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2ZM13.5 3.5V8h4.5',
+  reveal: 'M4 7.5c0-1.1.9-2 2-2h3.5l2 2.5H18c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-9.5Z'
+    + 'M9.5 16l5-4.5M14.5 15V11.5H11',
+  chev: 'M9.5 6.5 15 12l-5.5 5.5',
+  down: 'M7 10l5 5 5-5',
+}
+
+const FT_ICO = {
+  page: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"'
+    + ' aria-hidden="true"><path d="M7 2.8h7L19 8v13.2H7z"/><path d="M13.5 2.8V8H19"/></svg>',
+}
+
+function Ico({ d, cls }: { d: string; cls?: string }): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" className={cls}>
+      <path d={d} />
+    </svg>
+  )
+}
+
+/* The app-wide context menu is delegated: a surface declares its actions by
+   carrying a `_ctx` items provider and the document-level listener in the
+   demo shell does the rest. */
+type CtxHost = HTMLElement & { _ctx?: () => MenuItem[] }
+const ctxRef = (items: () => MenuItem[]) => (el: HTMLElement | null): void => {
+  if (el) (el as CtxHost)._ctx = items
+}
+
+export function WorkspaceApp(): JSX.Element {
+  const s = useSyncExternalStore(store.subscribe, store.get)
+  /* The language the page resolved, so a pick repaints this island: every word
+     below is a t(key) read at render time (state/lang/store.ts). */
+  useSyncExternalStore(lang.subscribe, lang.get)
+  const ws = store.shared()
+  if (s.route === 'launch') return <Launch />
+  if (s.route === 'file') return <FileView ws={ws} />
+  return <Changes ws={ws} />
+}
+
+const LAUNCH_CARDS: Array<[string, string, string, string]> = [
+  ['diff', ICO.diff, 'gui.ws.changes', 'gui.ws.sub.changes'],
+  ['browser', ICO.web, 'gui.ws.browser', 'gui.ws.sub.browser'],
+]
+
+function Launch(): JSX.Element {
+  return (
+    <div className="wslaunch">
+      {LAUNCH_CARDS.map(([tab, d, name, sub]) => (
+        <button key={tab} className="lcard" onClick={() => store.pick(tab)}>
+          <Ico d={d} />
+          <span className="t">
+            {t(name)}
+            <small>{t(sub)}</small>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Changes({ ws }: { ws: WsShared }): JSX.Element {
+  /* The flash class rides one render and the flag drops once painted, so
+     the next arrival can raise it again. */
+  useEffect(() => {
+    ws.changes.forEach((c) => { c.flash = false })
+  })
+  if (!ws.changes.length) return <div className="wsnote">{t('gui.ws.no_changes')}</div>
+  let group: string | null = null
+  const out: JSX.Element[] = []
+  ws.changes.forEach((c) => {
+    const g = c.turn === ws.turn ? 'gui.ws.turn_now' : 'gui.ws.turn_earlier'
+    if (g !== group) {
+      group = g
+      out.push(<div key={`grp:${g}:${c.key}`} className="wsgrp">{t(g)}</div>)
+    }
+    out.push(<ChgRow key={`${c.key}:${c.turn}`} c={c} />)
+  })
+  return <>{out}</>
+}
+
+function chgItems(c: WsChange): MenuItem[] {
+  return [
+    { label: t('gui.ws.open'), fn: () => store.openPath(c.key) },
+    { label: t('gui.ws.copy_path_do'), fn: () => copyToClip(c.key, t('gui.ws.copy_path')) },
+  ]
+}
+
+function ChgRow({ c }: { c: WsChange }): JSX.Element {
+  const toggle = (): void => {
+    c.open = !c.open
+    c.auto = false
+    store.redraw()
+  }
+  return (
+    <div className={'chg' + (c.flash ? ' flash' : '')}>
+      <div
+        className="chghd"
+        role="button"
+        tabIndex={0}
+        aria-expanded={c.open}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          toggle()
+        }}
+        ref={ctxRef(() => chgItems(c))}
+      >
+        <i className={'chgc ' + c.kind} title={t('gui.ws.chip.' + c.kind + '_t')}>{t('gui.ws.chip.' + c.kind)}</i>
+        <span className="chgp" title={c.key}>
+          {c.dir ? <span className="dir">{c.dir}</span> : null}
+          {c.name}
+        </span>
+        <span className="chgs">
+          {c.add ? <span className="a">{`+${c.add}`}</span> : null}
+          {c.del ? <span className="d">{`−${c.del}`}</span> : null}
+        </span>
+        <button
+          className="chgm"
+          aria-label={t('gui.ws.actions')}
+          onClick={(e) => {
+            e.stopPropagation()
+            const r = e.currentTarget.getBoundingClientRect()
+            menuAt(r.left, r.bottom + 6, chgItems(c))
+          }}
+        >
+          {'⋯'}
+        </button>
+      </div>
+      {c.open ? <ChgDiff c={c} /> : null}
+    </div>
+  )
+}
+
+function DLine({ numbered, kind, text, oldNo, newNo }: {
+  numbered: boolean
+  kind: string
+  text: string
+  oldNo?: number | null
+  newNo?: number | null
+}): JSX.Element {
+  if (!numbered) return <div className={'dl ' + kind}>{text === '' ? ' ' : text}</div>
+  /* The line's number in the file it still exists in: the new one for added
+     and unchanged lines, the old one for a line that was deleted. */
+  const no = newNo == null ? oldNo : newNo
+  return (
+    <div className={'dl ' + kind + ' num'}>
+      <i className="lno">{no == null ? '' : String(no)}</i>
+      <b className="sg">{kind === 'add' ? '+' : kind === 'del' ? '−' : ''}</b>
+      <span>{text === '' ? ' ' : text}</span>
+    </div>
+  )
+}
+
+export function ChgDiff({ c, patch }: { c: WsChange; patch?: boolean }): JSX.Element {
+  /* The desk pane draws the raw patch text the prototype's diffBody does; this
+     row's own inline expand keeps its structured, foldable view either way --
+     `patch` is what tells the two apart, so a caller that never passes it (the
+     row) renders exactly as it always has. */
+  if (patch) return <PatchDiff c={c} />
+  /* One gutter decision per file, not per hunk: a mixed card must not
+     zigzag its left edge between the two layouts. */
+  const numbered = c.hunks.some((h) => h.rows.some((r) => r.length > 2))
+  const out: JSX.Element[] = []
+  c.hunks.forEach((h, hi) => {
+    if (hi) out.push(<div key={`hs${hi}`} className="hsep" />)
+    h.rows.forEach((r, ri) => {
+      const key = `${hi}:${ri}`
+      if (r[0] === 'gap') {
+        const lines = r[1] as string[]
+        out.push(
+          <button
+            key={key}
+            className="gap"
+            onClick={(e) => {
+              e.stopPropagation()
+              r.open = !r.open
+              store.redraw()
+            }}
+          >
+            {r.open
+              ? `··· ${t('gui.ws.fold_lines', { n: lines.length })} ···`
+              : `··· ${t('gui.ws.expand_lines', { n: lines.length })} ···`}
+          </button>,
+        )
+        if (r.open) lines.forEach((l, li) => out.push(<DLine key={`${key}:${li}`} numbered={numbered} kind="ctx" text={l} />))
+        return
+      }
+      if (r[0] === 'hunk') {
+        if (ri) out.push(<div key={key} className="hsep" />)
+        return
+      }
+      out.push(<DLine key={key} numbered={numbered} kind={r[0]} text={r[1] as string} oldNo={r[2]} newNo={r[3]} />)
+    })
+  })
+  return <div className="diff">{out}</div>
+}
+
+/* The desk pane's look for a change: the same path bar and numbered code
+   block FileView draws for a file, fed the raw unified text instead of a
+   file's own bytes -- one fbar/fpane/fbody/fview shape for both, rather than
+   a second one for a patch. */
+function PatchDiff({ c }: { c: WsChange }): JSX.Element {
+  const path = c.dir + c.name
+  const inPane = !!usePaneHead()
+  const copy = (
+    <button
+      className="ghost-ic fcopy tipdn"
+      data-tip={t('gui.ws.copy_path_do')}
+      aria-label={t('gui.ws.copy_path_do')}
+      onClick={() => copyToClip(path, t('gui.ws.copy_path'))}
+    >
+      <Ico d={ICO.doc} />
+    </button>
+  )
+  return (
+    <div className="fwrap">
+      {inPane ? (
+        <PaneHead
+          title={c.name}
+          tip={path}
+          meta={(
+            <>
+              {c.dir ? <span className="workspace-dir">{c.dir}</span> : null}
+              <span className="workspace-stat">
+                <b className="workspace-add">{`+${c.add}`}</b> <b className="workspace-del">{`\u2212${c.del}`}</b>
+              </span>
+            </>
+          )}
+        >
+          {copy}
+        </PaneHead>
+      ) : (
+        <div className="fbar">
+          <span className="nm" title={path}>
+            {c.dir ? <i>{c.dir}</i> : null}
+            <b>{c.name}</b>
+          </span>
+          {copy}
+          <span className="fsp" />
+        </div>
+      )}
+      <div className="fpane">
+        <div className="fbody">
+          <div className="fview">
+            <CodeLines text={toUnified(path, c.hunks)} kind="diff" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── the file view ─────────────────────────────────────────────────── */
+
+/* Applications whose names the host knows, as a starting list rather than a
+   registry: `open -a` and a bare Linux launcher both want a name, and a name
+   this list does not have has nowhere to be typed yet -- that belongs with the
+   settings row, and is not in this change. Windows has no portable way to name
+   an application, so it gets the host default only, which is what fs.open
+   sends there. */
+const OPEN_WITH: Record<string, string[]> = {
+  mac: ['Cursor', 'Visual Studio Code', 'Xcode', 'Keynote', 'Numbers', 'Pages', 'Preview', 'TextEdit'],
+  linux: ['cursor', 'code', 'libreoffice', 'gedit'],
+  windows: [],
+}
+
+/* A file the page cannot render. It says so, and offers what can still be
+   done with it: hand it to an application. That runs where the GATEWAY runs,
+   so it is withheld unless that host is this desktop -- a remote serve would
+   start a program on somebody else's screen. Copying the path and revealing
+   the file stay in the header, which every file gets. */
+function BinNote({ f, title, detail }: { f: WsFile; title?: string; detail?: string | null }): JSX.Element {
+  useSyncExternalStore(deliveries.subscribe, deliveries.getVersion)
+  const chosen = appFor(f.path)
+  const canApp = canOpenInApp()
+  const ext = extOf(f.path)
+  const size = f.size ?? (deliveries.byPath(f.path) as { size?: number } | null)?.size ?? 0
+  const meta = [ext ? t('gui.ws.file_kind', { k: ext.toUpperCase() }) : '', deliveries.humanSize(size)]
+    .filter(Boolean).join(' \u00b7 ')
+  const hand = (app: string | null): void => {
+    void openInApp(f.path, app).then(
+      () => {},
+      (e: unknown) => toast(((e as Error) && (e as Error).message) || String(e)),
+    )
+  }
+  const pick = (e: ReactPointerEvent<HTMLButtonElement>): void => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const names = OPEN_WITH[hostPlatform()] || []
+    const items: Array<MenuItem | '-'> = names.map((name) => ({
+      label: name === chosen ? `${name} \u00b7 ${t('gui.ws.open_with_now')}` : name,
+      /* Remember the choice for this kind, then act on it -- the reader picked
+         an application for pptx, not for this one file. */
+      fn: () => { setAppFor(f.path, name); hand(name) },
+    }))
+    if (names.length) items.push('-')
+    items.push({
+      label: t('gui.ws.open_with_default'),
+      fn: () => { setAppFor(f.path, null); hand(null) },
+    })
+    menuAt(r.left, r.bottom + 6, items)
+  }
+  return (
+    <div className="workspace-bin">
+      <div className="workspace-bin-card">
+        <div className="workspace-bin-tile" aria-hidden="true">
+          <svg viewBox="0 0 48 60">
+            <path className="workspace-bin-sheet"
+              d="M8 1.5h22.5L46.5 17.5V51a7.5 7.5 0 0 1-7.5 7.5H8A6.5 6.5 0 0 1 1.5 52V8A6.5 6.5 0 0 1 8 1.5Z" />
+            <path className="workspace-bin-fold" d="M30.5 1.5V12a5.5 5.5 0 0 0 5.5 5.5h10.5" />
+          </svg>
+          {ext ? <span className="workspace-bin-ext">{ext}</span> : null}
+        </div>
+        <div className="workspace-bin-title">{title ?? t('gui.ws.file_binary')}</div>
+        {meta ? <div className="workspace-bin-meta">{meta}</div> : null}
+        {detail ? <div className="workspace-bin-detail">{detail}</div> : null}
+        {canApp ? (
+          <div className="workspace-bin-acts">
+            <span className="workspace-bin-split">
+              <button className="mini go" onClick={() => hand(chosen)}>
+                {chosen ? t('gui.ws.open_with_app', { a: chosen }) : t('gui.ws.open_with_host')}
+              </button>
+              <button
+                className="mini go workspace-bin-more tipdn"
+                data-tip={t('gui.ws.open_with_pick')}
+                aria-label={t('gui.ws.open_with_pick')}
+                aria-haspopup="menu"
+                onPointerUp={pick}
+              >
+                <Ico d={ICO.down} />
+              </button>
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/* One file, no tree beside it. What the viewer opens comes from the transcript,
+   the diff list or the deliverables shelf -- nothing navigates from inside it,
+   which is why there is nothing left here to navigate with. */
+export function FileView({ ws, file = ws.file }: { ws: WsShared; file?: WsFile | null }): JSX.Element {
+  const inPane = !!usePaneHead()
+  if (!store.source().canBrowse) return <div className="wsnote">{t('gui.ws.file_unreadable')}</div>
+  const f = file
+  const view = f ? String(f.seq ?? f.path) : null
+  return (
+    <div className="fwrap">
+      {inPane ? <FileHead f={f} /> : <Fbar f={f} />}
+      <div className="fpane">
+        {!f ? (
+          <div className="fempty">
+            <div dangerouslySetInnerHTML={{ __html: FT_ICO.page }} />
+            <div className="t">{t('gui.ws.file_none')}</div>
+          </div>
+        ) : (
+          <div className="fbody">
+            <FileBody key={view ?? undefined} f={f} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* `data.detail` first: on a refused fs call `message` is the wire CODE
+   (`config_validation_error`), and the sentence the reader can act on -- the
+   host has no `xdg-open`, the path is outside the fence -- rides in the detail.
+   A dropped socket has a message and no detail, hence the fallback. */
+const whySaid = (e: unknown): string => {
+  const said = e as { data?: { detail?: string }; message?: string } | null
+  return said?.data?.detail || said?.message || String(e)
+}
+
+/* A deck adds nothing to the bar: no application picker and no viewer toolbar
+   in the frame below. The deck is read here and changed by talking to the
+   agent, so its bar reads as the same bar an image or a PDF gets. */
+function CopyPath({ path }: { path: string }): JSX.Element {
+  return (
+    <button
+      className="ghost-ic fcopy tipdn"
+      data-tip={t('gui.ws.copy_path_do')}
+      aria-label={t('gui.ws.copy_path_do')}
+      onClick={() => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(path).then(() => toast(t('gui.ws.copy_path')), () => {})
+        }
+      }}
+    >
+      <Ico d={ICO.doc} />
+    </button>
+  )
+}
+
+function ViewSeg({ f }: { f: WsFile }): JSX.Element | null {
+  if (!TWO_VIEWS[f.kind]) return null
+  return (
+    <PaneHeadSeg
+      options={[{ key: 'rendered', label: t('gui.ws.file_rendered') }, { key: 'source', label: t('gui.ws.file_source') }]}
+      value={f.raw ? 'source' : 'rendered'}
+      onPick={(k) => {
+        f.raw = k === 'source'
+        store.redraw()
+      }}
+    />
+  )
+}
+
+function FileActs({ f }: { f: WsFile }): JSX.Element {
+  const platform = hostPlatform()
+  const revealTip = t(platform === 'mac' ? 'gui.ws.reveal_finder'
+    : platform === 'windows' ? 'gui.ws.reveal_explorer' : 'gui.ws.reveal_folder')
+  return (
+    <>
+      {f.kind === 'pdf' || f.kind === 'html' ? (
+        <button
+          className="ghost-ic tipdn workspace-ext"
+          data-tip={t('gui.ws.file_newtab')}
+          aria-label={t('gui.ws.file_newtab')}
+          /* The tab shows the page as the pane does, scripts and all, under the
+             same opaque-origin sandbox the route puts on it. */
+          onClick={() => window.open(f.kind === 'html' ? runURL(f.path) : fileURL(f.path), '_blank', 'noopener')}
+        >
+          <Ico d={ICO.ext} />
+        </button>
+      ) : null}
+      {/* Reveal runs where the GATEWAY runs, like every fs call, so on a
+          remote serve it shows the file on that host. */}
+      <button
+        className="ghost-ic tipdn"
+        data-tip={revealTip}
+        aria-label={revealTip}
+        onClick={() => {
+          store.source().reveal?.(f.path).then(() => {}, (e: unknown) => toast(whySaid(e)))
+        }}
+      >
+        <Ico d={ICO.reveal} />
+      </button>
+    </>
+  )
+}
+
+const splitRel = (f: WsFile): [string, string] => {
+  const rel = store.source().shortPath(f.path)
+  const cut = rel.lastIndexOf('/')
+  return cut > 0 ? [rel.slice(0, cut + 1), rel.slice(cut + 1)] : ['', rel]
+}
+
+const copyMenu = (f: WsFile) => ctxRef(() => [
+  { label: t('gui.ws.copy_path_do'), fn: () => copyToClip(f.path, t('gui.ws.copy_path')) },
+])
+
+/* In a desk pane the file is named once, in the pane's header: the base name
+   as the title, the folder it sits in as the muted line after it, and the
+   controls that act on it at the header's end. */
+function FileHead({ f }: { f: WsFile | null }): JSX.Element {
+  if (!f) return <PaneHead title={t('gui.ws.file_none')} />
+  const [dir, name] = splitRel(f)
+  return (
+    <PaneHead title={name} tip={f.path} titleRef={copyMenu(f)}
+      meta={dir ? <span className="workspace-dir">{dir}</span> : null}>
+      <ViewSeg f={f} />
+      <CopyPath path={f.path} />
+      <FileActs f={f} />
+    </PaneHead>
+  )
+}
+
+/* The same file, drawn outside a pane: a bar of its own above the body. */
+function Fbar({ f }: { f: WsFile | null }): JSX.Element {
+  const [dir, name] = f ? splitRel(f) : ['', '']
+  return (
+    <div className="fbar">
+      {f ? (
+        <>
+          <span className="nm" title={f.path} ref={copyMenu(f)}>
+            {dir ? <i>{dir}</i> : null}
+            <b>{name}</b>
+          </span>
+          <CopyPath path={f.path} />
+        </>
+      ) : (
+        <span className="nm">{t('gui.ws.file_none')}</span>
+      )}
+      <span className="fsp" />
+      {f ? <ViewSeg f={f} /> : null}
+      {f ? <span className="workspace-file-acts"><FileActs f={f} /></span> : null}
+    </div>
+  )
+}
+
+/* ── the file body ─────────────────────────────────────────────────── */
+
+/* A patch is one of the few formats whose lines carry their meaning in the
+   first character; without colour it reads as noise with plus signs. */
+function diffLineCls(line: string): string {
+  if (/^(\+\+\+|---)/.test(line)) return ' dmeta'
+  if (line[0] === '+') return ' dadd'
+  if (line[0] === '-') return ' ddel'
+  if (line.startsWith('@@')) return ' dhunk'
+  if (/^(diff |index |new file|deleted file|similarity |rename |Binary )/.test(line)) return ' dmeta'
+  return ''
+}
+
+function FileBody({ f }: { f: WsFile }): JSX.Element {
+  const asSource = TWO_VIEWS[f.kind] ? f.raw : !RENDERED[f.kind]
+  const asImage = f.kind === 'img' || (f.kind === 'svg' && !asSource)
+  const asFrame = (f.kind === 'pdf' || f.kind === 'html') && !asSource
+  const asDeck = f.kind === 'office'
+  const deliveredAt = useSyncExternalStore(deliveries.subscribe,
+    () => asImage || asDeck ? deliveries.byPath(f.path)?.when ?? null : null)
+  /* Rewrites of the open file stream in (liveFile.ts); each one moves the
+     version, so the preview redraws in place while an agent edits it. */
+  const live = useLiveFile(f.path, (asImage || asDeck || asFrame) && !f.err)
+  const delivered = f.seq == null ? deliveredAt : `${f.seq}:${deliveredAt ?? ''}`
+  const version = live ? `${delivered ?? ''}~${live}` : delivered
+  const sniffs = f.kind === 'bin' && !f.raw && !f.sniffed && store.sniffable(f.path)
+  const wantsText = !asImage && !asFrame && !asDeck && (f.kind !== 'bin' || f.raw)
+  useEffect(() => {
+    if (f.err || f.loading) return
+    if (sniffs) void store.sniffFile(f)
+    else if (wantsText && f.text == null) void store.loadFileText(f)
+  })
+  let body: JSX.Element
+  let fills = asFrame || asDeck
+  if (f.err) {
+    body = <div className="verr">{f.err}</div>
+  } else if (asImage) {
+    body = <PictureBody key={`${f.path}:${version}`} f={f} version={version} />
+  } else if (asFrame) {
+    /* No sandbox attribute on a PDF frame: Chromium refuses its PDF viewer
+       inside any sandboxed frame -- the request is answered 200 and then
+       blocked by the client, so the pane stayed a grey box with a sad face,
+       whatever tokens the attribute granted (allow-scripts included). The
+       viewer runs in its own extension origin, so the frame being same-origin
+       hands the document nothing of the page's.
+
+       An HTML file is rendered as the page it is, scripts included: a page
+       drawn on a canvas or laid out by its own code is otherwise a blank or a
+       broken-looking rectangle. Both halves grant the scripts -- the frame's
+       sandbox attribute and the header the route sends for `run=1` -- and
+       neither grants `allow-same-origin`, so the page keeps an opaque origin
+       and reaches no cookie or socket of this one. */
+    body = f.kind === 'pdf'
+      ? <iframe key={live} referrerPolicy="no-referrer" src={versioned(fileURL(f.path), live || null)} />
+      : <iframe key={live} sandbox="allow-scripts" referrerPolicy="no-referrer" src={versioned(runURL(f.path), live || null)} />
+  } else if (asDeck) {
+    body = <DeckBody f={f} version={version} />
+  } else if (sniffs) {
+    body = <div className="vspin">{t('gui.ws.file_loading')}</div>
+  } else if (f.kind === 'bin' && !f.raw) {
+    body = <BinNote f={f} />
+    fills = true
+  } else if (f.text == null) {
+    body = <div className="vspin">{t('gui.ws.file_loading')}</div>
+  } else if (f.kind === 'md' && !asSource) {
+    body = <div className="prose" dangerouslySetInnerHTML={{ __html: mdHtml(f.text) }} />
+  } else if (f.kind === 'csv' && !asSource) {
+    body = <CsvTable text={f.text} tab={/\.tsv$/i.test(f.path)} />
+  } else if (f.kind === 'bin' && looksBinary(f.text)) {
+    body = <BinNote f={f} title={t('gui.ws.file_not_text')} />
+    fills = true
+  } else {
+    const parsed = f.kind === 'json' && !asSource ? parseJsonCapped(f.text) : null
+    body = parsed ? <JsonView v={parsed.v} /> : <CodeLines text={f.text} kind={f.kind} />
+  }
+  return <div className={fills ? 'fview workspace-fill' : 'fview'}>{body}</div>
+}
+
+function PictureBody({ f, version }: { f: WsFile; version: number | string | null }): JSX.Element {
+  const [broken, setBroken] = useState<string | null>(null)
+  return (
+    <div className="shot">
+      {broken
+        ? <div className="verr">{broken}</div>
+        : <img src={versioned(fileURL(f.path), version)} alt={f.path}
+          /* The picture kinds never read text, so this is the only place they
+             learn why nothing came -- and the error itself does not say, which
+             is why the probe asks for a status: gone, over the ceiling, or
+             served and still not a picture this browser can draw. */
+          onError={() => {
+            void store.probeDeliveryMissing(f.path).then((status) => setBroken(
+              status === 404 ? t('gui.ws.file_gone')
+                : status === 413 ? t('gui.ws.file_big')
+                  : status === 403 ? t('gui.ws.file_denied') : t('gui.ws.img_broken')))
+          }} />}
+    </div>
+  )
+}
+
+/* A deck is shown as the PDF the gateway renders of it. The render is asked
+   for before it is framed, because a frame cannot say why its document did not
+   come, and this one can take a while or fail outright: LibreOffice may be
+   missing on the host, or hang on a deck. The answer's body is dropped unread
+   -- the gateway keeps the rendering, so the frame's own request is a cache
+   read -- and a failure falls back to the note a deck used to get, with the
+   gateway's words beside it. */
+function DeckBody({ f, version }: { f: WsFile; version: number | string | null }): JSX.Element {
+  const [pages, setPages] = useState<number | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  const [gone, setGone] = useState(false)
+  const first = pageURL(f.path, 1, version)
+  useEffect(() => {
+    setPages(null)
+    setFailed(null)
+    setGone(false)
+    let alive = true
+    const said = (e: unknown): string => ((e as Error) && (e as Error).message) || String(e)
+    /* The first page is asked for before any of them are drawn, and it answers
+       two questions at once: whether the rendering can be made at all -- a host
+       with no LibreOffice, a deck that will not convert -- and how many pages
+       there are to ask for, which the route puts on the picture it returns.
+       One round trip, and the rest are ordinary pictures the browser fetches
+       as the reader reaches them. */
+    fetch(first, { credentials: 'same-origin' }).then(async (r) => {
+      if (!alive) return
+      if (r.ok) {
+        void r.body?.cancel()
+        const said_ = Number(r.headers.get('X-Raven-Pdf-Pages'))
+        setPages(Number.isFinite(said_) && said_ > 0 ? said_ : 1)
+        return
+      }
+      /* The file itself is gone, which is not a render that failed: it reads
+         the way a gone file of any other kind does. */
+      if (r.status === 404) {
+        deliveries.markMissing(f.path)
+        setGone(true)
+        return
+      }
+      let text = ''
+      try {
+        text = (await r.text()).trim()
+      } catch {
+        /* An error without a body still has a status to show. */
+      }
+      if (alive) setFailed(text || `${r.status} ${r.statusText}`.trim())
+    }, (e: unknown) => { if (alive) setFailed(said(e)) })
+    return () => { alive = false }
+  }, [first, f.path])
+  if (gone) return <div className="verr">{t('gui.ws.file_gone')}</div>
+  if (failed != null) {
+    return <BinNote f={f} title={t('gui.ws.render_failed')} detail={failed} />
+  }
+  if (pages == null) return <div className="vspin">{t('gui.ws.file_rendering')}</div>
+  return (
+    <div className="workspace-pages">
+      {Array.from({ length: pages }, (_, i) => (
+        /* Lazy, so a long document costs the pages the reader actually reaches
+           rather than all of them at once -- each one is a render on the
+           gateway the first time it is asked for. The first is eager: it is
+           already fetched by the round trip above, and waiting for the
+           observer to notice it would blank the panel it just proved. */
+        <img
+          key={i}
+          className="workspace-page"
+          src={pageURL(f.path, i + 1, version)}
+          loading={i === 0 ? 'eager' : 'lazy'}
+          alt={t('gui.ws.page_n', { n: i + 1 })}
+        />
+      ))}
+    </div>
+  )
+}
+
+function CodeLines({ text, kind }: { text: string; kind: string }): JSX.Element {
+  return (
+    <div className="code">
+      {text.split('\n').map((line, i) => (
+        <div key={i} className={'ln' + (kind === 'diff' ? diffLineCls(line) : '')}>
+          <i>{String(i + 1)}</i>
+          <span>{line || ' '}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CsvTable({ text, tab }: { text: string; tab: boolean }): JSX.Element {
+  const rows = text.replace(/\r/g, '').split('\n').filter((l) => l.length).slice(0, 500)
+    .map((l) => l.split(tab ? '\t' : ','))
+  return (
+    <div className="csvw">
+      <table className="csvt">
+        <tbody>
+          {rows.map((cells, i) => (
+            <tr key={i}>
+              {cells.map((c, j) => (i === 0 ? <th key={j}>{c}</th> : <td key={j}>{c}</td>))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* ── json: a foldable tree ────────────────────────────────────────────
+   Native <details> does the folding, so there is no open-state to manage
+   and the keyboard works for free. A node budget keeps a machine-dumped
+   megabyte from freezing the tab. */
+const JSON_NODE_BUDGET = 4000
+
+function parseJsonCapped(text: string): { v: unknown } | null {
+  if (text.length > 2 * 1024 * 1024) return null
+  try {
+    return { v: JSON.parse(text) }
+  } catch {
+    /* A file that does not parse is still a file: fall through to the plain
+       numbered lines rather than showing an error for something readable. */
+    return null
+  }
+}
+
+function JsonLeaf({ v }: { v: unknown }): JSX.Element {
+  const cls = v === null ? 'jnull' : typeof v === 'string' ? 'jstr' : typeof v === 'number' ? 'jnum' : 'jbool'
+  const text = v === null ? 'null' : typeof v === 'string' ? JSON.stringify(v) : String(v)
+  return <span className={'jv ' + cls}>{text}</span>
+}
+
+function jsonNodeEl(v: unknown, key: string | number | null, state: { left: number }, depth: number, k: string): JSX.Element {
+  state.left -= 1
+  const keyBit = key !== null
+    ? (
+        <>
+          <span className="jk">{typeof key === 'number' ? String(key) : JSON.stringify(key)}</span>
+          <span className="jc">:</span>
+        </>
+      )
+    : null
+  if (v === null || typeof v !== 'object') {
+    return (
+      <div key={k} className="jrow">
+        {keyBit}
+        <JsonLeaf v={v} />
+      </div>
+    )
+  }
+  const isArr = Array.isArray(v)
+  const entries: Array<[string | number, unknown]> = isArr
+    ? (v as unknown[]).map((x, i) => [i, x] as [number, unknown])
+    : Object.entries(v as Record<string, unknown>)
+  const kidRows: JSX.Element[] = []
+  for (const [ck, child] of entries) {
+    if (state.left <= 0) {
+      kidRows.push(<div key="cap" className="jrow jmore">{t('gui.ws.json_capped')}</div>)
+      break
+    }
+    kidRows.push(jsonNodeEl(child, ck, state, depth + 1, String(ck)))
+  }
+  if (!entries.length) kidRows.push(<div key="empty" className="jrow jmore">{isArr ? '[]' : '{}'}</div>)
+  return (
+    /* The first two levels open by default: that is the shape of the file.
+       Below that the reader opens what they are looking for. */
+    <details key={k} className="jnode" open={depth < 2}>
+      <summary>
+        {keyBit}
+        <span className="jb">{isArr ? '[' : '{'}</span>
+        <span className="jn">{t('gui.ws.json_items', { n: String(entries.length) })}</span>
+        <span className="jb">{isArr ? ']' : '}'}</span>
+      </summary>
+      <div className="jkids">{kidRows}</div>
+    </details>
+  )
+}
+
+function JsonView({ v }: { v: unknown }): JSX.Element {
+  const state = { left: JSON_NODE_BUDGET }
+  return <div className="jsonv">{jsonNodeEl(v, null, state, 0, 'root')}</div>
+}

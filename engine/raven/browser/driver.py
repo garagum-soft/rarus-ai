@@ -1,0 +1,1212 @@
+"""A single Chromium page, driven over CDP by both the agent and the reader.
+
+Design notes worth keeping:
+
+* **The page is shared, not per-caller.** The agent's tools and the GUI panel
+  address one page. That is what lets a reader log in by hand and the agent
+  continue on the other side of the login.
+* **Several agents, one browser, one tab each.** A caller that names an
+  ``owner`` (a conversation, a sub-agent run) is bound to a tab: the active one
+  if nobody else holds it, otherwise a fresh one. Its later calls land on that
+  tab whatever the panel is showing, and each of its actions brings the tab to
+  the front so the panel shows what the model is doing. Callers with no owner
+  are the reader's own hands.
+* **Reading is structural, not visual.** ``snapshot`` walks the DOM for the
+  handful of things a caller acts on and hands back stable ``ref`` ids. Asking
+  the model to find a button in a JPEG costs far more and works less often, so
+  screenshots are for showing the reader and for final visual checks.
+* **Nothing starts until something asks.** Chromium is launched on the first
+  navigation, so a Raven that never opens a page never pays for one.
+* **Playwright is an extra.** Every entry point raises ``BrowserUnavailableError``
+  with an install hint the reader can actually run rather than an ImportError
+  traceback.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import re
+import shlex
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
+from raven.browser.policy import NavigationRefusedError, check_navigation, navigation_refusal
+
+
+# sys.executable is the venv that has playwright in both install shapes -- a uv
+# tool install (the engines carry it) and a source checkout -- whereas `uv sync`
+# exists only in the checkout, so the hint names the interpreter itself.
+# shlex.quote emits POSIX quoting that cmd/PowerShell take literally, so on
+# Windows the path gets double quotes, and only when a space demands them.
+def _quote_interpreter(path: str) -> str:
+    if sys.platform == "win32":
+        return f'"{path}"' if " " in path else path
+    return shlex.quote(path)
+
+
+CHROMIUM_INSTALL_HINT = f"{_quote_interpreter(sys.executable)} -m playwright install chromium"
+# When the package itself is missing (the installers' bare-raven fallback
+# rung), `python -m playwright` cannot work either; point at the installer
+# this platform runs instead.
+PACKAGE_INSTALL_HINT = (
+    f"reinstall raven via {'install.ps1' if sys.platform == 'win32' else 'install.sh'} "
+    "(engines carry the browser library); from a source checkout: uv sync --all-extras"
+)
+# When the browser is on disk but the host lacks the system libraries it links
+# against: Playwright's own command, which installs them with apt as root.
+CHROMIUM_DEPS_HINT = f"{_quote_interpreter(sys.executable)} -m playwright install-deps chromium"
+
+
+def _host_library_gap(text: str) -> str | None:
+    """What a launch failure says this host lacks, when that is what it says.
+
+    Two Linux shapes, and nothing else:
+
+    - the dynamic loader's refusal as the browser starts, naming the first
+      library it could not load -- what a host without one reports whenever
+      Playwright's own dependency check has not caught it first;
+    - that check's report, which suggests ``playwright install-deps`` and so
+      would otherwise read as a browser that is not installed at all. Where it
+      cannot map a library to a package it suggests nothing and lists the
+      libraries instead, so those are named.
+
+    Playwright's Windows check is neither: its report reads "missing
+    dependencies!" rather than "... to run browsers." and carries remedies of
+    its own -- a Visual C++ runtime among them, which no install-deps line
+    brings -- so it is left for the caller to pass through whole.
+    """
+    loader = re.search(r"error while loading shared libraries: ([^\s:]+)", text)
+    if loader:
+        return f"the system library {loader.group(1)} is missing"
+    if "Host system is missing dependencies to run browsers" not in text:
+        return None
+    listed = re.findall(r"\S+\.so(?:\.\S+)?", text.partition("Missing libraries:")[2])
+    if len(listed) == 1:
+        return f"the system library {listed[0]} is missing"
+    if listed:
+        return f"the system libraries {', '.join(listed)} are missing"
+    return "the host is missing system libraries it needs"
+
+
+def _cannot_start_at_all(text: str) -> bool:
+    """Whether a launch failure stops the browser under any profile, so that a
+    throwaway one cannot get past it. Three such failures, and only these:
+
+    - a host missing a system library, in either shape Linux reports it
+      (``_host_library_gap``);
+    - Playwright's own host check on any platform -- the Windows report is
+      not a Linux shape, but no profile supplies a Visual C++ runtime either;
+    - no browser at the path Playwright resolved.
+    """
+    return (
+        _host_library_gap(text) is not None
+        or "Host system is missing dependencies" in text
+        or "Executable doesn't exist" in text
+    )
+
+
+# One profile on disk: logins survive restarts, and -- because pop-out is a
+# relaunch -- they survive the panel/window switch too. Read at launch rather
+# than at import: a process that moves HOME after importing this module (the
+# test suite gives every test its own) must not open the profile it left.
+def _profile_dir() -> Path:
+    return Path.home() / ".raven" / "browser-profile"
+
+
+DEFAULT_VIEWPORT = (1280, 800)
+NAV_TIMEOUT_MS = 30_000
+ACT_TIMEOUT_MS = 10_000
+MAX_REFS = 200
+MAX_TEXT_CHARS = 20_000
+MAX_TABS = 20
+"""A ceiling on open tabs.
+
+The agent opens tabs through the same call the panel's Cmd-T uses, and a loop
+that opens one per iteration costs a renderer process each -- the machine goes
+down before anything in raven notices. The number is generous for a reader and
+still bounded."""
+
+OWNER_IDLE_S = 600.0
+"""How long an owner keeps its tab without touching it.
+
+A sub-agent run that finished, or a conversation the reader walked away from,
+never says goodbye. Past this the binding lapses and the tab is free for the
+next owner to claim, so a single-agent user who comes back tomorrow finds the
+agent on the tab they are looking at rather than on a fresh one beside it."""
+
+
+class BrowserUnavailableError(RuntimeError):
+    """Playwright or its Chromium is not installed."""
+
+
+class BrowserBusyError(RuntimeError):
+    """No tab can be given to this owner right now."""
+
+
+# The elements a caller can actually act on, plus the few that carry the page's
+# structure. Everything else is noise in a snapshot.
+_SNAPSHOT_JS = """
+(maxRefs) => {
+  const out = [];
+  const seen = new WeakSet();
+  const sel = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=textbox],'
+    + '[role=checkbox],[role=radio],[role=tab],[role=menuitem],[contenteditable=""],'
+    + '[contenteditable=true],h1,h2,h3,summary,[onclick]';
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return null;
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return null;
+    return r;
+  };
+  const label = (el) => {
+    const aria = el.getAttribute && el.getAttribute('aria-label');
+    if (aria) return aria.trim();
+    if (el.tagName === 'INPUT') {
+      const ph = el.getAttribute('placeholder');
+      if (ph) return ph.trim();
+      if (el.labels && el.labels[0]) return el.labels[0].textContent.trim();
+      return (el.getAttribute('name') || el.type || '').trim();
+    }
+    const t = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    return t.slice(0, 120);
+  };
+  const role = (el) => {
+    const r = el.getAttribute && el.getAttribute('role');
+    if (r) return r;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a') return 'link';
+    if (tag === 'button') return 'button';
+    if (tag === 'input') return el.type === 'checkbox' || el.type === 'radio' ? el.type : 'textbox';
+    if (tag === 'textarea') return 'textbox';
+    if (tag === 'select') return 'combobox';
+    if (/^h[1-3]$/.test(tag)) return 'heading';
+    return tag;
+  };
+  document.querySelectorAll(sel).forEach((el) => {
+    if (out.length >= maxRefs || seen.has(el)) return;
+    const r = vis(el);
+    if (!r) return;
+    seen.add(el);
+    const item = {
+      ref: 'ref_' + (out.length + 1),
+      role: role(el),
+      name: label(el),
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2),
+    };
+    if (el.tagName === 'A' && el.href) item.href = el.href;
+    if (el.value !== undefined && el.type !== 'password' && typeof el.value === 'string') {
+      item.value = el.value.slice(0, 80);
+    }
+    if (el.disabled) item.disabled = true;
+    el.setAttribute('data-raven-ref', item.ref);
+    out.push(item);
+  });
+  return {
+    url: location.href,
+    title: document.title,
+    text: (document.body ? document.body.innerText : '').slice(0, %MAX_TEXT%),
+    refs: out,
+  };
+}
+""".replace("%MAX_TEXT%", str(MAX_TEXT_CHARS))
+
+_OPENS_TAB_JS = """
+(el) => {
+  const a = el.closest('a[target]') || (el.tagName === 'FORM' ? el : el.closest('form[target]'));
+  return !!(a && a.target === '_blank');
+}
+"""
+
+
+@dataclass
+class _Owner:
+    page: Any
+    seen: float
+
+
+@dataclass
+class _State:
+    playwright: Any = None
+    browser: Any = None
+    context: Any = None
+    page: Any = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    cdp: Any = None
+    on_frame: Any = None
+    stream_quality: int = 55
+    # Why the last navigation was refused, for the next state() to report. A
+    # click that goes nowhere with nothing said is indistinguishable from a
+    # dead link.
+    refused: str = ""
+    owners: dict[str, _Owner] = field(default_factory=dict)
+    adopting: set[asyncio.Task] = field(default_factory=set)
+    # Pages the driver itself is creating right now (``_page_for`` / ``tab_new``).
+    # The context's "page" event cannot tell them from popups, and adopting one
+    # would move the panel on a READ; the creating call decides what the panel
+    # shows (act -> ``_focus``, read -> nothing). Popups keep an opener, so
+    # ``_adopt`` skips only opener-less pages while this is non-zero.
+    spawning: int = 0
+    # When the reader last acted on any page, so a tool can tell its model that
+    # the page it is about to read was changed by a hand other than its own.
+    touched: float = 0.0
+
+
+class Browser:
+    """The shared page. Every method starts Chromium if it is not up yet."""
+
+    def __init__(self) -> None:
+        self._s = _State()
+        # Survives close(): the pop-out flow is close-and-relaunch, and the
+        # relaunch has to remember which kind of window was asked for.
+        self._headful = False
+        # Also survives close(), and for a sharper reason: `_State` is one
+        # session, this guards the transition *between* sessions. A relaunch
+        # calls close(), which swaps in a fresh state -- so a lock living there
+        # would be replaced mid-launch and stop excluding anyone at exactly the
+        # moment two callers are most likely to collide. Separate from
+        # `_s.lock`, which the navigation methods take after calling `_ensure`.
+        self._launch_lock = asyncio.Lock()
+
+    # ---- lifecycle ---------------------------------------------------------
+
+    @staticmethod
+    def probe() -> tuple[bool, str]:
+        """Whether a page can be opened at all, and why not when it cannot."""
+        try:
+            import playwright  # noqa: F401
+        except ImportError:
+            return False, f"playwright is not installed: {PACKAGE_INSTALL_HINT}"
+        return True, ""
+
+    @property
+    def started(self) -> bool:
+        page = self._s.page
+        try:
+            return page is not None and not page.is_closed()
+        except Exception:
+            return page is not None
+
+    async def _ensure(self) -> Any:
+        ok, why = self.probe()
+        if not ok:
+            raise BrowserUnavailableError(why)
+        # Serialised, because the launch is the part with the most await points
+        # in it and the gateway dispatches frames concurrently: two callers that
+        # both found no page would each start a Chromium, the second overwriting
+        # the first's handles so nothing could ever close them -- and the
+        # survivor would be the one that lost the profile lock, i.e. the one
+        # without the reader's logins.
+        async with self._launch_lock:
+            return await self._launch_once()
+
+    async def _launch_once(self) -> Any:
+        if self._s.page is not None:
+            # A reader can close a popped-out window under us; a dead page
+            # must relaunch, not raise TargetClosed on every call forever.
+            if self.started:
+                return self._s.page
+            await self.close()
+        from playwright.async_api import async_playwright
+
+        w, h = DEFAULT_VIEWPORT
+        launch: dict[str, Any] = {"headless": not self._headful}
+        if self._headful:
+            # Drop the "controlled by automated software" banner: to the
+            # reader this window is simply their browser.
+            launch["ignore_default_args"] = ["--enable-automation"]
+            launch["args"] = [f"--window-size={w},{h + 88}"]
+        ctx_opts: dict[str, Any] = {
+            "viewport": {"width": w, "height": h},
+            # 2x so the panel's stream is crisp on retina displays; the
+            # agent's screenshots stay CSS-sized via scale="css" below.
+            "device_scale_factor": 2,
+            # A page that knows it is headless renders differently often
+            # enough that the reader would be looking at a different site
+            # than the one they would get in their own browser.
+            "user_agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+            ),
+        }
+        try:
+            self._s.playwright = await async_playwright().start()
+            context = None
+            try:
+                profile = _profile_dir()
+                profile.mkdir(parents=True, exist_ok=True)
+                context = await self._s.playwright.chromium.launch_persistent_context(
+                    str(profile), **launch, **ctx_opts
+                )
+            except Exception as exc:
+                # Another Raven (an old TUI, a second serve) may hold the
+                # profile's singleton lock; browsing must still work, just
+                # without the shared cookie jar. Chromium words that failure per
+                # platform and per locale, and only its English Linux words are
+                # known here, so every failure gets the one relaunch except
+                # those no profile can fix, where it would only bury the first
+                # error under the same one again.
+                text = str(exc)
+                if _cannot_start_at_all(text):
+                    raise
+                logger.warning(
+                    "browser: launch with the profile failed, retrying with a throwaway one ({})",
+                    text.partition("\n")[0] or type(exc).__name__,
+                )
+            if context is None:
+                self._s.browser = await self._s.playwright.chromium.launch(**launch)
+                context = await self._s.browser.new_context(**ctx_opts)
+            self._s.context = context
+            pages = context.pages
+            self._s.page = pages[0] if pages else await context.new_page()
+            self._wire(self._s.page)
+            # Registered after the first page exists so it only ever fires for
+            # popups. A target=_blank link becomes a new tab and the view
+            # follows it -- the native behaviour, and both the agent and the
+            # panel keep addressing the active tab.
+            self._s.context.on("page", self._on_new_page)
+            # The URL-string check on `goto` is the only one a caller can reach,
+            # and it is not the only way the page moves: a click follows an href
+            # the driver never sees, a popup becomes the active tab, and goto
+            # itself follows redirects the pre-check could not have seen. On a
+            # cloud host that is the whole link-local refusal, since the page
+            # the agent is reading is what tells it where to go next.
+            await context.route("**/*", self._police)
+        except Exception as exc:
+            await self.close()
+            hint = f"{exc}"
+            # Ahead of the not-installed test: Playwright's dependency report
+            # suggests `playwright install-deps`, which that test also matches.
+            gap = _host_library_gap(hint)
+            if gap is not None:
+                raise BrowserUnavailableError(
+                    f"Chromium is installed but cannot start here: {gap}. Installing system "
+                    f"libraries needs root, so it is the user's step: on Debian or Ubuntu, {CHROMIUM_DEPS_HINT}"
+                ) from None
+            if "Executable doesn't exist" in hint or "playwright install" in hint:
+                # "Not installed" is the right reading only when nothing is on
+                # disk. The same error comes back when a browser is installed
+                # where this process does not look -- Playwright resolves its
+                # cache from HOME, which a sandboxed run or another account
+                # moves -- and then the install line sends the reader to fetch
+                # what they already have. Playwright's error names the path it
+                # tried, which is the one fact that tells the two apart.
+                looked = re.search(r"Executable doesn't exist at (.+)", hint)
+                where = f" ({looked.group(1).strip()})" if looked else ""
+                raise BrowserUnavailableError(
+                    f"Chromium is not installed where this process looks for it{where}; if it is "
+                    "installed elsewhere, set PLAYWRIGHT_BROWSERS_PATH to its ms-playwright directory. "
+                    f"Otherwise run: {CHROMIUM_INSTALL_HINT}"
+                ) from None
+            raise BrowserUnavailableError(f"could not start Chromium: {hint}") from None
+        logger.info("browser: chromium started ({}x{})", w, h)
+        return self._s.page
+
+    async def _police(self, route: Any) -> None:
+        """Refuse a navigation Chromium is about to make, whoever asked for it.
+
+        Only *navigations* are judged -- a subresource cannot put its bytes
+        where ``browser.read`` would return them -- but every request is still
+        paused and resumed through here, because a route pattern is the only
+        filter Playwright offers and it matches on the URL, not the resource
+        kind. Two costs come with that, and they are paid on every request
+        rather than on the ones this refuses:
+
+        * a round trip into Python per request;
+        * no HTTP cache. Playwright disables it for the life of any context
+          with routing enabled, so a reload refetches every subresource.
+
+        Both are real for a reader watching the panel, and the alternative is
+        CDP (``Fetch.enable`` with ``resourceType: Document``), which pauses
+        only documents and leaves the cache alone. It is not here because a
+        CDP session is per page and would have to outlive the screencast's --
+        a lifetime change that wants a real Chromium to verify, which this
+        module's tests deliberately do not need.
+        """
+        request = route.request
+        try:
+            if not request.is_navigation_request():
+                await route.continue_()
+                return
+            reason = navigation_refusal(request.url)
+            if reason is None:
+                await route.continue_()
+                return
+        except Exception:  # noqa: BLE001 - the fence must not hang a page
+            # Fail open rather than leave the request neither continued nor
+            # aborted: a request nobody answers hangs until the navigation times
+            # out, with nothing said to anyone. Not because `goto` checked
+            # first -- it did not, for the paths this exists for: a click, a
+            # popup and a post-redirect hop never went through it, so here this
+            # is the only line. The trade is that a throw comes from a route
+            # torn down under us far more often than from a URL the check
+            # chokes on, and the alternative to letting one through is hanging
+            # the page. A torn-down route raises on the way out too, which is
+            # why the continue is itself guarded.
+            logger.debug("browser: could not police {}", getattr(request, "url", "?"))
+            try:
+                await route.continue_()
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+            return
+        logger.warning("browser: refused navigation to {} ({})", request.url, reason)
+        self._s.refused = reason
+        await route.abort("blockedbyclient")
+
+    @staticmethod
+    def _on_console(page: Any, msg: Any) -> None:
+        """Keep a page's console on that page.
+
+        One buffer for every tab read as the current page's console, so a
+        snapshot answered an owner with the errors another owner's page had
+        logged -- and a model acted on a failure that was not its page's.
+        """
+        log = page._raven_console
+        log.append({"type": msg.type, "text": msg.text[:500]})
+        del log[:-100]
+
+    @staticmethod
+    def _console_of(page: Any) -> list[dict[str, Any]]:
+        return list(getattr(page, "_raven_console", []) or [])
+
+    def _wire(self, page: Any) -> None:
+        """Handlers every tab needs, applied once per page.
+
+        The loading flag rides the page object itself: navigation commits set
+        it, the load event clears it, and the frame header / state carry it to
+        the panel's progress bar. ``framenavigated`` fires for every frame, so
+        the handler filters to the main frame.
+        """
+        page.set_default_timeout(ACT_TIMEOUT_MS)
+        page._raven_console = []
+        page.on("console", lambda msg, p=page: self._on_console(p, msg))
+        page._raven_loading = False
+
+        def _nav(frame: Any) -> None:
+            if frame == page.main_frame:
+                page._raven_loading = True
+
+        page.on("framenavigated", _nav)
+        page.on("load", lambda: setattr(page, "_raven_loading", False))
+        # A page that never reaches load (SPA soft-fails, aborted loads) must
+        # not spin forever; domcontentloaded is the honest lower bound.
+        page.on("domcontentloaded", lambda: setattr(page, "_raven_loading", False))
+
+    async def _restream(self) -> None:
+        """Re-bind the screencast to the (new) active page."""
+        if self._s.on_frame is not None:
+            try:
+                await self.start_stream(self._s.on_frame, quality=self._s.stream_quality)
+                logger.debug("browser: restreamed onto {}", self.url)
+            except Exception:
+                logger.exception("browser: could not restream after tab switch")
+
+    def _on_new_page(self, page: Any) -> None:
+        task = asyncio.ensure_future(self._adopt(page))
+        self._s.adopting.add(task)
+        task.add_done_callback(self._s.adopting.discard)
+
+    async def _settle(self) -> None:
+        """Wait for popups already announced to be adopted.
+
+        An action that opened one returns from Playwright before the handler
+        above has run, so a caller reading the page straight after would read
+        the opener. Only adoptions already in flight are waited for; a popup
+        Chromium has not announced yet is caught by the caller's next read.
+        """
+        pending = [t for t in self._s.adopting if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async def _adopt(self, page: Any) -> None:
+        """A popup becomes a new tab and the view follows it.
+
+        So does the owner whose page opened it: a target=_blank link the agent
+        clicked has to land where the agent reads next, or it reads the page it
+        left and reports that the click did nothing. The rebind happens before
+        the load wait so a caller settling on it is not made to wait out a slow
+        popup to learn which tab is now its own.
+        """
+        if page is self._s.page or self._s.context is None:
+            return
+        try:
+            opener = await page.opener()
+        except Exception:
+            opener = None
+        if opener is None and (self._s.spawning or getattr(page, "_raven_spawned", False)):
+            # Not a popup: a page the driver is creating in _page_for/tab_new,
+            # which also wires it and decides the panel itself. Adopting it
+            # here made a READ move what the panel shows (the documented
+            # never-happens), because the read path assigns no _s.page for the
+            # guard above to catch. Two checks because this task can run on
+            # either side of new_page() resolving: while it is in flight the
+            # counter is up; once it returned, the creator has already marked
+            # the page -- synchronously, so there is no window between them.
+            return
+        self._wire(page)
+        if opener is not None:
+            for rec in self._s.owners.values():
+                if rec.page is opener:
+                    rec.page = page
+        self._s.page = page
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        except Exception:
+            pass
+        await self._restream()
+
+    # ---- ownership -----------------------------------------------------------
+
+    def _owner_live(self, rec: _Owner, now: float) -> bool:
+        try:
+            closed = rec.page.is_closed()
+        except Exception:
+            closed = True
+        return not closed and now - rec.seen < OWNER_IDLE_S
+
+    def _reap_owners(self, now: float) -> None:
+        for key in [k for k, rec in self._s.owners.items() if not self._owner_live(rec, now)]:
+            del self._s.owners[key]
+
+    def owner_of(self, page: Any) -> str | None:
+        """Which live owner holds this page, if any."""
+        now = time.monotonic()
+        for key, rec in self._s.owners.items():
+            if rec.page is page and self._owner_live(rec, now):
+                return key
+        return None
+
+    def _landing(self, owner: str, now: float) -> Any | None:
+        """The page a call for ``owner`` lands on now, or None for a new tab.
+
+        The one rule both questions about it go through: ``_page_for`` binds
+        the answer and ``url_for`` reports it without binding. The permission
+        gate keys an acting call on that report before the call runs, so the
+        site a person is asked about is only the site acted on if the same
+        rule picks the page both times. Only live bindings count, which is the
+        view ``_page_for`` acts on once it has reaped.
+        """
+        rec = self._s.owners.get(owner)
+        if rec is not None and self._owner_live(rec, now):
+            return rec.page
+        active = self._s.page
+        held = {id(r.page) for k, r in self._s.owners.items() if k != owner and self._owner_live(r, now)}
+        if id(active) not in held:
+            return active
+        return None
+
+    def url_for(self, owner: str | None) -> str:
+        """Where a call for this owner would act, without starting or binding.
+
+        The owner's own tab while it holds a live one; otherwise the page
+        ``_page_for`` would hand it -- the front tab, unless another live owner
+        holds that -- and empty when the call would have to open a tab of its
+        own, which no site describes yet, or when no browser is running and the
+        call would start one. A prediction, made before the call:
+        whatever moves in between (the reader switches tabs, another owner
+        takes the front one, the binding idles past ``OWNER_IDLE_S`` while a
+        person decides) moves the call with it. The reader, ``None``, reads
+        the front tab.
+        """
+        if owner is None:
+            return self.url
+        page = self._landing(owner, time.monotonic())
+        return page.url if page is not None else ""
+
+    async def _page_for(self, owner: str | None, *, act: bool = True) -> Any:
+        """The page a caller works on, binding an owner on its first call.
+
+        ``owner=None`` is the reader; ``act`` says whether the call changes the
+        page, which is what the touch stamp and the front-most switch follow --
+        a read from either side must not move what the panel shows.
+        """
+        active = await self._ensure()
+        now = time.monotonic()
+        if owner is None:
+            if act:
+                self._s.touched = now
+            return active
+        self._reap_owners(now)
+        rec = self._s.owners.get(owner)
+        if rec is not None:
+            rec.seen = now
+            page = rec.page
+        else:
+            page = self._landing(owner, now)
+            if page is None:
+                if len(self._pages()) >= MAX_TABS:
+                    raise BrowserBusyError(f"tab limit reached ({MAX_TABS}); close one before opening another")
+                self._s.spawning += 1
+                try:
+                    page = await self._s.context.new_page()
+                finally:
+                    self._s.spawning -= 1
+                page._raven_spawned = True
+                self._wire(page)
+            self._s.owners[owner] = _Owner(page, now)
+        if act:
+            await self._focus(page)
+        return page
+
+    async def _focus(self, page: Any) -> None:
+        """Make this tab the one the panel shows."""
+        if page is self._s.page:
+            return
+        self._s.page = page
+        await self._restream()
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
+    def touched_since(self, when: float) -> bool:
+        """Whether the reader acted on any page after ``when`` (a monotonic stamp)."""
+        return self._s.touched > when
+
+    def release(self, owner: str) -> None:
+        """Forget an owner's binding; its tab stays open for whoever claims it next."""
+        self._s.owners.pop(owner, None)
+
+    # ---- tabs ----------------------------------------------------------------
+
+    def _pages(self) -> list[Any]:
+        ctx = self._s.context
+        if ctx is None:
+            return []
+        return [p for p in ctx.pages if not p.is_closed()]
+
+    async def tabs(self, owner: str | None = None) -> list[dict[str, Any]]:
+        """Every open tab, active flag included. Never starts Chromium.
+
+        With an ``owner``, ``yours`` marks the tab bound to it and ``held``
+        the tabs another live owner is working in.
+        """
+        out: list[dict[str, Any]] = []
+        mine = self._s.owners.get(owner) if owner is not None else None
+        for i, p in enumerate(self._pages()):
+            title = ""
+            try:
+                title = await p.title()
+            except Exception:
+                pass
+            row: dict[str, Any] = {
+                "index": i,
+                "url": p.url,
+                "title": title,
+                "active": p is self._s.page,
+                "loading": bool(getattr(p, "_raven_loading", False)),
+            }
+            if owner is not None:
+                holder = self.owner_of(p)
+                row["yours"] = mine is not None and mine.page is p
+                row["held"] = holder is not None and holder != owner
+            out.append(row)
+        return out
+
+    async def tab_new(self, url: str | None = None, *, owner: str | None = None) -> dict[str, Any]:
+        await self._ensure()
+        if len(self._pages()) >= MAX_TABS:
+            return await self._state(error=f"tab limit reached ({MAX_TABS}); close one first")
+        self._s.spawning += 1
+        try:
+            page = await self._s.context.new_page()
+        finally:
+            self._s.spawning -= 1
+        page._raven_spawned = True
+        self._wire(page)
+        if owner is not None:
+            self._s.owners[owner] = _Owner(page, time.monotonic())
+        else:
+            self._s.touched = time.monotonic()
+        await self._focus(page)
+        if url and url.strip():
+            return await self.goto(url.strip(), owner=owner)
+        return await self._state(page=page)
+
+    async def tab_activate(self, index: int, *, owner: str | None = None) -> dict[str, Any]:
+        """Bring a tab to the front; an owner asking is rebound to it.
+
+        A tab another live owner is working in is refused to an owner: two
+        agents typing into one page is the collision the binding exists to
+        prevent, and a reader who wants to look at it can, with no owner.
+        """
+        pages = self._pages()
+        if not (0 <= index < len(pages)):
+            return await self._state(error=f"no tab {index}")
+        page = pages[index]
+        if owner is not None:
+            holder = self.owner_of(page)
+            if holder is not None and holder != owner:
+                return await self._state(error=f"tab {index} is being used by another agent", page=page)
+            self._s.owners[owner] = _Owner(page, time.monotonic())
+        else:
+            self._s.touched = time.monotonic()
+        await self._focus(page)
+        return await self._state(page=page)
+
+    async def tab_close(self, index: int, *, owner: str | None = None) -> dict[str, Any]:
+        """Close one tab; closing the last one closes the browser (native).
+
+        An owner may close only the tab it holds. A tab held by another owner
+        is refused as in ``tab_activate`` -- and a tab with NO owner is the
+        reader's, not idle: the panel's tab may hold a login the user was just
+        asked to complete (``HANDOFF_NOTE``), and closing the last tab closes
+        the whole browser, so an auto-approved call must never take it out
+        silently. An owner that wants an unheld tab gone claims it first with
+        ``tab_activate`` -- a front-most switch the reader can see -- and then
+        closes what it holds. The owner's own binding lapses with the tab.
+        """
+        pages = self._pages()
+        if not (0 <= index < len(pages)):
+            return await self._state(error=f"no tab {index}")
+        victim = pages[index]
+        if owner is not None:
+            holder = self.owner_of(victim)
+            if holder is None:
+                return await self._state(
+                    error=f"tab {index} is the user's tab; activate it first if it must close",
+                    page=victim,
+                )
+            if holder != owner:
+                return await self._state(error=f"tab {index} is being used by another agent", page=victim)
+        else:
+            self._s.touched = time.monotonic()
+        was_active = victim is self._s.page
+        try:
+            await victim.close()
+        except Exception:
+            pass
+        for key in [k for k, rec in self._s.owners.items() if rec.page is victim]:
+            del self._s.owners[key]
+        rest = self._pages()
+        if not rest:
+            await self.close()
+            return {"url": "", "title": "", "started": False, "headful": self._headful}
+        if was_active:
+            self._s.page = rest[min(index, len(rest) - 1)]
+            await self._restream()
+        return await self._state()
+
+    async def stop_loading(self) -> dict[str, Any]:
+        """The toolbar's stop button: Page.stopLoading on the active tab."""
+        page = self._s.page
+        if page is None:
+            return await self._state()
+        try:
+            cdp = self._s.cdp
+            if cdp is not None:
+                await cdp.send("Page.stopLoading")
+            else:
+                tmp = await self._s.context.new_cdp_session(page)
+                await tmp.send("Page.stopLoading")
+                await tmp.detach()
+            page._raven_loading = False
+        except Exception as exc:
+            return await self._state(error=str(exc))
+        return await self._state()
+
+    async def set_headful(self, headful: bool) -> dict[str, Any]:
+        """Move the page between the panel stream and a real window.
+
+        Chromium cannot change headless-ness in place, so this is a relaunch
+        that carries the URL over. Logins ride along in the persistent
+        profile; only a throwaway-profile fallback (profile lock held
+        elsewhere) loses them.
+        """
+        headful = bool(headful)
+        if headful == self._headful:
+            return await self.state()
+        url = self.url
+        if self._s.page is not None:
+            await self.close()
+        self._headful = headful
+        if url and not url.startswith("about:"):
+            return await self.goto(url)
+        return await self.state()
+
+    async def close(self) -> None:
+        await self.stop_stream()
+        s = self._s
+        for name in ("context", "browser"):
+            obj = getattr(s, name)
+            if obj is not None:
+                try:
+                    await obj.close()
+                except Exception:
+                    pass
+        if s.playwright is not None:
+            try:
+                await s.playwright.stop()
+            except Exception:
+                pass
+        self._s = _State()
+        logger.info("browser: closed")
+
+    # ---- navigation --------------------------------------------------------
+
+    async def goto(self, url: str, *, owner: str | None = None) -> dict[str, Any]:
+        # Checked before the page is ensured: a refused target must not be the
+        # thing that launches Chromium.
+        try:
+            target = check_navigation(url)
+        except NavigationRefusedError as exc:
+            return await self._state(error=str(exc))
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                await page.goto(target, timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    async def go(self, direction: str, *, owner: str | None = None) -> dict[str, Any]:
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                if direction == "back":
+                    await page.go_back(timeout=NAV_TIMEOUT_MS)
+                elif direction == "forward":
+                    await page.go_forward(timeout=NAV_TIMEOUT_MS)
+                else:
+                    await page.reload(timeout=NAV_TIMEOUT_MS)
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    # ---- reading -----------------------------------------------------------
+
+    async def snapshot(self, *, owner: str | None = None) -> dict[str, Any]:
+        """The page as things a caller can act on, with stable refs."""
+        page = await self._page_for(owner, act=False)
+        try:
+            data = await page.evaluate(_SNAPSHOT_JS, MAX_REFS)
+        except Exception as exc:
+            return await self._state(error=str(exc), page=page)
+        data["console"] = self._console_of(page)[-20:]
+        data["tab"] = self._index_of(page)
+        return data
+
+    async def screenshot(self, quality: int = 60, full: bool = False, *, owner: str | None = None) -> str:
+        """A base64 JPEG. The panel shows it; a tool uses it to check its work.
+
+        scale="css" keeps the image at viewport size: the context renders at
+        2x for the reader's stream, and a 2x screenshot would quadruple what
+        the model pays to look at the same page.
+        """
+        page = await self._page_for(owner, act=False)
+        raw = await page.screenshot(type="jpeg", quality=max(1, min(100, quality)), full_page=full, scale="css")
+        return base64.b64encode(raw).decode("ascii")
+
+    # ---- the reader's live view ---------------------------------------------
+
+    @property
+    def streaming(self) -> bool:
+        return self._s.cdp is not None
+
+    @property
+    def url(self) -> str:
+        return self._s.page.url if self._s.page else ""
+
+    @property
+    def loading(self) -> bool:
+        p = self._s.page
+        return bool(getattr(p, "_raven_loading", False)) if p else False
+
+    @property
+    def viewport(self) -> tuple[int, int]:
+        vp = (self._s.page.viewport_size if self._s.page else None) or {}
+        return vp.get("width", DEFAULT_VIEWPORT[0]), vp.get("height", DEFAULT_VIEWPORT[1])
+
+    async def set_viewport(self, width: int, height: int) -> None:
+        """Match the page to the panel, so the panel is the page -- not a
+        thumbnail of some other, wider page."""
+        page = await self._ensure()
+        w = max(320, min(3840, int(width)))
+        h = max(240, min(2400, int(height)))
+        if (w, h) != self.viewport:
+            await page.set_viewport_size({"width": w, "height": h})
+
+    async def start_stream(
+        self, on_frame: Any, *, width: int | None = None, height: int | None = None, quality: int = 55
+    ) -> None:
+        """CDP screencast: Chromium pushes a JPEG per paint to ``on_frame``.
+
+        ``on_frame(jpeg_b64, meta)`` is called from the CDP event loop and must
+        not block. Pushing (rather than the panel polling screenshots) is what
+        makes typing and scrolling feel attached to the page: the next frame
+        arrives when the page paints, not when the next poll comes around.
+        """
+        page = await self._ensure()
+        if width and height:
+            await self.set_viewport(width, height)
+        await self.stop_stream()
+        cdp = await self._s.context.new_cdp_session(page)
+        self._s.cdp = cdp
+        self._s.on_frame = on_frame
+        self._s.stream_quality = quality
+
+        def _frame(params: dict[str, Any]) -> None:
+            sid = params.get("sessionId")
+            if sid is not None:
+                # Ack immediately or Chromium stops sending.
+                asyncio.ensure_future(cdp.send("Page.screencastFrameAck", {"sessionId": sid}))
+            try:
+                on_frame(params.get("data", ""), params.get("metadata") or {})
+            except Exception:
+                logger.exception("browser: frame sink failed")
+
+        cdp.on("Page.screencastFrame", _frame)
+        w, h = self.viewport
+        await cdp.send(
+            "Page.startScreencast",
+            {
+                # 2x the CSS viewport: the capture happens at the context's
+                # device pixels, so this cap is "full retina", not upscaling.
+                "format": "jpeg",
+                "quality": max(1, min(100, int(quality))),
+                "maxWidth": w * 2,
+                "maxHeight": h * 2,
+                "everyNthFrame": 1,
+            },
+        )
+
+    async def stop_stream(self) -> None:
+        cdp = self._s.cdp
+        self._s.cdp = None
+        self._s.on_frame = None
+        if cdp is not None:
+            for op in ("send", "detach"):
+                try:
+                    await (cdp.send("Page.stopScreencast") if op == "send" else cdp.detach())
+                except Exception:
+                    pass
+
+    def _index_of(self, page: Any) -> int | None:
+        for i, p in enumerate(self._pages()):
+            if p is page:
+                return i
+        return None
+
+    async def _history_reach(self, page: Any = None) -> tuple[bool, bool]:
+        """(can_back, can_forward) for a tab (the active one by default), via CDP history.
+
+        Uses the screencast's CDP session when one is live and it is the active
+        tab being asked about; otherwise a short-lived one. Any failure degrades
+        to (True, True) — a wrongly enabled arrow no-ops, a wrongly disabled one
+        loses a capability.
+        """
+        page = page if page is not None else self._s.page
+        if page is None:
+            return False, False
+        try:
+            cdp = self._s.cdp if page is self._s.page else None
+            own = False
+            if cdp is None:
+                cdp = await self._s.context.new_cdp_session(page)
+                own = True
+            hist = await cdp.send("Page.getNavigationHistory")
+            if own:
+                await cdp.detach()
+            i = int(hist.get("currentIndex", 0))
+            n = len(hist.get("entries") or [])
+            return i > 0, i < n - 1
+        except Exception:
+            return True, True
+
+    async def _state(self, error: str | None = None, *, page: Any = None) -> dict[str, Any]:
+        page = page if page is not None else self._s.page
+        title = ""
+        if page is not None:
+            try:
+                title = await page.title()
+            except Exception:
+                pass
+        can_back, can_fwd = await self._history_reach(page)
+        out: dict[str, Any] = {
+            "url": page.url if page else "",
+            "title": title,
+            "started": self.started,
+            "headful": self._headful,
+            "loading": bool(getattr(page, "_raven_loading", False)) if page else False,
+            "can_back": can_back,
+            "can_forward": can_fwd,
+            "tab_count": len(self._pages()),
+            "tab": self._index_of(page) if page is not None else None,
+        }
+        if not error and self._s.refused:
+            # Reported once, then forgotten: a click that goes nowhere with
+            # nothing said reads as a dead link rather than a refusal.
+            error, self._s.refused = self._s.refused, ""
+        if error:
+            out["error"] = error
+        return out
+
+    async def state(self) -> dict[str, Any]:
+        """Where the page is, without starting a browser to find out."""
+        if self._s.page is None:
+            ok, why = self.probe()
+            return {
+                "url": "",
+                "title": "",
+                "started": False,
+                "headful": self._headful,
+                "available": ok,
+                "reason": why,
+            }
+        out = await self._state()
+        out["available"] = True
+        out["reason"] = ""
+        return out
+
+    # ---- acting ------------------------------------------------------------
+
+    @staticmethod
+    def _locate(page: Any, ref: str) -> Any:
+        return page.locator(f'[data-raven-ref="{ref}"]')
+
+    async def click(
+        self,
+        ref: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        button: str = "left",
+        *,
+        owner: str | None = None,
+    ) -> dict[str, Any]:
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                if ref:
+                    loc = self._locate(page, ref)
+                    # A link that opens a tab is announced by Chromium after the
+                    # click resolves; waiting for the popup here is what lets
+                    # the readback describe the tab the agent is now on rather
+                    # than the one it left. Only a declared target can be
+                    # known in advance -- a window.open in a handler is caught
+                    # by the owner's next read, once the tab has been adopted.
+                    opens_tab = await loc.evaluate(_OPENS_TAB_JS, timeout=ACT_TIMEOUT_MS)
+                    if opens_tab:
+                        async with page.expect_popup(timeout=ACT_TIMEOUT_MS):
+                            await loc.click(timeout=ACT_TIMEOUT_MS, button=button)
+                    else:
+                        await loc.click(timeout=ACT_TIMEOUT_MS, button=button)
+                elif x is not None and y is not None:
+                    await page.mouse.click(x, y, button=button)
+                else:
+                    return await self._state(error="click needs a ref or x/y", page=page)
+                page = await self._landed(page, owner)
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    async def _landed(self, page: Any, owner: str | None) -> Any:
+        """The page an action ends on, loaded enough to read.
+
+        A click that navigates needs the load to settle before the caller
+        reads the page, or it reads the old one; a click that opened a popup
+        moved its owner to the popup, and that is the page to settle and report.
+        """
+        await self._settle()
+        if owner is not None:
+            rec = self._s.owners.get(owner)
+            if rec is not None:
+                page = rec.page
+        await page.wait_for_load_state("domcontentloaded", timeout=ACT_TIMEOUT_MS)
+        return page
+
+    async def type_text(
+        self, text: str, ref: str | None = None, submit: bool = False, *, owner: str | None = None
+    ) -> dict[str, Any]:
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                if ref:
+                    await self._locate(page, ref).fill(text, timeout=ACT_TIMEOUT_MS)
+                else:
+                    await page.keyboard.type(text)
+                if submit:
+                    await page.keyboard.press("Enter")
+                    page = await self._landed(page, owner)
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    async def press(self, key: str, *, owner: str | None = None) -> dict[str, Any]:
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                await page.keyboard.press(key)
+                page = await self._landed(page, owner)
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    async def scroll(self, dx: int = 0, dy: int = 0, *, owner: str | None = None) -> dict[str, Any]:
+        page = await self._page_for(owner)
+        async with self._s.lock:
+            try:
+                await page.mouse.wheel(dx, dy)
+            except Exception as exc:
+                return await self._state(error=str(exc), page=page)
+        return await self._state(page=page)
+
+    # ---- the reader's raw input ---------------------------------------------
+    # No lock and no state readback: these arrive as a stream (a drag is dozens
+    # of moves), the screencast is already reporting the result, and a lock
+    # here would let one slow agent navigation freeze the reader's pointer.
+
+    async def mouse(
+        self,
+        action: str,
+        x: float | None = None,
+        y: float | None = None,
+        button: str = "left",
+        count: int = 1,
+        dx: float = 0,
+        dy: float = 0,
+    ) -> None:
+        page = await self._page_for(None)
+        m = page.mouse
+        if action == "move" and x is not None:
+            await m.move(x, y or 0)
+        elif action == "down":
+            if x is not None:
+                await m.move(x, y or 0)
+            await m.down(button=button, click_count=max(1, int(count)))
+        elif action == "up":
+            await m.up(button=button, click_count=max(1, int(count)))
+        elif action == "wheel":
+            await m.wheel(dx, dy)
+
+    async def key_event(self, key: str, action: str = "press") -> None:
+        page = await self._page_for(None)
+        kb = page.keyboard
+        if action == "down":
+            await kb.down(key)
+        elif action == "up":
+            await kb.up(key)
+        else:
+            await kb.press(key)
+
+    async def insert_text(self, text: str) -> None:
+        """Composed text (IME input) lands as-is -- key events cannot spell it."""
+        page = await self._page_for(None)
+        await page.keyboard.insert_text(text)
+
+
+_BROWSER: Browser | None = None
+
+
+def get_browser() -> Browser:
+    """The process-wide page. One browser per Raven, not one per caller."""
+    global _BROWSER
+    if _BROWSER is None:
+        _BROWSER = Browser()
+    return _BROWSER

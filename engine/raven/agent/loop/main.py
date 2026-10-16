@@ -1,0 +1,1063 @@
+"""AgentLoop -- the default harness.
+
+Module-level names live in ``_shared``; method groups live in mixins
+(``turn_path`` / ``wiring`` / ``mcp_glue`` / ``organ_glue``).
+"""
+
+from __future__ import annotations
+
+from raven.accounts.gate import refusal_for_turn
+from raven.agent import knowledge_scope
+from raven.agent.harness import bind_harness, default_harness_modules
+from raven.agent.loop._shared import (
+    TYPE_CHECKING,
+    Any,
+    AsyncExitStack,
+    Callable,
+    ContextBuilder,
+    DirectChatHandoff,
+    LLMProvider,
+    MemoryConsolidator,
+    ModelBinding,
+    Path,
+    RecoveryLimits,
+    SandboxConfig,
+    SandboxExecutor,
+    SandboxInitError,
+    SessionManager,
+    SessionPolicy,
+    StorePipeline,
+    SubagentManager,
+    ToolRegistry,
+    asyncio,
+    build_executor,
+    datetime,
+    logger,
+    session_of,
+    use_binding,
+    workdir,
+)
+from raven.agent.loop.bundles import (
+    EngineWiring,
+    HostWiring,
+    SubagentWiring,
+    ToolWiring,
+    TurnPolicy,
+    resolve_wiring,
+)
+from raven.agent.loop.mcp_glue import McpGlueMixin
+from raven.agent.loop.organ_glue import OrganGlueMixin
+from raven.agent.loop.turn_path import TurnPathMixin
+from raven.agent.loop.wiring import WiringMixin
+from raven.agent.subagent.charter import charter_scope
+from raven.agent.subagent.delegate import delegate_scope
+from raven.agent.subagent.team_state import team_brief as _team_brief
+from raven.spine.turn import AnswerlessTurnError
+
+if TYPE_CHECKING:
+    from raven.agent.hook import CompositeHook
+    from raven.agent.loop.checkpoint import CheckpointService
+    from raven.context_engine import ContextEngine
+    from raven.contracts.harness import HarnessModules
+    from raven.contracts.memory import MemoryBackend
+    from raven.contracts.tool import Tool
+    from raven.mcp.manager import MCPConnectionManager
+    from raven.providers.pool import ProviderPool
+    from raven.routing.router import ModelRouter
+    from raven.sandbox.debug_server import SandboxDebugServer
+    from raven.spine.runner import Drain, Emit, TurnOutcome
+    from raven.spine.turn import TurnRequest
+
+
+# What a turn that asked to design a Persona may reach. Talking to the reader
+# and nothing else: designing is the platform's own step, and every tool that
+# writes a file or dispatches work would be this turn doing by hand what it was
+# not asked to do (see the charter in `_run_turn`).
+MAKER_TOOLS: tuple[str, ...] = ("ask_user", "message")
+
+
+class AgentLoop(TurnPathMixin, WiringMixin, McpGlueMixin, OrganGlueMixin):
+    """
+    The agent loop is the core processing engine.
+
+    It:
+    1. Receives messages from the spine
+    2. Builds context with history, memory, skills
+    3. Calls the LLM
+    4. Executes tool calls
+    5. Sends responses back
+    """
+
+    _TOOL_RESULT_MAX_CHARS = 16_000
+
+    # Reconnects allowed for a streamed call that failed before its first delta
+    # (after one, the caller has output that a retry would duplicate).
+    _MAX_STREAM_RECONNECTS = 1
+
+    # Tool-failure-loop break: nudge after the same tool fails deterministically
+    # this many times running; cap the nudges per turn so it can't itself loop.
+    _LOOP_BREAK_THRESHOLD = 2
+
+    _LOOP_BREAK_MAX = 2
+
+    # No-progress loop break: nudge after one exact call has given one exact
+    # answer this many times in a turn. Higher than the failure threshold on
+    # purpose -- repeating a call that works is ordinary (a poll waiting on a
+    # condition, a re-read after an edit), and only an answer that never moves
+    # is the stuck case. Same per-turn cap, for the same reason.
+    _NO_PROGRESS_THRESHOLD = 8
+
+    # Kept, and now only what it always was: a bound on injected advice. It is
+    # not what failed -- the per-answer "fire once" rule is, and one measured
+    # turn spent 1 of these 2 and then watched 280 more identical calls go by.
+    # The steps below deliberately do not read it: enforcement must not be
+    # rationed by how much text a turn has already been given.
+    _NO_PROGRESS_MAX = 2
+
+    # Escalation, for when the nudge was read and did not land. Four more
+    # identical answers past the nudge is what settles that: on the measured
+    # turn every call from the 8th to the 288th was byte-identical, answered by
+    # an identical 287-token reply over a prompt-cached ~265k prefix, so a model
+    # that was going to change course had already had four chances not to look
+    # like this. Four costs ~34s when the guard is wrong.
+    _NO_PROGRESS_REFUSE = 12
+
+    # Refusals of one established call before the turn ends. The refusal names
+    # what happened and what to do instead, and a model needs a call or two to
+    # act on that, so it is not one. It is not more because a further refusal
+    # buys nothing: each iteration of the measured loop cost 9.7s and about a
+    # cent, of which the tool itself was 0.25s, so bounding the loop is the
+    # whole saving and exactly where it is bounded is worth pennies.
+    _NO_PROGRESS_REFUSALS_MAX = 3
+
+    # Hook rollbacks per turn: a gate that keeps bouncing a draft must not be
+    # able to spin the loop forever. Past the cap the decision degrades to
+    # pass-through and the refusal is counted, so the books never read a
+    # bounce that did not happen.
+    _MAX_HOOK_ROLLBACKS = 8
+    # Generation parameters a rollback may override on the re-sample call.
+    # Anything else is dropped: these feed the provider call directly, and an
+    # unknown key from a hook must not TypeError the whole turn.
+    _ROLLBACK_OVERRIDE_KEYS = frozenset({"temperature", "max_tokens", "reasoning_effort"})
+
+    # The tool that can read an attachment for a model that cannot see it.
+    # Contributed by the EverOS plugin, so absent on a default install.
+    _DESCRIBE_TOOL = "understand_media"
+
+    _MEMORY_FAILURES_BEFORE_ALARM = 3
+
+    """How many consecutive store failures make this a standing fault rather
+    than a blip. One failed write is a network hiccup nobody needs told about;
+    three in a row is a backend that is not coming back on its own."""
+
+    _WATCHED_TOOLS = {
+        "list_dir": "path",
+        "read_file": "path",
+        "grep": "path",
+        "find": "path",
+        "code_map": "path",
+        "exec": "command",
+        "web_fetch": "url",
+    }
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        workspace: Path,
+        model: str | None = None,
+        *,
+        session_manager: SessionManager | None = None,
+        provider_pool: "ProviderPool | None" = None,
+        router: "ModelRouter | None" = None,
+        sandbox_config: SandboxConfig | None = None,
+        executor: "SandboxExecutor | None" = None,
+        mcp_servers: dict | None = None,
+        tools: "ToolWiring | None" = None,
+        subagents: "SubagentWiring | None" = None,
+        engine: "EngineWiring | None" = None,
+        policy: "TurnPolicy | None" = None,
+        host: "HostWiring | None" = None,
+    ):
+        tools, subagents, engine, policy, host = resolve_wiring(tools, subagents, engine, policy, host)
+        exec_config = tools.exec_config
+        ask_user_config = tools.ask_user_config
+        a2a_config = tools.a2a_config
+        search_api_key = tools.search_api_key
+        jina_api_key = tools.jina_api_key
+        web_proxy = tools.web_proxy
+        web_search_provider = tools.web_search_provider
+        web_fetch_provider = tools.web_fetch_provider
+        web_provider_keys = tools.web_provider_keys
+        image_search = tools.image_search
+        connection_add = tools.connection_add
+        code_map = tools.code_map
+        ci_status = tools.ci_status
+        restrict_to_workspace = tools.restrict_to_workspace
+        disabled_tools = tools.disabled_tools
+        tool_search_config = tools.tool_search_config
+        media_config = tools.media_config
+        plugin_tools = tools.plugin_tools
+        plugin_tool_gates = tools.plugin_tool_gates
+        deliverables = tools.deliverables
+        agents = subagents.agents
+        max_concurrent_subagents = subagents.max_concurrent_subagents
+        max_subagent_spawns_per_hour = subagents.max_subagent_spawns_per_hour
+        subagent_dag_config = subagents.subagent_dag_config
+        subagent_questions_config = subagents.subagent_questions_config
+        workdir_resolver = subagents.workdir_resolver
+        context_config = engine.context_config
+        runtime_config = engine.runtime_config
+        context_window_tokens = engine.context_window_tokens
+        strategies = engine.strategies
+        skill_forge_config = engine.skill_forge_config
+        skill_forge_router_config = engine.skill_forge_router_config
+        memory_config = engine.memory_config
+        compaction_config = engine.compaction_config
+        backend = engine.backend
+        playbook_config = engine.playbook_config
+        max_iterations = policy.max_iterations
+        empty_recovery = policy.empty_recovery
+        interactive = policy.interactive
+        now_fn = policy.now_fn
+        hooks = host.hooks
+        cron_service = host.cron_service
+        channels_config = host.channels_config
+        from raven.agent.hook import CompositeHook
+        from raven.config.schema import A2aConfig, AskUserToolConfig, CompactionConfig, ExecToolConfig
+        from raven.token_wise.registry import StrategyRegistry
+
+        self.channels_config = channels_config
+        self._deliverables = deliverables
+        self._workdir_resolver = workdir_resolver
+        self.workspace = workspace
+        # The model a turn runs on is per session, so it cannot live in two
+        # attributes on a process-wide loop. ``_default_binding`` is what a
+        # session starts on; ``provider``/``model`` below read whichever
+        # binding the running turn entered.
+        self._provider_pool = provider_pool
+        # An explicit window rides on the binding, which is what answers for it
+        # from here on -- every binding this loop makes carries it, so a session
+        # switching models cannot shake off a number the user pinned. No special
+        # case for 65536: the retired default the old bootstrap wrote to disk is
+        # cleared where it lives by ``config.loader``, so what arrives here is a
+        # real choice.
+        self._default_binding = ModelBinding(
+            provider, model or provider.get_default_model(), context_window_tokens or None
+        )
+        self._session_bindings: dict[str, ModelBinding] = {}
+        # Per-session operating policy (iteration cap, mode overlay); set by a
+        # transport that speaks modes, read once at each turn's start.
+        self._session_policies: dict[str, SessionPolicy] = {}
+        # Keys whose session record has been consulted for a stored model, hit
+        # or miss. See ``_restore_once``.
+        self._restore_attempted: set[str] = set()
+        # Resolved lazily on the first tool result that carries an image. Keyed
+        # by model, not a single flag: the loop is a long-lived singleton and
+        # takes a per-call model (strategies rewrite it, and the model chain
+        # falls back), so one model's verdict must not answer for another's.
+        # Keyed by model but *computed from the provider*, so a rebuild that
+        # keeps the model id would keep serving the old transport's verdict --
+        # ``_forget_transport_verdicts`` is what the binding setters call.
+        self._image_tool_result_ok: dict[str, bool] = {}
+        self._vision_ok: dict[str, bool] = {}
+        self._default_max_iterations = max_iterations
+        # Empty-response recovery budgets. None → enabled defaults.
+        self._recovery_limits = empty_recovery if empty_recovery is not None else RecoveryLimits()
+        self.search_api_key = search_api_key
+        self.jina_api_key = jina_api_key
+        self.web_proxy = web_proxy
+        # What this process was built with. The selection itself is a property
+        # over the file (see ``wiring.web_search_provider``); these answer when
+        # the file names nothing.
+        self._boot_web_search_provider = web_search_provider
+        self._boot_web_fetch_provider = web_fetch_provider
+        self.web_provider_keys = web_provider_keys
+        self.image_search = image_search
+        self.connection_add = connection_add
+        self.code_map = code_map
+        self.ci_status = ci_status
+        from raven.config.raven import MemoryConfig, SubagentDagConfig, SubagentQuestionsConfig
+        from raven.config.schema import MediaGenConfig
+
+        self.media_config = media_config or MediaGenConfig()
+        self.subagent_dag_config = subagent_dag_config or SubagentDagConfig()
+        self.subagent_questions_config = subagent_questions_config or SubagentQuestionsConfig()
+        # Stored, not only forwarded to the context engine: the autofill resolver
+        # runs outside the assembler and needs the same user_id the recall in
+        # `# Memory` uses, or it would read a different store than the one the
+        # turn's own memory came from.
+        self.memory_config = memory_config or MemoryConfig()
+        self.exec_config = exec_config or ExecToolConfig()
+        self.ask_user_config = ask_user_config or AskUserToolConfig()
+        self.a2a_config = a2a_config or A2aConfig()
+        self._compaction = compaction_config or CompactionConfig()
+        self.cron_service = cron_service
+        self.restrict_to_workspace = restrict_to_workspace
+        # TokenWise strategies — empty registry acts as pure pass-through.
+        self.strategies = strategies if strategies is not None else StrategyRegistry([])
+        # Fake-clock injection point for benchmark/sim harnesses. Defaults
+        # to wall clock so production paths (gateway, REPL) are unaffected.
+        # Used both here (session entry timestamps) and threaded into
+        # ContextBuilder so the LLM's "Current Time:" prompt stays in
+        # sync with what we record on persisted messages.
+        self._now_fn = now_fn or datetime.now
+
+        # Optional plugin-provided MemoryBackend.
+        # Bootstrap wires this from ``PluginRegistry.build_memory_backend``;
+        # legacy callsites pass ``None`` and retain the existing post-turn
+        # pipeline unchanged. See ``_dispatch_backend_store`` for the call
+        # site that consumes it.
+        self.backend: "MemoryBackend | None" = backend
+        # A turn enqueues and returns; the pipeline owns ordering, retry and
+        # what teardown does with whatever is left.
+        self._store_pipeline = StorePipeline(
+            lambda: self.backend,
+            on_ok=self._note_memory_ok,
+            on_failure=self._note_memory_failure,
+        )
+        # Tools contributed by activated plugins; registered into the
+        # ToolRegistry by ``_register_default_tools``.
+        self.plugin_tools: "list[Tool]" = list(plugin_tools or [])
+
+        # Per-turn stash for ``injected_skill_ids`` surfaced by
+        # :class:`DefaultContextEngine.assemble`'s ``AssembledContext.metadata``.
+        # Populated inside ``_assemble_context_messages`` so the after-turn
+        # feedback dispatcher can read it without re-running selection.
+        # ``None`` means "use the ``_collect_injected_skill_ids`` path" — see
+        # that method for the branch.
+        self._last_injected_skill_ids: list[str] | None = None
+        # ``qualified_id -> registry source`` for the ids above. The id's own
+        # prefix is the addressing namespace (``local`` for anything on disk),
+        # so origin reporting needs this side map — see
+        # ``SkillsSegmentBuilder.build``.
+        self._last_injected_skill_sources: dict[str, str] = {}
+
+        from raven.config.live import LiveConfig, skill_blocklist
+
+        self._live_config = LiveConfig()
+        self.context = ContextBuilder(
+            workspace,
+            skill_forge_config=skill_forge_config,
+            now_fn=now_fn,
+            blocklist_reader=lambda: skill_blocklist(self._live_config),
+            has_memory_backend=backend is not None,
+        )
+        self.sessions = session_manager or SessionManager(workspace)
+        # Off switches with no config file behind them: an eval harness that
+        # needs a strict tool subset passes its list here directly
+        # (benchmarks/appworld/agent_cli.py is the only such caller).
+        #
+        # Deliberately NOT where the config's own switches arrive. Those are read
+        # live per request instead -- see `_withheld_tool_names`. A boot-time copy
+        # of `tools.disabled_tools` unioned in here would make the switch one-way
+        # forever: the page can take a name back out of the file, but nothing can
+        # take it out of a set captured before the process started, so a tool that
+        # was off at launch could never be turned back on.
+        self._disabled_tools = set(disabled_tools or [])
+        # Entries already reported as naming a tool this switch does not own, so
+        # the notice lands once rather than on every MCP connect.
+        self._disabled_tools_reserved_warned: set[str] = set()
+        self._tool_search_config = tool_search_config
+        # Assigned for real only when the feature is on, but read on every
+        # backgrounded DAG submission -- including default deploys, where an
+        # unset attribute would raise instead of answering "no route".
+        self.tool_search_controller = None
+        from raven.config.live import permissions_config
+        from raven.permissions import BuiltinRulings, PermissionGate
+
+        # Config is read through a late-bound callable so a mode flipped on a
+        # settings surface reads on the next tool call.
+        permission_gate = PermissionGate(
+            config_source=lambda: permissions_config(self._live_config),
+            builtin=BuiltinRulings(
+                extra_deny_patterns=self.exec_config.extra_deny_patterns,
+                extra_deny_source=self._live_exec_extra_deny,
+            ),
+            judge_provider_for=self._permission_judge_provider,
+            allow_ask=True,
+        )
+        from raven.agent.block_hints import explainer
+
+        # ``verifier_provider`` is late-bound because the harness is assembled
+        # after this line: the registry exists before the roles that read it.
+        # The block explainer reads the config live too, so a hint names the
+        # value in force when the refusal happens.
+        self.tools = ToolRegistry(
+            tool_gates=plugin_tool_gates or (),
+            permission_gate=permission_gate,
+            verifier_provider=lambda: self.harness.action,
+            block_explainer=explainer(self._live_config.raw),
+        )
+        # A conversation's own mode outlives a restart on its record, the way
+        # its model does; this is how the gate reads it back.
+        from raven.permissions import set_session_mode_restorer
+
+        set_session_mode_restorer(self.stored_session_permission_mode)
+        # Asked once per assembled tool array, so an off switch flipped now is
+        # honoured by the next request rather than the next restart.
+        self.tools.set_withheld_source(self._withheld_tool_names)
+
+        # Context engine — the single ContextAssembler.
+        # Constructed here (after self.tools) so the factory can capture
+        # ``self.tools.get_definitions`` as a deferred callable; the actual
+        # tool registry contents are filled by ``_register_default_tools``
+        # later in this constructor.
+        #
+        # Deferred ``raven.context_engine`` import: see module-level note about
+        # the import cycle with ``raven.agent.__init__``.
+        if context_config is None:
+            from raven.config.raven import ContextConfig
+
+            context_config = ContextConfig()
+        from raven.context_engine import build_context_engine
+
+        self.context_config = context_config
+
+        # Skill Hub client — built once and shared by the HubSkillSource
+        # (catalog discovery) and the read_skill / use_skill tools (body /
+        # bundle), so both lanes use one connection pool + identical config.
+        # ``cache_dir`` points into the workspace skill tree so a use_skill'd
+        # Hub skill is registry-discoverable on later turns. ``None`` when no
+        # Hub endpoint is configured — read_skill is then not registered and
+        # use_skill serves local/everos only.
+        self._skill_hub_client = self._build_skill_hub_client(
+            workspace,
+            skill_forge_router_config,
+        )
+        # Install-policy knobs for the use_skill tool (registered later in
+        # ``_register_builtin_tools``, which does not see these configs).
+        self._skill_min_safety = float(
+            getattr(getattr(skill_forge_router_config, "hub", None), "min_safety", 0.7),
+        )
+        self._skill_blocklist = list(getattr(skill_forge_config, "blocklist", None) or [])
+        # What the three skill tools screen against, asked per call: the list
+        # at construction is the one the operator had when the loop started,
+        # and a skill enabled on the settings page has to stop being refused.
+        self._skill_blocklist_reader = lambda: skill_blocklist(self._live_config)
+        self._skill_auto_install = str(getattr(skill_forge_config, "auto_install", "auto") or "auto")
+
+        self.context_engine: "ContextEngine"
+        if engine.context_engine is not None:
+            # The door handed a built engine through the bundle; bind it as-is.
+            self.context_engine = engine.context_engine
+        else:
+            self.context_engine = build_context_engine(
+                workspace=workspace,
+                config=context_config,
+                builder=self.context,
+                provider=provider,
+                model=self._default_binding.model,
+                # The resolved window, not the constructor argument: unset (the
+                # common case) it is None there and the real size comes from the
+                # ladder in ``providers.rates``.
+                context_window_tokens=self.context_window_tokens,
+                get_tool_definitions=self.tools.get_definitions,
+                # Read through a lambda, not bound here: ``self.subagents`` is built
+                # further down this constructor, and the agent table it exposes is
+                # rebuilt on a hot config apply, so anything captured now would be
+                # either missing or stale by the time a turn asks for it.
+                list_subagents=lambda: self.subagents.list_agents(),
+                get_tool_notices=self._mcp_tool_notices,
+                now_fn=now_fn,
+                # The factory uses these to assemble the unified engine's
+                # SkillForgeRouter + EverOS recall lane.
+                backend=backend,
+                memory_config=self.memory_config,
+                skill_forge_router_config=skill_forge_router_config,
+                skill_forge_config=skill_forge_config,
+                skill_hub_client=self._skill_hub_client,
+                provider_pool=provider_pool,
+                # The same reader the catalog gets: the pool drop and the
+                # scent menu screen against the list on disk now, so a skill
+                # switched off -- or back on -- reaches the next turn.
+                blocklist_reader=lambda: skill_blocklist(self._live_config),
+            )
+
+        # The four strategy roles this generation runs on. Assembled here
+        # because both organs they wrap are in hand by now -- the registry
+        # from above and the engine just bound -- and frozen for the
+        # generation's life: the tool array is the prompt-cache prefix, so a
+        # mid-turn swap would move it between two model calls of one turn.
+        # ``tools`` is read through a lambda rather than captured, and the
+        # engine above is not: trajectory replay rebinds ``loop.tools`` onto a
+        # recorded registry after this constructor returns, so both roles that
+        # read it -- Capability's array and Memory's tool-token reservation --
+        # have to keep reading it fresh, the way the inline code they replaced
+        # did. Nothing rebinds ``context_engine``, and a generation's window
+        # *is* its engine (see ``harness/memory.py``), so that one is bound.
+        self.harness: HarnessModules = default_harness_modules(
+            self.context_engine,
+            lambda: self.tools,
+            provider=lambda: self.provider,
+            model=lambda: self.model,
+            context_window_tokens=lambda: self.context_window_tokens,
+            system_prompt=lambda skills: self.context.build_system_prompt(skills),
+            # Callables like the rest, but for one reason rather than two: the
+            # ceiling follows the model a request goes out under, which moves
+            # under a live ``/model`` switch. The compaction settings are fixed
+            # at construction today; the callable keeps the seam uniform and
+            # costs a lambda.
+            compaction=lambda: self._compaction,
+            output_ceiling=self._wire_output_ceiling,
+            # Read when a compaction happens, through the manager built below:
+            # the runs in flight and the instances are the live ones then.
+            team_state=lambda key: _team_brief(key, getattr(self, "subagents", None)),
+        )
+
+        # Checkpointing is configured under ``runtime.checkpoint``;
+        # gated by (policy, interactive) — see ``_checkpoint_active``. When
+        # the gate is closed the loop is byte-identical to baseline.
+        if runtime_config is None:
+            from raven.config.raven import RuntimeConfig
+
+            runtime_config = RuntimeConfig()
+        self.runtime_config = runtime_config
+        self.interactive = interactive
+        self._checkpoint_enabled = self._checkpoint_active(runtime_config.checkpoint.policy, interactive)
+        # One entry per working directory this process has served, never
+        # evicted: a service is cheap, but each one materialises a shadow repo
+        # under that directory, so a long-lived gateway ends up holding one
+        # repo per session rather than the single agent-home repo it used to.
+        # Reclaim is by deleting the session directory; nothing here prunes.
+        self._checkpoints: dict[Path, "CheckpointService | None"] = {}
+        # session_key -> {"checkpoint_id", "files"} stashed when a turn is
+        # interrupted (max-iter); consumed by the next turn's recovery prompt.
+        self._pending_recovery: dict[str, dict] = {}
+
+        self._sandbox_config = sandbox_config
+        self._owned_ids: set[str] = set()
+        # The catalogue's default stands in for a session that never set a tier:
+        # `_apply_mode` stamps a policy only on the ACP turn path, so a terminal,
+        # gateway or channel turn would otherwise resolve to no tier at all.
+        try:
+            from raven.config.loader import load_config
+            from raven.config.mode_catalogue import build_mode_catalogue
+
+            loaded = load_config()
+            self._default_tier = build_mode_catalogue(loaded).default
+        except Exception as exc:
+            logger.warning("Could not resolve the default sub-agent tier; falling back to none: {}", exc)
+            self._default_tier = ""
+            loaded = None
+        org_rows = list(loaded.subagents.org) if loaded is not None else []
+        team_rows = list(loaded.subagents.teams) if loaded is not None else []
+        self.subagents = SubagentManager(
+            provider=provider,
+            workspace=workspace,
+            model=self._default_binding.model,
+            search_api_key=search_api_key,
+            jina_api_key=jina_api_key,
+            web_proxy=web_proxy,
+            web_search_provider=web_search_provider,
+            web_fetch_provider=web_fetch_provider,
+            web_provider_keys=web_provider_keys,
+            image_search=image_search,
+            exec_config=self.exec_config,
+            restrict_to_workspace=restrict_to_workspace,
+            sandbox_config=sandbox_config,
+            owned_ids=self._owned_ids,
+            max_concurrent=max_concurrent_subagents,
+            max_spawns_per_hour=max_subagent_spawns_per_hour,
+            agents=agents,
+            session_dir=self.sessions.session_dir,
+            session_tier=self.session_tier,
+            target_ready=self._routed_target_ready,
+            retry_delays=tuple(self._recovery_limits.llm_error_retry_delays),
+            retry_after_output=bool(self._recovery_limits.llm_retry_after_output),
+            rate_limit_wait_max_s=self._recovery_limits.rate_limit_wait_max_s,
+            provider_pool=self._provider_pool,
+            org=org_rows,
+            teams=team_rows,
+        )
+        # Reads the live direct chats through a lambda for the reason the identity
+        # segment does: the manager is rebuilt on a hot config apply.
+        self._direct_handoff = DirectChatHandoff(live=lambda key: self.subagents.live_direct_turns(key))
+        # Kept for hot-applying web config changes and for the operations
+        # surfaces that report what config declared, as distinct from what the
+        # agent table resolved (the table also holds the package built-in rows).
+        self._agent_configs = agents or []
+        self._dag_progress_sink = None
+        # Late-bound sink that pushes per-turn SkillForge-injected skill ids to
+        # the page's skill panel (the host wires it to the page's emitter,
+        # parallel to _dag_progress_sink). None in non-web contexts (CLI/IM).
+        self._skills_sink = None
+
+        # Executor: synchronous construction only; VM starts in _start_executor()
+        # A sandboxed VM mounts one host root at /workspace, not one per
+        # session, so it must be wide enough to cover every working directory
+        # the resolver can hand out. Agent home is usually somewhere else
+        # entirely -- under PER_CHANNEL the root is ``<agent home>/../tmp``, a
+        # sibling, and an explicit ``-w`` cannot be an ancestor of agent home
+        # because ``validate_override`` refuses one -- so it is mounted
+        # separately at /agent-home to keep memory/skills/session state
+        # reachable from inside the VM.
+        #
+        # The check is not dead: under LAUNCH_DIR the root is wherever the user
+        # started raven, and launching from ``~`` puts agent home inside it. A
+        # second mount of a directory already covered is what this avoids.
+        from raven.config.paths import get_sandbox_dir
+
+        mount_root = self._workdir_resolver.mount_root() if self._workdir_resolver else workspace
+        home_volume = () if workdir.is_within(workspace, mount_root) else ((str(workspace), "/agent-home", "rw"),)
+        self._executor: SandboxExecutor = (
+            # A caller that built its own executor hands it here; the mount and
+            # home-volume derivation belong to the builder alone.
+            executor
+            if executor is not None
+            else build_executor(sandbox_config, mount_root, self._owned_ids, home_volume, sandbox_dir=get_sandbox_dir)
+        )
+        self._executor_stack: AsyncExitStack | None = None
+        self._executor_started: bool = False
+        self._executor_start_lock = asyncio.Lock()
+        self._debug_server: SandboxDebugServer | None = None
+
+        self.router = router
+        self._playbooks = None
+        self._playbook_config = playbook_config
+        self.enable_personalization = False  # Set via configure_personalization()
+        self._running = False
+        self._mcp_servers = mcp_servers or {}
+        self._mcp_manager: MCPConnectionManager | None = None
+        self._mcp_event_sink = None
+        self._mcp_event_tasks: set = set()
+        self._mcp_connected = False
+        self._mcp_connecting = False
+        self._mcp_prewarm_task: asyncio.Task | None = None
+        self._mcp_reconcile_task: asyncio.Task | None = None
+        self._mcp_reconcile_target: dict | None = None
+        self._mcp_reconcile_attempts: dict = {}
+        self._mcp_prewarm_attempts: dict[str, object] = {}
+
+        from raven.agent.subagent.dag_mcp_scope import run_mcp_servers
+        from raven.agent.subagent.mcp_grant import LiveMcpSource
+
+        self.subagents.set_mcp_source(
+            LiveMcpSource(
+                lambda: self._mcp_servers,
+                lambda: self._mcp_manager,
+                self.tools,
+                self.tools.withheld_names,
+                # A bridged upstream is spawned by the endpoint, not by this
+                # manager, so the confinement has to travel with the source or a
+                # granted stdio server escapes the sandbox the host configured.
+                self.mcp_executor_provider,
+                # The one place a playbook's own ``mcpServers`` becomes
+                # resolvable in a conversation, and a read rather than a write:
+                # ``self._mcp_servers`` is this process's configuration and stays
+                # that, so a run cannot leave a definition behind and the main
+                # agent's own tool list does not move because a playbook named a
+                # server. Handed over as a second mapping rather than merged into
+                # the first so the source can tell whose definition it answered
+                # with -- see ``LiveMcpSource`` and ``subagent.dag_mcp_scope``.
+                run_mcp_servers,
+            )
+        )
+        # Consecutive backend.store failures; see _note_memory_failure.
+        self._memory_fail_streak = 0
+        self._processing_lock = asyncio.Lock()
+        # Fired after every dispatched turn (success, error, or cancel).
+        # Used by the proactive-engine WakeScheduler to re-fire wakes that
+        # were parked while the agent was busy. Callbacks must be cheap and
+        # must not raise.
+        self.on_turn_complete: list[Callable[[], None]] = []
+        self.memory_consolidator = MemoryConsolidator(
+            workspace=workspace,
+            provider=provider,
+            model=self._default_binding.model,
+            sessions=self.sessions,
+            context_window_tokens=self.context_window_tokens,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+            now_fn=now_fn,
+        )
+
+        self._consolidation_tasks: set[asyncio.Task] = set()
+
+        # Charters staged by an inbound dispatch, by session. Keyed rather than
+        # global for the reason session tools are: one process serves every
+        # session on a connection.
+        self._session_charters: dict[str, Any] = {}
+
+        # The Persona a session is running as, by session. Held rather than
+        # consumed, which is the whole difference from the dict above: a staged
+        # charter describes one dispatch, and a Persona is what the session is
+        # until another one replaces it.
+        self._session_personas: dict[str, tuple[Any, Any]] = {}
+
+        # The Persona a session has generated but not saved, by session. A
+        # generated Harness is a draft until someone says to keep it: the page
+        # shows this one and saves it by name, and a session that generates a
+        # second one before saving the first replaces it, because a draft is
+        # the answer to the request that is on screen.
+        self._session_drafts: dict[str, Any] = {}
+
+        # ``self.subagents``, ``self.context_engine`` and
+        # ``self.memory_consolidator`` were each handed ``provider`` earlier in
+        # this constructor. Inside a turn they read the turn's binding; the
+        # reference they hold is only the fallback for work that runs outside
+        # one, and ``set_default_binding`` is what keeps that fallback current.
+        # Add the call there when adding another holder.
+
+        # AgentLoop holds the memory subsystems directly:
+        #
+        # - ``self.memory_consolidator`` (above) — markdown compaction
+        #   policy. Owns the ``MemoryStore`` it built; reach it via
+        #   ``self.memory_consolidator.store`` when needed.
+        # - ``self.context.skills`` — :class:`LocalSkillCatalog` for the
+        #   always-skills + ``# Skills`` render path. The SkillForgeRouter stack
+        #   (assembled in ``context_engine.factory``) owns retrieval.
+
+        # AgentHook lifecycle chain: the host hands finished hooks (adapter-
+        # wrapped callbacks included -- raven/agent/hook/adapters is where a
+        # plain callable becomes one). List order is chain order: an observer
+        # that must see every inbound belongs before anything that can
+        # short-circuit, and an outbound modifier goes last.
+        self.hooks: "CompositeHook" = CompositeHook()
+        if hooks is not None:
+            self.hooks.extend(hooks)
+
+        self._register_default_tools()
+        # After the registry is populated, and after ``_mcp_servers`` is set: the
+        # runtime reads both to build the generator's inventory of what this
+        # install can actually offer. Built here rather than beside the other
+        # fields above because it is the only assembly in this constructor with
+        # that dependency, and the two orderings are not compatible -- see
+        # ``_build_playbook_runtime``.
+        self._build_playbooks()
+        # Only now does every late-bound grant exist (the playbook funnel is
+        # the youngest organ), so this is where plugin tools that declared
+        # ``bind_runtime`` receive their handles.
+        self._bind_plugin_runtime()
+        self._report_reserved_disabled_tools()
+
+    async def _start_executor(self) -> None:
+        """Idempotent: start the sandbox executor once before first use."""
+        async with self._executor_start_lock:
+            if self._executor_started:
+                return
+            stack = AsyncExitStack()
+            try:
+                await stack.__aenter__()
+                await stack.enter_async_context(self._executor)
+            except Exception:
+                await stack.aclose()
+                raise
+            self._executor_stack = stack
+            self._executor_started = True
+
+    async def _start_debug_server(self) -> None:
+        """Start the sandbox debug socket server if debug mode is enabled."""
+        cfg = self._sandbox_config
+        if cfg is None or not cfg.debug.enabled:
+            return
+        if cfg.backend == "none":
+            logger.warning(
+                "sandbox.debug.enabled=true is ignored because backend='none' (no boxlite runtime is active)"
+            )
+            return
+        try:
+            from raven.config.paths import get_data_dir, get_sandbox_dir
+            from raven.sandbox.debug_server import SandboxDebugServer
+
+            socket_path = SandboxDebugServer.resolve_socket_path(cfg.debug.socket, get_data_dir())
+            server = SandboxDebugServer(
+                socket_path=socket_path,
+                owned_ids=self._owned_ids,
+                max_message_bytes=cfg.debug.max_message_bytes,
+                sandbox_home=get_sandbox_dir("boxlite"),
+            )
+            await server.start()
+            self._debug_server = server
+        except Exception as exc:
+            # The user explicitly opted in to debug mode; failing silently here
+            # leaves them puzzled when `raven sandbox` later says "socket not
+            # found". Log loud so the reason is visible.
+            logger.error("Failed to start sandbox debug server: %s", exc)
+
+    async def close_executor(self) -> None:
+        """Tear down the sandbox executor."""
+        if self._debug_server is not None:
+            try:
+                await self._debug_server.stop()
+            except Exception as exc:
+                logger.warning("Error stopping sandbox debug server: %s", exc)
+            self._debug_server = None
+        if self._executor_stack:
+            try:
+                await self._executor_stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                pass
+            self._executor_stack = None
+        self._executor_started = False
+        if self._skill_hub_client is not None:
+            try:
+                await self._skill_hub_client.aclose()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Error closing Skill Hub client: %s", exc)
+            self._skill_hub_client = None
+        # Connected stdio servers ran their child processes under this
+        # executor; with it gone, a record left ``connected`` is a lie no
+        # reload retries. Tell the organ so those rows park in ``error``,
+        # where the retry door heals them with a provider-fresh executor.
+        # On the close_mcp path the manager is already detached (a no-op).
+        if self._mcp_manager is not None:
+            try:
+                lost = await self._mcp_manager.executor_lost("sandbox executor closed")
+                if lost:
+                    self._sync_mcp_meta_tools()
+            except Exception as exc:  # noqa: BLE001 -- teardown must not die on bookkeeping
+                logger.warning("Error marking MCP servers after executor close: %s", exc)
+
+    async def run(self) -> None:
+        """Bring the agent runtime up and stay alive.
+
+        Turns arrive through the spine (``run_turn``); this coroutine no longer
+        drains an inbound bus. It starts the executor / debug server / MCP, then
+        idles on ``self._running`` so the gateway can gather it as a long-lived
+        task and tear it down via ``stop()`` on shutdown.
+        """
+        self._running = True
+        try:
+            await self._start_executor()
+            await self._start_debug_server()
+            await self._connect_mcp()
+        except SandboxInitError as exc:
+            logger.error("Sandbox failed to start: {}", exc)
+            await self.close_executor()
+            self._running = False
+            return
+        except Exception:
+            await self.close_executor()
+            raise
+        logger.info("Agent loop started")
+
+        while self._running:
+            await asyncio.sleep(1.0)
+
+    @property
+    def is_processing(self) -> bool:
+        """True while a turn is being dispatched under the global lock."""
+        return self._processing_lock.locked()
+
+    def notify_turn_complete(self) -> None:
+        """Fire the turn-complete callbacks: the seam a host sink signals through."""
+        self._notify_turn_complete()
+
+    def _notify_turn_complete(self) -> None:
+        for callback in self.on_turn_complete:
+            try:
+                callback()
+            except Exception:
+                logger.exception("on_turn_complete callback failed")
+
+    def stop(self) -> None:
+        """Stop the agent loop."""
+        self._running = False
+        logger.info("Agent loop stopping")
+
+    async def run_turn(
+        self,
+        req: TurnRequest,
+        emit: Emit,
+        drain: Drain,
+        *,
+        stream: bool = True,
+        usage_sink: dict[str, Any] | None = None,
+        text_sink: dict[str, Any] | None = None,
+    ) -> "TurnOutcome":
+        """Bind the turn to its session's model; see ``_run_turn`` for the turn.
+
+        This is where a session's model becomes the one thing everything under
+        the turn reads: the loop's own ``provider``/``model``, the context
+        engine's LLM-backed segments, the skill gate and rewriter, the
+        consolidator, and anything the turn detaches (a subagent inherits the
+        context it was created in).
+
+        Resolving once here is also what makes a mid-turn switch harmless
+        without any parking. The binding is captured before the first read and
+        held for the tree, so a switch that lands while this turn runs is
+        simply not visible to it -- it takes effect on the session's next
+        turn. Turns from other sessions run under their own binding
+        concurrently, which is the point.
+        """
+        session_key = req.conversation or f"{req.source.channel}:{req.source.chat_id}"
+        # An account's engine at zero credits or over its disk allowance starts no new
+        # turn (accounts mode only -- outside it this is always None); a turn already
+        # running, and the sub-agent results that come back to it, still finish.
+        if (blocked := refusal_for_turn(req)) is not None:
+            raise AnswerlessTurnError(blocked)
+        flush = True
+        capture = None
+        failure: BaseException | None = None
+        try:
+            # The tools a session brought with it become visible here, for the same
+            # reason the model binding does: this is where the turn's task begins.
+            # The request handler that accepted them cannot open the scope itself --
+            # it submits the turn onto the spine and the turn runs on a task that
+            # inherits nothing from it.
+            # Written before the scopes below rather than inside the turn: the
+            # table has to be in hand by the time the tool array is rendered and
+            # the prompt assembled, and both happen under those scopes. Off, and
+            # on any failure, this is ``None`` -- which every reader treats as
+            # "no playbook this turn" and answers exactly as it did before.
+            # Resolved once, before the setup call, and used on both sides of it.
+            # The generation below awaits a model call, and a session that
+            # switched model while it was in flight would otherwise have the
+            # setup run on the old pair and the turn body on the new one --
+            # which is exactly what the Model Binding contract in CONTEXT.md
+            # forbids: a turn resolves its pair once and holds it for the whole
+            # turn tree.
+            # A direct chat's conversation is the instance's lane, which nothing
+            # ever stores a binding under -- the session's switch lives on the
+            # bare session key. Strip the lane back to its session, as the
+            # direct-chat record path does (see raven.spine.turn.session_of).
+            binding = self._with_live_window(self.binding_for_session(session_of(session_key)))
+            resolution = await self._resolve_playbook_turn(req, session_key, binding)
+            delegate_table = resolution.table
+            if resolution.active:
+                from raven.playbook.run_record import PlaybookRunCapture
+
+                capture = PlaybookRunCapture(
+                    query=getattr(req, "text", "") or "",
+                    disposition=resolution.disposition,
+                    selected_playbook=resolution.selected_playbook,
+                    artifact_name=resolution.artifact_name,
+                    capture_workflow=resolution.capture_workflow,
+                )
+            from raven.playbook.run_record import capture_scope
+
+            # The charter a dispatch staged for this session, taken for this turn
+            # only. Both scopes below are None on an ordinary turn, which is the
+            # path every reader answers to as "no playbook".
+            charter = self._take_session_charter(session_key)
+            # A turn that asked to design a Persona never writes the library,
+            # whether or not the design came back. It used to be told not to,
+            # in a prompt, and only when generation had succeeded -- so a
+            # generation the validator threw away left an ordinary turn holding
+            # every tool, and a reader whose own words said "create and save it"
+            # got exactly that: a playbook written by `create_playbook`, a name
+            # collision, and a question about overwriting something they had
+            # never asked to save. The narrowing is the tool table now, not the
+            # wording: what this turn may reach is what it may do.
+            asked_persona = getattr(req, "playbook_mode", None) == "persona"
+            if asked_persona:
+                from raven.agent.subagent.charter import Charter
+
+                charter = Charter(
+                    prompt=(
+                        "The platform could not design a Persona for this request. Say so plainly, in one or "
+                        "two sentences, and say what you would need to try again. Create nothing and save "
+                        "nothing: the reader asked to design a Persona, not to have a playbook written for "
+                        "them."
+                    ),
+                    tools=MAKER_TOOLS,
+                )
+            if resolution.disposition == "artifact" and resolution.artifact_name:
+                from raven.agent.subagent.charter import Charter
+
+                artifact_status = (
+                    f"has generated the Persona Harness {resolution.artifact_name!r} and is holding it as a "
+                    "draft the reader can save or let go"
+                    if not resolution.persisted
+                    else f"has generated and saved the reusable Persona Harness {resolution.artifact_name!r}"
+                )
+                charter = Charter(
+                    prompt=(
+                        f"The platform {artifact_status}. Reply concisely with what the generated Harness is "
+                        "for and who it can hand work to. Do not claim it has been saved."
+                    ),
+                    tools=MAKER_TOOLS if asked_persona else None,
+                )
+                self.adopt_session_persona(session_key, resolution)
+                # The workers go with the coordinator, to the turns that will
+                # dispatch them. This turn was just told not to.
+                delegate_table = None
+            elif charter is None and (persona := self.session_persona(session_key)) is not None:
+                charter, persona_table = persona
+                if delegate_table is None:
+                    delegate_table = persona_table
+            with (
+                use_binding(binding),
+                # Beside the binding and for the same reason: the settings a
+                # turn reads more than once answer the same way all the way
+                # through it.
+                self._turn_scope(),
+                self.tools.session_scope_for(session_key),
+                # Above `turn_scope`, which is the whole of why it is here and
+                # not in the turn body. That freeze decides which tools this
+                # turn's schema may carry, and it reads the withheld set --
+                # which asks this binding whether the conversation named a
+                # base. Bound after the freeze, the search tool was withheld at
+                # the moment that mattered and frozen out of every turn: the
+                # feature could not work at all, however well the rest of it
+                # was wired.
+                knowledge_scope.bind(knowledge_scope.read(self.sessions, session_key), session_key),
+                self.tools.turn_scope(),
+                delegate_scope(delegate_table),
+                charter_scope(charter),
+                capture_scope(capture),
+                # The participant seats in the hook chain ask this turn's modules,
+                # so a replaced Action or Planning decides what a plugin's
+                # judgement does -- bound per turn like the model.
+                bind_harness(self.harness),
+            ):
+                outcome = await self._run_turn(
+                    req,
+                    emit,
+                    drain,
+                    stream=stream,
+                    usage_sink=usage_sink,
+                    text_sink=text_sink,
+                )
+            if capture is not None:
+                await self._finish_playbook_turn(resolution, capture, binding)
+            return outcome
+        except asyncio.CancelledError as exc:
+            flush = False
+            failure = exc
+            raise
+        except BaseException as exc:
+            # Recorded, never handled: the turn's error belongs to the caller.
+            # Held only so the run record below can say why the turn ended --
+            # the one record an operator reads to diagnose a failure used to
+            # claim ``failed`` and give no reason, while the finalization
+            # branch saved the full text for a *successful* turn whose compile
+            # step erred.
+            failure = exc
+            raise
+        finally:
+            if capture is not None and capture.status == "running" and self._playbooks is not None:
+                from raven.playbook.run_record import RunRecordStore
+
+                capture.finish(
+                    status="cancelled" if not flush else "failed",
+                    error=None if failure is None else f"{type(failure).__name__}: {failure}",
+                )
+                try:
+                    RunRecordStore(self._playbooks.store.root).save(capture)
+                except Exception:  # noqa: BLE001 - cleanup cannot replace the turn's error
+                    logger.opt(exception=True).warning("playbook: failed turn record could not be saved")
+            # Every way a turn ends passes here, which is what makes this the
+            # place a foreground DAG run learns its turn is over. A direct chat
+            # runs on an instance's own lane, concurrently with the main agent's
+            # turn, and can own no graph, so its end must not release the main
+            # turn's runs.
+            if req.direct_target is None:
+                await self._release_dag_runs(session_key, flush=flush)
+
+    async def _release_dag_runs(self, session_key: str, *, flush: bool) -> None:
+        """Release the foreground DAG runs the turn on ``session_key`` still binds.
+
+        ``flush=False`` performs no awaits inside the tool, so this is safe to
+        run while a CancelledError is propagating. A failure here is logged
+        rather than raised: the turn has already ended, and its outcome must not
+        be replaced by bookkeeping on its graphs.
+        """
+        tool = self.tools.get("run_subagent_dag")
+        release = getattr(tool, "release_turn", None)
+        if release is None:
+            return
+        try:
+            await release(session_key, flush=flush)
+        except Exception:  # noqa: BLE001 - see docstring
+            logger.opt(exception=True).warning("DAG runs of {} could not be released", session_key)

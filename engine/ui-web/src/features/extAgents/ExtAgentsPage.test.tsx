@@ -1,0 +1,1821 @@
+// @vitest-environment happy-dom
+import { act, cleanup, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { setTranslator } from '../../i18n/t'
+import * as confirmStore from '../../state/confirm'
+import * as detail from '../../state/detail'
+import * as pageStore from '../../state/page'
+import { resetSources, setSources } from '../../state/sources'
+import { domSnapshot } from '../../test/domSnapshot'
+import { ExtAgentsApp } from './ExtAgentsPage'
+import * as store from './store'
+
+import type { ExtAgentActArgs, ExtAgentRow, ExtAgentsSource } from './types'
+
+/* React refuses act() outside a test runner it recognizes unless told. */
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+const toastWriter = vi.hoisted(() => ({ items: [] as string[] }))
+vi.mock('../../state/toast', () => ({
+  show: (text: string) => {
+    toastWriter.items.push(text)
+  },
+}))
+
+/* The host's provider list, which the built-in row's pill picks from. */
+const hostModels = vi.hoisted(() => ({
+  providers: [] as Array<{ id: string; name: string; models: string[]; configured?: string[]; on: boolean }>,
+  loads: 0,
+}))
+vi.mock('../model/source', () => ({
+  defaultProviders: () => hostModels.providers,
+  loadDefaultProviders: async () => {
+    hostModels.loads += 1
+  },
+}))
+
+function row(over: Partial<ExtAgentRow> = {}): ExtAgentRow {
+  return {
+    name: 'claude_code',
+    preset: 'claude_code',
+    kind: 'acp',
+    configured: true,
+    enabled: true,
+    probe_status: 'ready',
+    probe_detail: '',
+    has_api_key: false,
+    description: 'Claude Code CLI',
+    test_running: false,
+    last_test_ok: null,
+    last_test_at_ms: null,
+    last_test_detail: '',
+    upgrade_to: null,
+    ...over,
+  }
+}
+
+/* The island runs against the same two seams production wires: a stand-in
+   translator on setTranslator (it returns its key, so tests assert catalogue
+   keys, not translations) and a fixture source on sources.extAgents. A write
+   can be told to refuse, which is how the refusal states are reached. */
+function install(rows: ExtAgentRow[], over: Partial<ExtAgentsSource> & { refuse?: (op: string) => string | null } = {}) {
+  const acts: Array<[string, string, ExtAgentActArgs]> = []
+  const loads: boolean[] = []
+  const rescans: boolean[] = []
+  const { refuse, ...rest } = over
+  const source: ExtAgentsSource = {
+    load: async (probe, rescan) => {
+      loads.push(!!probe)
+      rescans.push(!!rescan)
+      return rows
+    },
+    act: async (op, r, args) => {
+      acts.push([op, r.name, args || {}])
+      const why = refuse ? refuse(op) : null
+      if (why) throw { data: { detail: why } }
+      /* Both real sources answer with the row as the write left it -- the rpc
+         one by reloading the roster, the fixture one by mutating in place. */
+      if (op === 'toggle') r.enabled = !!(args as { enabled?: boolean } | undefined)?.enabled
+      if (op === 'connect') {
+        r.configured = true
+        r.enabled = true
+      }
+      if (op === 'update' && args?.description !== undefined) r.description = args.description
+      return rows
+    },
+    ...rest,
+  }
+  const toasts: string[] = []
+  toastWriter.items = toasts
+  const confirms: string[] = []
+  setTranslator((key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key))
+  vi.spyOn(pageStore, 'show').mockImplementation(() => {})
+  vi.spyOn(confirmStore, 'ask').mockImplementation((title, _b, _l, fn) => {
+    confirms.push(title)
+    fn()
+  })
+  setSources({ extAgents: source })
+  document.body.innerHTML =
+    '<section id="extAgentsPage"><div id="extAgentsBody"></div></section>' +
+    '<aside id="detail" data-open="false"><b id="dTitle">—</b><div id="dBody"></div></aside>' +
+    '<div id="menu" data-open="false"></div>'
+  return { source, acts, loads, rescans, toasts, confirms }
+}
+
+async function mount() {
+  const view = render(<ExtAgentsApp />, { container: document.getElementById('extAgentsBody')! })
+  await act(async () => {
+    store.open()
+  })
+  return view
+}
+
+const rowsOf = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.extAgents-card')]
+const rowNamed = (name: string): HTMLElement =>
+  rowsOf().find((r) => r.querySelector('.extAgents-t')!.textContent === name)!
+const tabs = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.extAgents-tab')]
+const tabLabel = (tab: HTMLElement): string => tab.firstChild!.textContent!
+const tabLabels = (): string[] => tabs().map(tabLabel)
+const tabNamed = (label: string): HTMLButtonElement => tabs().find((b) => tabLabel(b) === label)!
+/* The card's corner control, by what it says: an icon button says it in its
+   label, a tag in its text. */
+const controlOf = (name: string): string | null => {
+  const ctl = rowNamed(name).querySelector('.extAgents-ctl')!
+  return ctl.querySelector('button')?.getAttribute('aria-label') ?? ctl.textContent
+}
+const buttonOf = (name: string): HTMLButtonElement | null => rowNamed(name).querySelector('.extAgents-ctl button')
+const lineOf = (name: string): string | null => rowNamed(name).querySelector('.extAgents-one')!.textContent
+/* The card's footer about the last thing that went wrong: the word and the
+   reason. Null when the card carries none; the press is the corner control. */
+const footOf = (name: string): { k: string | null; r: string | null } | null => {
+  const f = rowNamed(name).querySelector('.extAgents-foot')
+  if (!f) return null
+  return {
+    k: f.querySelector('.extAgents-foot-k')?.textContent ?? null,
+    r: f.querySelector('.extAgents-foot-r')?.textContent ?? null,
+  }
+}
+const ledOf = (name: string): string | null => rowNamed(name).querySelector('.extAgents-nm .extAgents-led')?.className ?? null
+/* Which tab lists a card, read by pressing each one in turn -- the filter under
+   test -- and coming back to All, where every other helper looks. */
+const namesIn = async (label: string): Promise<string[]> => {
+  await click(tabNamed(label))
+  const names = rowsOf().map((r) => r.querySelector('.extAgents-t')!.textContent!)
+  await click(tabNamed('gui.filter.all'))
+  return names
+}
+const sectionOf = async (name: string): Promise<string | undefined> => {
+  for (const label of ['gui.agent.g_on', 'gui.agent.g_avail', 'gui.agent.g_missing']) {
+    if (tabNamed(label) && (await namesIn(label)).includes(name)) return label
+  }
+  return undefined
+}
+
+const sheet = (): HTMLElement | null => document.querySelector('#dBody .extAgents-sheet')
+const sheetName = (): string | null => sheet()?.querySelector('h3')?.textContent ?? null
+const sheetStatus = (): string | null => sheet()?.querySelector('.extAgents-by')?.textContent ?? null
+const sheetActs = (): Array<string | null> => [...(sheet()?.querySelectorAll('.extAgents-act button') ?? [])].map((b) => b.textContent)
+const sheetTextarea = (): HTMLTextAreaElement | null => sheet()?.querySelector('textarea') ?? null
+
+async function openSheet(name: string): Promise<void> {
+  await act(async () => {
+    rowNamed(name).click()
+  })
+}
+
+const click = async (el: Element | null | undefined): Promise<void> => {
+  expect(el, 'the control under test').toBeTruthy()
+  await act(async () => {
+    ;(el as HTMLElement).click()
+  })
+}
+
+/* Enter on a control, the way a keyboard reaches it: keydown first (which is
+   what the row listens for), then the activation the browser derives from it.
+   `preventDefault` on the keydown is exactly what suppresses that activation,
+   so the order matters and a plain `.click()` would not see the bug. */
+const pressEnter = async (el: Element | null | undefined): Promise<void> => {
+  expect(el, 'the control under test').toBeTruthy()
+  await act(async () => {
+    const target = el as HTMLElement
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    const prevented = !target.dispatchEvent(ev)
+    if (!prevented) target.click()
+  })
+}
+
+/* React installs its own `value` setter on the element, so assigning `.value`
+   and firing `input` leaves its state untouched and the field reverts on the
+   next render. The native setter is what React's onChange reads back. */
+const typeInto = async (el: Element | null | undefined, text: string): Promise<void> => {
+  expect(el, 'the field under test').toBeTruthy()
+  const field = el as HTMLInputElement | HTMLTextAreaElement
+  const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
+  await act(async () => {
+    setter.call(field, text)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+/* React delegates `onBlur` from the root and listens for `focusout`, not for
+   the non-bubbling `blur`. */
+const blur = async (el: Element | null | undefined): Promise<void> => {
+  expect(el, 'the field under test').toBeTruthy()
+  await act(async () => {
+    ;(el as HTMLElement).dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+  })
+}
+
+afterEach(() => {
+  /* The real close path, not the island's closer alone: `sheetDismissed` arms a
+     drop keyed on the drawer's generation, and only a close makes the next
+     open a new generation. */
+  act(() => {
+    detail.close()
+  })
+  cleanup()
+  resetSources()
+  store._resetForTests()
+})
+
+describe('the tabs', () => {
+  it('files every card under connected, available or not installed, and All lists them in that order', async () => {
+    install([
+      row({ name: 'Raven', preset: undefined, kind: 'builtin', builtin: true, configured: false, probe_status: 'unknown' }),
+      row({ name: 'Raven-Code', preset: undefined, vendored: true, configured: false, enabled: true }),
+      row({ name: 'on_one' }),
+      row({ name: 'off_one', enabled: false }),
+      row({ name: 'hermes', preset: 'hermes', configured: false, enabled: false, probe_status: 'attention' }),
+      row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' }),
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: false, enabled: false, probe_status: 'missing' }),
+      row({ name: 'Raven-PPT', preset: undefined, vendored: true, configured: false, enabled: false, probe_status: 'attention' }),
+    ])
+    await mount()
+    expect(tabLabels()).toEqual(['gui.filter.all', 'gui.agent.g_on', 'gui.agent.g_avail', 'gui.agent.g_missing'])
+    expect(await namesIn('gui.agent.g_on')).toEqual(['Raven', 'Raven-Code', 'on_one'])
+    /* Raven's own first, then the server's order. An endpoint whose probe says
+       unreachable is not something to install; a shipped product is never
+       absent, only unready, and both stay connectable. */
+    expect(await namesIn('gui.agent.g_avail')).toEqual(['Raven-PPT', 'off_one', 'hermes', 'mirothinker'])
+    expect(await namesIn('gui.agent.g_missing')).toEqual(['codex'])
+    expect(rowsOf().map((r) => r.querySelector('.extAgents-t')!.textContent)).toEqual([
+      'Raven', 'Raven-Code', 'on_one', 'Raven-PPT', 'off_one', 'hermes', 'mirothinker', 'codex',
+    ])
+    expect(tabs().map((b) => b.querySelector('.extAgents-tn')!.textContent)).toEqual(['8', '3', '4', '1'])
+  })
+
+  it('always offers All and Connected, and the other two only with cards in them', async () => {
+    install([row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' })])
+    await mount()
+    expect(tabLabels()).toEqual(['gui.filter.all', 'gui.agent.g_on', 'gui.agent.g_missing'])
+    await click(tabNamed('gui.agent.g_on'))
+    expect(tabNamed('gui.agent.g_on').querySelector('.extAgents-tn')!.textContent).toBe('0')
+    expect(rowsOf()).toEqual([])
+    expect(document.querySelector('.extAgents-empty')!.textContent).toBe('gui.agent.none')
+  })
+
+  it('keeps an emptied tab in place rather than moving the reader off it', async () => {
+    install([row({ name: 'off_one', enabled: false })])
+    await mount()
+    await click(tabNamed('gui.agent.g_avail'))
+    await click(buttonOf('off_one'))
+    expect(tabNamed('gui.agent.g_avail').getAttribute('aria-selected')).toBe('true')
+    expect(rowsOf()).toEqual([])
+    expect(document.querySelector('.extAgents-empty')!.textContent).toBe('gui.agent.none_avail')
+    await click(tabNamed('gui.filter.all'))
+    expect(tabLabels()).toEqual(['gui.filter.all', 'gui.agent.g_on'])
+  })
+
+  it('re-measures availability every time the page opens', async () => {
+    const { loads } = install([row()])
+    await mount()
+    await act(async () => {
+      store.open()
+    })
+    expect(loads).toEqual([true, true])
+  })
+})
+
+describe('a card', () => {
+  it('says who it is in one line: the catalogue for a known agent, the probe or the transport otherwise', async () => {
+    install([
+      row({ name: 'claude_code' }),
+      row({ name: 'Raven-Code', preset: undefined, vendored: true, configured: false }),
+      row({ name: 'homemade', preset: undefined, configured: true, enabled: false, probe_status: 'attention', probe_detail: 'found, untested' }),
+      row({ name: 'plain', preset: undefined, configured: true, enabled: true }),
+      row({ name: 'moved', preset: undefined, configured: true, enabled: false, upgrade_to: 'acp' }),
+    ])
+    await mount()
+    expect(lineOf('claude_code')).toBe('gui.agent.short_claude_code')
+    expect(lineOf('Raven-Code')).toBe('gui.agent.short_raven_code')
+    expect(lineOf('homemade')).toBe('found, untested')
+    expect(lineOf('plain')).toBe('gui.agent.kind_acp')
+    expect(lineOf('moved')).toBe('gui.agent.kind_acp · gui.agent.tag_stale')
+  })
+
+  it('carries a corner control only for connect and install, none once connected', async () => {
+    install([
+      row({ name: 'Raven', preset: undefined, kind: 'builtin', builtin: true, configured: false, probe_status: 'unknown' }),
+      row({ name: 'on_one' }),
+      row({ name: 'off_one', enabled: false }),
+      row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' }),
+    ])
+    await mount()
+    expect(controlOf('Raven')).toBe('')
+    expect(controlOf('on_one')).toBe('')
+    expect(controlOf('off_one')).toBe('gui.agent.connect')
+    expect(controlOf('codex')).toBe('gui.agent.go_install')
+    const labels = new Set(rowsOf().flatMap((r) => [...r.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))))
+    expect(labels).toEqual(new Set(['gui.agent.connect', 'gui.agent.go_install']))
+  })
+
+  it('lights the dot only for a working agent, gold when the probe has a caveat', async () => {
+    install([
+      row({ name: 'on_one' }),
+      row({ name: 'on_warn', probe_status: 'attention' }),
+      row({ name: 'off_one', enabled: false }),
+      row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' }),
+    ])
+    await mount()
+    expect(ledOf('on_one')).toBe('extAgents-led')
+    expect(ledOf('on_warn')).toBe('extAgents-led extAgents-led-warn')
+    expect(ledOf('off_one')).toBeNull()
+    expect(ledOf('codex')).toBeNull()
+  })
+
+  it('opens the sheet from the card, by mouse and by keyboard, but not from its control', async () => {
+    const { acts } = install([row({ name: 'on_one' }), row({ name: 'off_one', enabled: false })])
+    await mount()
+    await pressEnter(rowNamed('on_one'))
+    expect(sheetName()).toBe('on_one')
+    await act(async () => {
+      detail.close()
+    })
+    await pressEnter(buttonOf('off_one'))
+    expect(acts).toEqual([['toggle', 'off_one', { enabled: true }]])
+    expect(sheetName()).not.toBe('off_one')
+  })
+})
+
+describe('connecting', () => {
+  it('adds a preset, switches a configured row back on, and migrates a stale one after asking', async () => {
+    const { acts, confirms } = install([
+      row({ name: 'hermes', preset: 'hermes', configured: false, enabled: false, probe_status: 'attention' }),
+      row({ name: 'off_one', enabled: false }),
+      row({ name: 'moved', configured: true, enabled: false, upgrade_to: 'acp' }),
+    ])
+    await mount()
+    await click(buttonOf('hermes'))
+    await click(buttonOf('off_one'))
+    await click(buttonOf('moved'))
+    expect(acts).toEqual([
+      ['connect', 'hermes', {}],
+      ['toggle', 'off_one', { enabled: true }],
+      ['migrate', 'moved', {}],
+    ])
+    expect(confirms).toEqual(['gui.agent.migrate_do'])
+  })
+
+  it('sends a key-less endpoint to the sheet instead of writing', async () => {
+    const { acts } = install([row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: false, enabled: false })])
+    await mount()
+    await click(buttonOf('mirothinker'))
+    expect(acts).toEqual([])
+    expect(sheetName()).toBe('mirothinker')
+  })
+
+  it('shows the card testing for the length of a switch-on, with nothing else to press', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const rows = [row({ name: 'off_one', enabled: false })]
+    install(rows, {
+      act: async (op, r, args) => {
+        await gate
+        if (op === 'toggle') r.enabled = !!(args as { enabled?: boolean } | undefined)?.enabled
+        return rows
+      },
+    })
+    await mount()
+    await click(buttonOf('off_one'))
+    expect(buttonOf('off_one')).toBeNull()
+    expect(lineOf('off_one')).toBe('gui.agent.short_claude_code')
+    expect(footOf('off_one')).toEqual({ k: 'gui.agent.testing', r: null })
+    expect(ledOf('off_one')).toBe('extAgents-led extAgents-led-busy')
+    await act(async () => {
+      release()
+      await gate
+    })
+    expect(await sectionOf('off_one')).toBe('gui.agent.g_on')
+    expect(controlOf('off_one')).toBe('')
+  })
+
+  it('says testing on the sheet button too, since that is what the wait is', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const rows = [row({ name: 'off_one', enabled: false })]
+    install(rows, {
+      act: async (op, r, args) => {
+        await gate
+        if (op === 'toggle') r.enabled = !!(args as { enabled?: boolean } | undefined)?.enabled
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('off_one')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(sheetActs()).toEqual(['gui.agent.testing'])
+    await act(async () => {
+      release()
+      await gate
+    })
+  })
+
+  /* The same `pending` covers every write this page makes, so the word has to
+     come from which write it is. A disconnect reaches no gate at all -- the
+     server pings only on the way on -- so it is neither testing the agent nor
+     connecting to it. */
+  it('says disconnecting while a disconnect is in flight', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const rows = [row({ name: 'on_one', configured: true, enabled: true })]
+    install(rows, {
+      act: async (op, r, args) => {
+        await gate
+        if (op === 'toggle') r.enabled = !!(args as { enabled?: boolean } | undefined)?.enabled
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('on_one')
+    await click(sheet()!.querySelector('.extAgents-act button.danger'))
+    expect(footOf('on_one')).toEqual({ k: 'gui.agent.disconnecting', r: null })
+    await act(async () => {
+      release()
+      await gate
+    })
+  })
+
+  /* Before the first answer the grid is placeholders of a card's own shape,
+     one per catalogue entry since the catalogue is the roster on every
+     machine, not the empty message and a jump when the roster lands. Only
+     before the first answer: a reload keeps the rows it has. */
+  it('draws one placeholder card per catalogue entry until the roster arrives', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const rows = [row({ name: 'claude_code' }), row({ name: 'off_one', enabled: false })]
+    install(rows, {
+      load: async () => {
+        await gate
+        return rows
+      },
+    })
+    await mount()
+    expect(document.querySelectorAll('.extAgents-wcard').length).toBe(18)
+    expect(document.querySelector('.extAgents-grid')!.getAttribute('aria-busy')).toBe('true')
+    expect(document.querySelector('.extAgents-empty')).toBeNull()
+    expect(document.querySelector('.extAgents-tn')).toBeNull()
+    expect(document.querySelectorAll('.extAgents-tab .extAgents-wtn').length).toBe(2)
+    await act(async () => {
+      release()
+      await gate
+    })
+    expect(document.querySelectorAll('.extAgents-wcard').length).toBe(0)
+    expect(rowsOf().length).toBe(2)
+    expect(tabLabel(tabNamed('gui.filter.all'))).toBe('gui.filter.all')
+    /* A reload with rows in hand keeps them on screen. */
+    await act(async () => {
+      await store.load(true)
+    })
+    expect(document.querySelectorAll('.extAgents-wcard').length).toBe(0)
+  })
+
+  /* The slot under the line is never blank: with nothing wrong it says which
+     state the row is in, so a grid reads the same whether or not a card is in
+     trouble, and a strip that later replaces it takes no more room. Not the
+     vendor: the mark beside the name already says that. */
+  it('says how a card is doing under the line about it, when nothing is wrong', async () => {
+    install([
+      row({ name: 'tested', configured: true, enabled: true, last_test_ok: true, last_test_at_ms: Date.now() - 3 * 86400_000 }),
+      row({ name: 'on_one', configured: true, enabled: true }),
+      row({ name: 'off_one', enabled: false }),
+      row({ name: 'gone', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' }),
+    ])
+    await mount()
+    expect(footOf('tested')!.k).toContain('gui.agent.hd_on_tested')
+    expect(footOf('tested')!.k).toContain('gui.time.ago_d')
+    expect(footOf('on_one')!.k).toBe('gui.agent.g_on')
+    expect(footOf('off_one')!.k).toBe('gui.agent.g_avail')
+    expect(footOf('gone')!.k).toBe('gui.agent.g_missing')
+    for (const name of ['tested', 'on_one', 'off_one']) expect(rowNamed(name).querySelector('.extAgents-foot-quiet')).not.toBeNull()
+    expect(buttonOf('tested')).toBeNull()
+  })
+
+  it('keeps a refusal on the card in red with a retry, and does not toast it', async () => {
+    let refusals = 1
+    const { acts, toasts } = install([row({ name: 'off_one', enabled: false })], {
+      refuse: () => (refusals-- > 0 ? 'it did not answer a test message' : null),
+    })
+    await mount()
+    await click(buttonOf('off_one'))
+    /* The line about the agent stays as it was; what failed and the short
+       reason are a footer under it, the sheet has the steps, and the corner,
+       where every press on a card lives, offers the retry. */
+    expect(rowNamed('off_one').querySelector('.extAgents-one')!.className).toBe('extAgents-one')
+    expect(footOf('off_one')).toEqual({ k: 'gui.agent.st_connect_bad', r: 'gui.agent.why_open' })
+    expect(controlOf('off_one')).toBe('gui.retry')
+    expect(ledOf('off_one')).toBe('extAgents-led extAgents-led-bad')
+    expect(toasts).toEqual([])
+    await click(buttonOf('off_one'))
+    expect(acts).toEqual([
+      ['toggle', 'off_one', { enabled: true }],
+      ['toggle', 'off_one', { enabled: true }],
+    ])
+    expect(await sectionOf('off_one')).toBe('gui.agent.g_on')
+  })
+
+  it('still toasts when the load that opens the page is the thing that fails', async () => {
+    const { toasts } = install([], {
+      load: async () => {
+        throw { data: { detail: 'gateway away' } }
+      },
+    })
+    await mount()
+    expect(toasts).toEqual(['gui.agent.failed {"detail":"gateway away"}'])
+  })
+})
+
+describe('disconnecting', () => {
+  it('is done from the sheet, and moves the card to the available tab', async () => {
+    const { acts } = install([row({ name: 'on_one' })])
+    await mount()
+    await openSheet('on_one')
+    await click(sheet()!.querySelector('.extAgents-act button.danger'))
+    expect(acts).toEqual([['toggle', 'on_one', { enabled: false }]])
+    expect(await sectionOf('on_one')).toBe('gui.agent.g_avail')
+    expect(controlOf('on_one')).toBe('gui.agent.connect')
+  })
+})
+
+describe('the sheet', () => {
+  it('names the agent, says who makes it, and offers disconnect and test for a connected one', async () => {
+    install([row({ name: 'claude_code' })])
+    await mount()
+    await openSheet('claude_code')
+    expect(sheetName()).toBe('claude_code')
+    expect(sheetStatus()).toBe('gui.agent.hd_on_by {"by":"Anthropic"}')
+    expect(sheetActs()).toEqual(['gui.agent.disconnect', 'gui.agent.test_label'])
+  })
+
+  it('offers nothing to press on the built-in loop', async () => {
+    install([row({ name: 'Raven', preset: undefined, kind: 'builtin', builtin: true, configured: false, probe_status: 'unknown' })])
+    await mount()
+    await openSheet('Raven')
+    expect(sheetActs()).toEqual([])
+    expect(sheetStatus()).toBe('gui.agent.hd_on_by {"by":"gui.agent.by_raven"}')
+    expect(sheetTextarea()).toBeNull()
+    expect(sheet()!.querySelector('.extAgents-ro')!.textContent).toBe('Claude Code CLI')
+  })
+
+  it('reads the last verdict into the status line', async () => {
+    install([
+      row({ name: 'passed', last_test_ok: true, last_test_at_ms: 1 }),
+      row({ name: 'failed', last_test_ok: false, last_test_at_ms: 1, last_test_detail: 'it returned nothing' }),
+    ])
+    await mount()
+    await openSheet('passed')
+    expect(sheetStatus()).toBe('gui.agent.hd_on_tested')
+    await act(async () => {
+      detail.close()
+    })
+    await openSheet('failed')
+    /* The head says which state it is in; the block at the top of the body
+       says what failed, when, and -- the server having named no fix -- shows
+       its sentence as it came rather than folding the only reason away. */
+    expect(sheetStatus()).toBe('gui.agent.hd_on_test_bad')
+    expect(sheet()!.querySelector('.extAgents-by')!.className).toContain('extAgents-by-bad')
+    const note = sheet()!.querySelector('.extAgents-note')!
+    expect(note.querySelector('.extAgents-note-t')!.firstChild!.textContent).toBe('gui.agent.st_test_bad')
+    expect(note.querySelector('.extAgents-note-when')!.textContent).toContain('gui.time.ago_d')
+    expect(note.querySelector('.extAgents-note-p')!.textContent).toBe(
+      `gui.agent.said_test ${JSON.stringify({ button: 'gui.agent.test_again' })}`,
+    )
+    expect(note.querySelector('.extAgents-note-said')!.textContent).toBe('it returned nothing')
+    expect(note.querySelector('details')).toBeNull()
+    expect(sheetActs()).toEqual(['gui.agent.disconnect', 'gui.agent.test_again'])
+    /* The card says it too, under the line about the agent, with a retest. */
+    expect(rowNamed('failed').querySelector('.extAgents-one')!.className).toBe('extAgents-one')
+    expect(footOf('failed')).toEqual({ k: 'gui.agent.st_test_bad', r: expect.stringContaining('gui.time.ago_d') })
+    expect(controlOf('failed')).toBe('gui.agent.test_again_short')
+    expect(ledOf('failed')).toBe('extAgents-led extAgents-led-bad')
+  })
+
+  it('runs a test from its action bar, says so while it runs, and offers to stop it', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const rows = [row({ name: 'claude_code' })]
+    const { acts } = install(rows, {
+      act: async (op, r) => {
+        acts.push([op, r.name, {}])
+        if (op === 'test') await gate
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('claude_code')
+    await click(sheet()!.querySelectorAll('.extAgents-act button')[1])
+    expect(sheetStatus()).toBe('gui.agent.testing_head')
+    /* A cli test can run for two minutes on the agent's own quota, so the
+       running state keeps a control: Stop, in place of the Test that started it. */
+    expect(sheetActs()).toEqual(['gui.agent.disconnect', 'gui.stop'])
+    expect((sheet()!.querySelectorAll('.extAgents-act button')[1] as HTMLButtonElement).disabled).toBe(false)
+    await click(sheet()!.querySelectorAll('.extAgents-act button')[1])
+    expect(acts.map((a) => a[0])).toEqual(['test', 'test_cancel'])
+    await act(async () => {
+      release()
+      await gate
+    })
+    expect(sheetActs()).toEqual(['gui.agent.disconnect', 'gui.agent.test_label'])
+  })
+
+  it('writes what the agent is good at when the field is left, and keeps the old text when it is left blank', async () => {
+    const { acts } = install([row({ name: 'claude_code', description: 'Claude Code CLI' })])
+    await mount()
+    await openSheet('claude_code')
+    expect(sheetTextarea()!.value).toBe('Claude Code CLI')
+    await typeInto(sheetTextarea(), 'Fixes the failing test')
+    await blur(sheetTextarea())
+    expect(acts).toEqual([['update', 'claude_code', { description: 'Fixes the failing test' }]])
+    await typeInto(sheetTextarea(), '   ')
+    await blur(sheetTextarea())
+    expect(acts.length).toBe(1)
+    expect(sheetTextarea()!.value).toBe('Fixes the failing test')
+  })
+
+  it('holds a description typed for a preset until the connect that writes the row', async () => {
+    const { acts } = install([row({ name: 'hermes', preset: 'hermes', configured: false, enabled: false, probe_status: 'attention' })])
+    await mount()
+    await openSheet('hermes')
+    await typeInto(sheetTextarea(), 'Odd jobs')
+    await blur(sheetTextarea())
+    expect(acts).toEqual([])
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([['connect', 'hermes', { description: 'Odd jobs' }]])
+  })
+
+  it('takes a key for an endpoint and connects with it, once one is typed', async () => {
+    const { acts } = install([row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: false, enabled: false })])
+    await mount()
+    await openSheet('mirothinker')
+    const go = sheet()!.querySelector('.extAgents-act button') as HTMLButtonElement
+    expect(go.textContent).toBe('gui.agent.connect')
+    expect(go.disabled).toBe(true)
+    const field = sheet()!.querySelector('.extAgents-fld input')
+    await typeInto(field, ' sk-1 ')
+    expect((sheet()!.querySelector('.extAgents-act button') as HTMLButtonElement).disabled).toBe(false)
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([['connect', 'mirothinker', { api_key: 'sk-1' }]])
+  })
+
+  /* A key the endpoint rejects is stored all the same, and used to take the
+     field with it: the sheet then offered Connect, the gate refused the key,
+     and the sentence said to change a key there was no field for. */
+  it('lets an endpoint whose key is already stored type another, and switches it on with it', async () => {
+    const { acts } = install([
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true }),
+    ])
+    await mount()
+    await openSheet('mirothinker')
+    const field = sheet()!.querySelector('.extAgents-fld input') as HTMLInputElement
+    expect(field.placeholder).toBe('gui.agent.key_set')
+    const go = sheet()!.querySelector('.extAgents-act button') as HTMLButtonElement
+    expect(go.textContent).toBe('gui.agent.connect')
+    expect(go.disabled).toBe(false)
+    await typeInto(field, ' sk-2 ')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([
+      ['update', 'mirothinker', { api_key: 'sk-2' }],
+      ['toggle', 'mirothinker', { enabled: true }],
+    ])
+  })
+
+  it('keeps a plain press on a keyed endpoint as the connect it was', async () => {
+    const { acts } = install([
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true }),
+    ])
+    await mount()
+    await openSheet('mirothinker')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([['toggle', 'mirothinker', { enabled: true }]])
+  })
+
+  it('does not switch a row on behind a key edit the server refused', async () => {
+    const { acts } = install(
+      [row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true })],
+      { refuse: (op) => (op === 'update' ? 'no' : null) },
+    )
+    await mount()
+    await openSheet('mirothinker')
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-2')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([['update', 'mirothinker', { api_key: 'sk-2' }]])
+    expect(sheetActs()).toEqual(['gui.retry'])
+  })
+
+  it('draws no key field on an endpoint that is connected', async () => {
+    install([row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: true, has_api_key: true })])
+    await mount()
+    await openSheet('mirothinker')
+    expect(sheet()!.querySelector('.extAgents-fld input')).toBeNull()
+  })
+
+  /* On a connected row the button retries whatever write was refused, and a
+     key field beside it would let a stray keystroke displace that retry with
+     a credential change nothing asked for. */
+  it('keeps Retry for a connected endpoint whose description edit was refused, and draws no key field', async () => {
+    const { acts } = install(
+      [row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: true, has_api_key: true })],
+      { refuse: (op) => (op === 'update' ? 'no' : null) },
+    )
+    await mount()
+    await openSheet('mirothinker')
+    await typeInto(sheetTextarea(), 'Odd jobs')
+    await blur(sheetTextarea())
+    expect(sheetActs()).toEqual(['gui.retry'])
+    expect(sheet()!.querySelector('.extAgents-fld input')).toBeNull()
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([
+      ['update', 'mirothinker', { description: 'Odd jobs' }],
+      ['update', 'mirothinker', { description: 'Odd jobs' }],
+    ])
+  })
+
+  it('ignores Enter while the key it took is still being written', async () => {
+    const r = row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true })
+    const sent: string[] = []
+    let land: (() => void) | null = null
+    install([r], {
+      act: (op) => {
+        sent.push(op)
+        return new Promise<ExtAgentRow[]>((resolve) => {
+          land = () => resolve([r])
+        })
+      },
+    })
+    await mount()
+    await openSheet('mirothinker')
+    const field = sheet()!.querySelector('.extAgents-fld input')
+    await typeInto(field, 'sk-2')
+    await pressEnter(field)
+    await pressEnter(field)
+    expect(sent).toEqual(['update'])
+    expect((sheet()!.querySelector('.extAgents-act button') as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => land!())
+    expect(sent).toEqual(['update', 'toggle'])
+    await act(async () => land!())
+  })
+
+  it.each([true, false])('draws no key field on an endpoint whose preset moved transport (key stored: %s), and connects it by migrating', async (has_api_key) => {
+    const { acts, confirms } = install([
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key, upgrade_to: 'acp' }),
+    ])
+    await mount()
+    await openSheet('mirothinker')
+    expect(sheet()!.querySelector('.extAgents-fld input')).toBeNull()
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(confirms).toEqual(['gui.agent.migrate_do'])
+    expect(acts).toEqual([['migrate', 'mirothinker', {}]])
+  })
+
+  it('still takes a key for an endpoint that is on the roster without one', async () => {
+    const { acts } = install([
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: true, has_api_key: false }),
+    ])
+    await mount()
+    await openSheet('mirothinker')
+    expect((sheet()!.querySelector('.extAgents-act button') as HTMLButtonElement).disabled).toBe(true)
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-3')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(acts).toEqual([['update', 'mirothinker', { api_key: 'sk-3' }]])
+  })
+
+  it('shows an absent agent how to get installed, and re-checks the machine on request', async () => {
+    const rows = [row({ name: 'qwen', preset: 'qwen_code', configured: false, enabled: false, probe_status: 'missing' })]
+    const { loads, rescans } = install(rows)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
+    await mount()
+    await openSheet('qwen')
+    expect(sheetStatus()).toBe('gui.agent.hd_missing_by {"by":"gui.agent.by_qwen_code"}')
+    expect(sheet()!.querySelector('.extAgents-cmd code')!.textContent).toBe('npm install -g @qwen-code/qwen-code')
+    expect(sheet()!.querySelector<HTMLAnchorElement>('.extAgents-site')!.href).toBe('https://github.com/QwenLM/qwen-code')
+    expect(sheetActs()).toEqual(['gui.agent.recheck'])
+    await click(sheet()!.querySelector('.extAgents-cmd button'))
+    expect(sheet()!.querySelector('.extAgents-cmd button')!.textContent).toBe('gui.agent.copied')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(loads).toEqual([true, true])
+    /* The re-check reads the shell's PATH as it is now -- the agent was most
+       likely installed while this page was open -- and opening the page did not
+       pay for that. */
+    expect(rescans).toEqual([false, true])
+    expect(sheet()!.querySelector('.extAgents-probe')!.textContent).toBe('gui.agent.still_missing')
+    rows[0]!.probe_status = 'attention'
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(sheet()!.querySelector('.extAgents-probe')).toBeNull()
+    expect(await sectionOf('qwen')).toBe('gui.agent.g_avail')
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+  })
+
+  it('names a refused agent on its card instead of offering to connect it', async () => {
+    const { acts } = install([
+      row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'attention', needs_auth: true }),
+    ])
+    await mount()
+    expect(await sectionOf('codex')).toBe('gui.agent.g_avail')
+    expect(controlOf('codex')).toBe('gui.agent.unauthorized')
+    expect(buttonOf('codex')).toBeNull()
+    expect(acts).toEqual([])
+    /* The sheet says the same, and offers the one press that can take it
+       back: a Test re-measures the handshake. */
+    await openSheet('codex')
+    expect(sheetActs()).toEqual(['gui.agent.unauthorized', 'gui.agent.test_label'])
+    const [named, test] = [...sheet()!.querySelectorAll<HTMLButtonElement>('.extAgents-act button')]
+    expect(named!.disabled).toBe(true)
+    await click(test)
+    expect(acts.map((a) => a.slice(0, 2))).toEqual([['test', 'codex']])
+  })
+
+  /* One verdict for the card and the sheet, from `healthOf`: a failed test
+     reddens the card of a connected row the way the sheet already was, an off
+     row keeps its section's word instead, and every dot names its state. */
+  it('paints the card red for a connected row whose last test failed, and nothing for one that is off', async () => {
+    install([
+      row({ name: 'on_bad', last_test_ok: false, last_test_detail: 'no credential' }),
+      row({ name: 'off_bad', enabled: false, last_test_ok: false, last_test_detail: 'no credential' }),
+    ])
+    await mount()
+    expect(ledOf('on_bad')).toBe('extAgents-led extAgents-led-bad')
+    expect(ledOf('off_bad')).toBeNull()
+  })
+
+  /* One line in the head, like every other state; what the check found is the
+     note at the top of the body, in the warning colour, its words folded. */
+  const said = (key: string, vars: Record<string, string>): string => `${key} ${JSON.stringify(vars)}`
+  it("says in the sheet what the card's gold dot means, in a note of its own", async () => {
+    install([row({ name: 'on_warn', probe_status: 'attention', probe_detail: 'launch config changed since the last test -- run a test' })])
+    await mount()
+    expect(ledOf('on_warn')).toBe('extAgents-led extAgents-led-warn')
+    await openSheet('on_warn')
+    const line = sheet()!.querySelector('.extAgents-by')!
+    expect(line.querySelector('.extAgents-led')!.className).toBe('extAgents-led extAgents-led-warn')
+    expect(line.textContent).toBe('gui.agent.hd_on_attention')
+    expect(line.querySelector('details')).toBeNull()
+    const note = sheet()!.querySelector('.extAgents-note')!
+    expect(note.className).toBe('extAgents-note extAgents-note-warn')
+    expect(note.querySelector('.extAgents-note-t')!.textContent).toBe(said('gui.agent.warn_title', { agent: 'on_warn' }))
+    expect(note.querySelector('.extAgents-note-p')!.textContent).toBe(
+      said('gui.agent.warn_lead', { agent: 'on_warn', button: 'gui.agent.test_label' }),
+    )
+    expect(note.querySelector('details summary')!.textContent).toBe('gui.agent.probe_raw')
+    expect(note.querySelector('details')!.textContent).toContain('launch config changed since the last test')
+
+    const handed: Array<[string, string, Record<string, string>]> = []
+    store.lendAskRaven((key, name, vars) => handed.push([key, name, vars]))
+    await click(note.querySelector('.extAgents-note-ask'))
+    store.lendAskRaven(null)
+    expect(handed).toEqual([['gui.agent.ask_check', 'on_warn', { reason: 'launch config changed since the last test -- run a test' }]])
+  })
+
+  it('reads a check that found no credential as a sign-in', async () => {
+    install([row({ name: 'Pi', probe_status: 'attention', needs_auth: true, probe_detail: 'connected, but no session could be opened' })])
+    await mount()
+    await openSheet('Pi')
+    const note = sheet()!.querySelector('.extAgents-note')!
+    expect(note.querySelector('.extAgents-note-t')!.textContent).toBe(said('gui.agent.bad_sign_in', { agent: 'Pi' }))
+    expect(note.querySelector('.extAgents-note-p')!.textContent).toBe(
+      said('gui.agent.fix_sign_in_bare', { agent: 'Pi', button: 'gui.agent.test_label' }),
+    )
+    expect(sheetActs()).toContain('gui.agent.test_label')
+  })
+
+  it('names the dot for a reader who cannot see its colour', async () => {
+    install([row({ name: 'fine' }), row({ name: 'on_warn', probe_status: 'attention' }), row({ name: 'on_bad', last_test_ok: false })])
+    await mount()
+    const nameOf = (name: string): string | null => rowNamed(name).querySelector('.extAgents-led')!.getAttribute('aria-label')
+    expect(nameOf('fine')).toContain('gui.agent.hd_on_by')
+    expect(nameOf('on_warn')).toBe('gui.agent.hd_on_attention')
+    expect(nameOf('on_bad')).toBe('gui.agent.hd_on_test_bad')
+    /* The tooltip is on the name beside the dot, a target a pointer can find. */
+    expect(rowNamed('on_warn').querySelector('.extAgents-nm')!.getAttribute('title')).toBe('gui.agent.hd_on_attention')
+  })
+
+  it('keeps its rendered shape, grid', async () => {
+    install([
+      row({ name: 'Raven', preset: undefined, kind: 'builtin', builtin: true, configured: false, probe_status: 'unknown' }),
+      row({ name: 'claude_code' }),
+      row({ name: 'hermes', preset: 'hermes', configured: false, enabled: false, probe_status: 'attention' }),
+      row({ name: 'codex', preset: 'codex', configured: false, enabled: false, probe_status: 'missing' }),
+    ])
+    await mount()
+    expect(domSnapshot(document.getElementById('extAgentsBody')!)).toMatchSnapshot()
+  })
+
+  it('keeps its rendered shape, sheet', async () => {
+    install([row({ name: 'claude_code' })])
+    await mount()
+    await openSheet('claude_code')
+    expect(domSnapshot(document.getElementById('dBody')!)).toMatchSnapshot()
+  })
+
+  /* A test that failed has to say so wherever it was pressed. The sheet offers
+     Test from two states, and only one of them used to render the verdict: an
+     unauthorized row whose handshake now passes but whose agent still cannot
+     answer would drop the label, offer a plain Connect, and say nothing about
+     the test that had just failed. */
+  it('says a failed test failed on a row that is not connected', async () => {
+    const r = row({ name: 'ua', configured: false, enabled: false, needs_auth: true, probe_status: 'attention' })
+    const rows = [r]
+    install(rows, {
+      act: async (op) => {
+        if (op === 'test') {
+          r.needs_auth = false
+          r.probe_status = 'ready'
+          r.last_test_ok = false
+          r.last_test_detail = 'it connected and then answered nothing'
+        }
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('ua')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.test_label'))
+    /* Not connected, so the head names the maker rather than "connected". */
+    expect(sheetStatus()).toBe('gui.agent.st_test_bad · Anthropic')
+    const note = sheet()!.querySelector('.extAgents-note')!
+    expect(note.querySelector('.extAgents-note-t')!.textContent).toBe('gui.agent.st_test_bad')
+    expect(note.querySelector('.extAgents-note-said')!.textContent).toBe('it connected and then answered nothing')
+    /* The test cleared the handshake, so the bar is back to Connect, and the
+       note names Connect rather than a Test the bar no longer offers. */
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    expect(note.querySelector('.extAgents-note-p')!.textContent).toBe(
+      `gui.agent.said_test ${JSON.stringify({ button: 'gui.agent.connect' })}`,
+    )
+  })
+
+  /* The note and the bar are drawn from one state, so whatever the note tells
+     the reader to press has to be on the bar, in every state a failed test can
+     leave a row in. */
+  it.each([
+    ['connected', { configured: true, enabled: true }],
+    ['unauthorized', { configured: false, enabled: false, needs_auth: true, probe_status: 'attention' }],
+    ['available', { configured: false, enabled: false }],
+    ['waiting on a key', { preset: 'mirothinker', kind: 'openai', configured: false, enabled: false }],
+  ] as const)('names a press the bar offers, after a failed test on a %s row', async (_state, over) => {
+    install([row({ name: 'x', last_test_ok: false, last_test_at_ms: 1, last_test_detail: 'it answered nothing', ...over })])
+    await mount()
+    await openSheet('x')
+    const said = sheet()!.querySelector('.extAgents-note .extAgents-note-p')!.textContent!
+    const named = (JSON.parse(said.slice(said.indexOf('{'))) as { button: string }).button
+    expect(sheetActs()).toContain(named)
+  })
+})
+
+/* A refusal the server could classify arrives with its fix as data. The sheet
+   says it in the reader's language -- what is missing, the command on a line of
+   its own, the button to press after -- and folds the server's English sentence
+   under it. Every expectation spells the key and its arguments, so a fix drawn
+   with the wrong words, the wrong agent or the wrong button fails here. */
+describe('a refusal that names its fix', () => {
+  const say = (key: string, vars: Record<string, string>): string => `${key} ${JSON.stringify(vars)}`
+  const note = (): Element | null => sheet()?.querySelector('.extAgents-note') ?? null
+  const title = (): string | null => note()?.querySelector('.extAgents-note-t')?.firstChild?.textContent ?? null
+  const lead = (): string | null => note()?.querySelector('.extAgents-note-p')?.textContent ?? null
+  const raw = (): HTMLDetailsElement | null => note()?.querySelector('details.extAgents-note-raw') ?? null
+  const hermesSaid =
+    'connected, but no session could be opened: Internal error: Hermes is not connected to any AI provider yet. ' +
+    'Run `hermes model` to pick one (auth methods: hermes-setup)'
+
+  it('says what a failed test needs, the command on its own line, and folds the English under it', async () => {
+    install([
+      row({
+        name: 'Hermes Agent',
+        preset: 'hermes',
+        configured: false,
+        enabled: false,
+        needs_auth: true,
+        probe_status: 'attention',
+        last_test_ok: false,
+        last_test_at_ms: 1,
+        last_test_detail: hermesSaid,
+        last_test_remedy: { kind: 'setup', command: 'hermes model' },
+      }),
+    ])
+    await mount()
+    await openSheet('Hermes Agent')
+    expect(title()).toBe(say('gui.agent.bad_setup', { agent: 'Hermes Agent' }))
+    expect(lead()).toBe(say('gui.agent.fix_setup', { agent: 'Hermes Agent', button: 'gui.agent.test_label' }))
+    expect(sheetActs()).toContain('gui.agent.test_label')
+    expect(note()!.querySelector('.extAgents-cmd code')!.textContent).toBe('hermes model')
+    expect(raw()!.querySelector('summary')!.textContent).toBe('gui.agent.fix_raw')
+    expect(raw()!.textContent).toContain(hermesSaid)
+    expect(raw()!.open).toBe(false)
+    expect(sheet()!.querySelector('.extAgents-by')!.className).toContain('extAgents-by-bad')
+  })
+
+  it('says a refused connect needs a sign-in, names Retry, and copies the command', async () => {
+    const r = row({ name: 'Codex', preset: 'codex', configured: false, enabled: false })
+    const said = 'sub-agent Codex did not answer a test message: it is installed but has no usable credential'
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: said, remedy: { kind: 'sign_in', command: 'npx -y @openai/codex login' } } }
+        return [r]
+      },
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    await mount()
+    await openSheet('Codex')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(sheetStatus()).toBe('gui.agent.st_connect_bad · OpenAI')
+    expect(title()).toBe(say('gui.agent.bad_sign_in', { agent: 'Codex' }))
+    expect(lead()).toBe(say('gui.agent.fix_sign_in', { agent: 'Codex', button: 'gui.retry' }))
+    expect(sheetActs()).toEqual(['gui.retry'])
+    expect(raw()!.textContent).toContain(said)
+    await click(note()!.querySelector('.extAgents-cmd button'))
+    expect(writeText).toHaveBeenCalledWith('npx -y @openai/codex login')
+    expect(note()!.querySelector('.extAgents-cmd button')!.textContent).toBe('gui.agent.copied')
+  })
+
+  /* The note's link opens a conversation whose first message names the agent
+     and the reason -- the classified title when there is one, else the
+     server's own sentence -- for the reader to send. */
+  it('hands a refused connect or a failed test to Raven with its reason', async () => {
+    const handed: Array<[string, string, Record<string, string>]> = []
+    store.lendAskRaven((key, name, vars) => handed.push([key, name, vars]))
+    const codex = row({ name: 'Codex', preset: 'codex', configured: false, enabled: false })
+    install([codex, row({ name: 'failed', last_test_ok: false, last_test_at_ms: 1, last_test_detail: 'it returned nothing\nstderr: -' })], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: 'no usable credential', remedy: { kind: 'sign_in', command: 'codex login' } } }
+        return [codex]
+      },
+    })
+    await mount()
+    await openSheet('Codex')
+    expect(note()).toBeNull()
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    const ask = note()!.querySelector<HTMLButtonElement>('.extAgents-note-ask')!
+    expect(ask.textContent).toBe('gui.agent.ask_raven')
+    await click(ask)
+    expect(handed).toEqual([['gui.agent.ask_connect', 'Codex', { reason: say('gui.agent.bad_sign_in', { agent: 'Codex' }) }]])
+
+    await act(async () => {
+      detail.close()
+    })
+    await openSheet('failed')
+    await click(note()!.querySelector('.extAgents-note-ask'))
+    expect(handed[1]).toEqual(['gui.agent.ask_test', 'failed', { reason: 'it returned nothing' }])
+    store.lendAskRaven(null)
+  })
+
+  it('gives an endpoint row no command, since its key is fixed here and not in a terminal', async () => {
+    install([
+      row({
+        name: 'MiroThinker',
+        preset: 'mirothinker',
+        kind: 'openai',
+        last_test_ok: false,
+        last_test_at_ms: 1,
+        last_test_detail: 'it has no usable API key',
+        last_test_remedy: { kind: 'api_key', command: '' },
+      }),
+    ])
+    await mount()
+    await openSheet('MiroThinker')
+    expect(title()).toBe(say('gui.agent.bad_api_key', { agent: 'MiroThinker' }))
+    /* An endpoint with no key is not connected, and its bar offers Connect
+       beside the key field, not Test: the note names the press that is there. */
+    expect(lead()).toBe(say('gui.agent.fix_api_key', { agent: 'MiroThinker', button: 'gui.agent.connect' }))
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    expect(note()!.querySelector('.extAgents-cmd')).toBeNull()
+  })
+
+  it('offers the field again when the stored key is what the server refused', async () => {
+    const r = row({ name: 'MiroThinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true })
+    const sent: string[] = []
+    install([r], {
+      act: async (op) => {
+        sent.push(op)
+        if (op === 'toggle' && sent.length === 1) {
+          throw { data: { detail: 'HTTP 401: invalid api key', remedy: { kind: 'api_key', command: '' } } }
+        }
+        if (op === 'toggle') r.enabled = true
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('MiroThinker')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(note()!.querySelector('.extAgents-note-p')!.textContent).toBe(say('gui.agent.fix_api_key', { agent: 'MiroThinker', button: 'gui.retry' }))
+    expect(sheetActs()).toEqual(['gui.retry'])
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-2')
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    expect(note()!.querySelector('.extAgents-note-p')!.textContent).toBe(say('gui.agent.fix_api_key', { agent: 'MiroThinker', button: 'gui.agent.connect' }))
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(sent).toEqual(['toggle', 'update', 'toggle'])
+    expect(sheet()!.querySelector('.extAgents-fld input')).toBeNull()
+    expect(note()).toBeNull()
+  })
+
+  it('names Connect in a bare connect refusal too, once a key is typed', async () => {
+    const r = row({ name: 'MiroThinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true })
+    const sent: string[] = []
+    install([r], {
+      act: async (op) => {
+        sent.push(op)
+        if (op === 'toggle' && sent.length === 1) throw { data: { detail: 'HTTP 451: unavailable for legal reasons' } }
+        if (op === 'toggle') r.enabled = true
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('MiroThinker')
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(note()!.querySelector('.extAgents-note-t')!.textContent).toBe(say('gui.agent.bad_connect', { agent: 'MiroThinker' }))
+    expect(note()!.querySelector('.extAgents-note-p')!.textContent).toBe(say('gui.agent.said_connect', { button: 'gui.retry' }))
+    expect(note()!.querySelector('.extAgents-note-said')!.textContent).toBe('HTTP 451: unavailable for legal reasons')
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-2')
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    expect(note()!.querySelector('.extAgents-note-p')!.textContent).toBe(say('gui.agent.said_connect', { button: 'gui.agent.connect' }))
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(sent).toEqual(['toggle', 'update', 'toggle'])
+  })
+
+  /* A key typed beside an unrelated refusal is still the connect that spends
+     it, so the button says Connect rather than the Retry the press would not
+     make, and the refusal, whose retry that press will never be, leaves the
+     head and the note. */
+  it('names Connect, not Retry, once a key is typed beside a refused description, and drops that refusal', async () => {
+    const r = row({ name: 'MiroThinker', preset: 'mirothinker', kind: 'openai', configured: true, enabled: false, has_api_key: true })
+    const sent: string[] = []
+    install([r], {
+      act: async (op, _row, args) => {
+        sent.push(op)
+        if (op === 'update' && args?.description !== undefined) throw { data: { detail: 'disk full' } }
+        if (op === 'toggle') r.enabled = true
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('MiroThinker')
+    await typeInto(sheetTextarea(), 'Odd jobs')
+    await blur(sheetTextarea())
+    expect(sheetActs()).toEqual(['gui.retry'])
+    expect(note()!.querySelector('.extAgents-note-t')!.textContent).toBe('gui.agent.bad_save')
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-2')
+    expect(sheetActs()).toEqual(['gui.agent.connect'])
+    expect(note()).toBeNull()
+    expect(sheet()!.querySelector('.extAgents-led-bad')).toBeNull()
+    await click(sheet()!.querySelector('.extAgents-act button'))
+    expect(sent).toEqual(['update', 'update', 'toggle'])
+  })
+
+  it('falls back to the failed test, not to nothing, once a typed key has superseded a refused description', async () => {
+    const r = row({
+      name: 'MiroThinker',
+      preset: 'mirothinker',
+      kind: 'openai',
+      configured: true,
+      enabled: false,
+      has_api_key: true,
+      last_test_ok: false,
+      last_test_at_ms: 1,
+      last_test_detail: 'it returned nothing',
+    })
+    install([r], {
+      act: async (op, _row, args) => {
+        if (op === 'update' && args?.description !== undefined) throw { data: { detail: 'disk full' } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('MiroThinker')
+    await typeInto(sheetTextarea(), 'Odd jobs')
+    await blur(sheetTextarea())
+    expect(note()!.querySelector('.extAgents-note-t')!.textContent).toBe('gui.agent.bad_save')
+    await typeInto(sheet()!.querySelector('.extAgents-fld input'), 'sk-2')
+    expect(note()!.querySelector('.extAgents-note-t')!.firstChild!.textContent).toBe('gui.agent.st_test_bad')
+    expect(note()!.querySelector('.extAgents-note-p')!.textContent).toBe(say('gui.agent.said_test', { button: 'gui.agent.connect' }))
+    expect(note()!.querySelector('.extAgents-note-said')!.textContent).toBe('it returned nothing')
+  })
+
+  it('says to sign in, and offers nothing to run, when no command is known for the agent', async () => {
+    install([
+      row({
+        name: 'opencode',
+        preset: 'opencode',
+        last_test_ok: false,
+        last_test_at_ms: 1,
+        last_test_detail: 'it is installed but has no usable credential',
+        last_test_remedy: { kind: 'sign_in', command: '' },
+      }),
+    ])
+    await mount()
+    await openSheet('opencode')
+    expect(title()).toBe(say('gui.agent.bad_sign_in', { agent: 'opencode' }))
+    expect(lead()).toBe(say('gui.agent.fix_sign_in_bare', { agent: 'opencode', button: 'gui.agent.test_again' }))
+    expect(note()!.querySelector('.extAgents-cmd')).toBeNull()
+  })
+  it('says a download npx could not make, and gives the command that makes it with no time limit', async () => {
+    const r = row({ name: 'Claude Code', preset: 'claude_code', configured: false, enabled: false })
+    const command = 'npx -y @agentclientprotocol/claude-agent-acp@0.79.0'
+    const said = 'npx could not download it (ECONNREFUSED); check the network, the npm registry or the proxy'
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: said, remedy: { kind: 'download', command } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('Claude Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(title()).toBe(say('gui.agent.bad_download', { agent: 'Claude Code' }))
+    expect(lead()).toBe(say('gui.agent.fix_download', { agent: 'Claude Code', button: 'gui.retry' }))
+    expect(note()!.querySelector('.extAgents-cmd code')!.textContent).toBe(command)
+    expect(raw()!.textContent).toContain(said)
+    /* The card keeps its line about the agent and says the rest in a footer:
+       what failed, the short reason, and the retry. */
+    expect(lineOf('Claude Code')).toBe('gui.agent.short_claude_code')
+    expect(footOf('Claude Code')).toEqual({ k: 'gui.agent.st_connect_bad', r: 'gui.agent.why_download' })
+  })
+
+  it('offers no command for a download when the row\'s command is its own, not the preset\'s', async () => {
+    const r = row({ name: 'my-agent', preset: undefined, configured: true, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'toggle') throw { data: { detail: 'npx could not download it (ENOTFOUND)', remedy: { kind: 'download' } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('my-agent')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(lead()).toBe(say('gui.agent.fix_download_bare', { agent: 'my-agent', button: 'gui.retry' }))
+    expect(note()!.querySelector('.extAgents-cmd')).toBeNull()
+  })
+
+  it.each([
+    ['sign_in', 'gui.agent.why_sign_in'],
+    ['setup', 'gui.agent.why_setup'],
+    ['api_key', 'gui.agent.why_api_key'],
+    ['download', 'gui.agent.why_download'],
+    ['model', 'gui.agent.why_model'],
+    ['billing', 'gui.agent.why_billing'],
+    ['quota', 'gui.agent.why_quota'],
+    ['network', 'gui.agent.why_network'],
+    ['silent', 'gui.agent.why_silent'],
+    ['upgrade', 'gui.agent.why_upgrade'],
+    ['exited', 'gui.agent.why_exited'],
+    /* Sent without its two versions, a runtime fix names no Node.js, and the
+       card says what the sheet does: a launch that quit. */
+    ['runtime', 'gui.agent.why_exited'],
+  ])('puts a %s fix on the card as a line in the reader\'s words', async (kind, key) => {
+    const r = row({ name: 'Codex', preset: 'codex', configured: false, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: 'the English sentence', remedy: { kind, command: 'x' } } }
+        return [r]
+      },
+    })
+    await mount()
+    await click(buttonOf('Codex'))
+    expect(lineOf('Codex')).toBe('gui.agent.short_codex')
+    expect(footOf('Codex')).toEqual({ k: 'gui.agent.st_connect_bad', r: key })
+    expect(rowNamed('Codex').textContent).not.toContain('the English sentence')
+    expect(controlOf('Codex')).toBe('gui.retry')
+  })
+
+  /* Qwen Code's fixes are typed at its own prompt: `qwen` alone leaves the
+     reader there with nothing saying what next. So the sheet gives the way in
+     and the step as two numbered lines, each copyable -- measured on the
+     connect a free model's withdrawal refused. */
+  it('gives a fix made inside the agent as two numbered steps, each with its own copy', async () => {
+    const r = row({ name: 'Qwen Code', preset: 'qwen_code', configured: false, enabled: false })
+    const said =
+      "sub-agent 'Qwen Code' did not answer a test message, so it was not added: its model provider does not serve " +
+      'the model it is set to use'
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: said, remedy: { kind: 'model', command: 'qwen', then: '/auth' } } }
+        return [r]
+      },
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    await mount()
+    await openSheet('Qwen Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(lead()).toBe(say('gui.agent.fix_model', { agent: 'Qwen Code', button: 'gui.retry' }))
+    const steps = [...note()!.querySelectorAll('.extAgents-steps li')]
+    expect(steps.map((li) => li.firstChild!.textContent)).toEqual(['gui.agent.fix_step_run', 'gui.agent.fix_step_type'])
+    expect(steps.map((li) => li.querySelector('.extAgents-cmd code')!.textContent)).toEqual(['qwen', '/auth'])
+    await click(steps[1]!.querySelector('.extAgents-cmd button'))
+    expect(writeText).toHaveBeenCalledWith('/auth')
+    expect(raw()!.textContent).toContain(said)
+  })
+
+  it('says an agent with no provider yet is set up at its own prompt, in the same two steps', async () => {
+    install([
+      row({
+        name: 'Qwen Code',
+        preset: 'qwen_code',
+        last_test_ok: false,
+        last_test_at_ms: 1,
+        last_test_detail: 'it is installed but has no usable credential',
+        last_test_remedy: { kind: 'setup', command: 'qwen', then: '/auth' },
+      }),
+    ])
+    await mount()
+    await openSheet('Qwen Code')
+    /* The note names the press the action bar offers: a connected row's says
+       "again", since its last test is why the note is there. */
+    expect(title()).toBe(say('gui.agent.bad_setup', { agent: 'Qwen Code' }))
+    expect(lead()).toBe(say('gui.agent.fix_setup_then', { agent: 'Qwen Code', button: 'gui.agent.test_again' }))
+    expect([...note()!.querySelectorAll('.extAgents-steps code')].map((c) => c.textContent)).toEqual(['qwen', '/auth'])
+  })
+
+  it.each([
+    ['network', 'qwen hi', 'gui.agent.fix_network'],
+    ['silent', 'qwen hi', 'gui.agent.fix_silent'],
+    ['upgrade', 'npm i -g @qwen-code/qwen-code@latest', 'gui.agent.fix_upgrade'],
+    ['plan', 'https://www.kimi.com/code/#pricing', 'gui.agent.fix_plan'],
+    ['config', 'kimi doctor config', 'gui.agent.fix_config'],
+  ])('says a %s refusal and puts its one command on a line of its own', async (kind, command, key) => {
+    const r = row({ name: 'Qwen Code', preset: 'qwen_code', configured: false, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: 'the English sentence', remedy: { kind, command } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('Qwen Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(lead()).toBe(say(key, { agent: 'Qwen Code', button: 'gui.retry' }))
+    expect([...note()!.querySelectorAll('.extAgents-cmd code')].map((c) => c.textContent)).toEqual([command])
+    expect(note()!.querySelector('.extAgents-steps')).toBeNull()
+  })
+
+  it.each([
+    ['model', 'gui.agent.fix_model_bare'],
+    ['billing', 'gui.agent.fix_billing_bare'],
+    ['quota', 'gui.agent.fix_quota_bare'],
+    ['network', 'gui.agent.fix_network_bare'],
+    ['silent', 'gui.agent.fix_silent_bare'],
+    ['upgrade', 'gui.agent.fix_upgrade_bare'],
+    ['exited', 'gui.agent.fix_exited'],
+    ['plan', 'gui.agent.fix_plan_bare'],
+    ['config', 'gui.agent.fix_config_bare'],
+  ])('says a %s refusal with no command known in a sentence that ends, offering nothing to run', async (kind, key) => {
+    const r = row({ name: 'my-agent', preset: undefined, configured: true, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'toggle') throw { data: { detail: 'the English sentence', remedy: { kind, then: '/model' } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('my-agent')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(lead()).toBe(say(key, { agent: 'my-agent', button: 'gui.retry' }))
+    expect(note()!.querySelector('.extAgents-cmd')).toBeNull()
+    expect(raw()!.textContent).toContain('the English sentence')
+  })
+
+  /* Measured on Qwen Code 0.24.4 under Node 18.20.8: it dies at import with a
+     missing `node:fs` export, a sentence that names no Node.js. The fix is the
+     Node.js, so the sheet says which one ran and which one it needs. */
+  it.each([
+    ['nvm install 22 && nvm alias default 22', 'gui.agent.fix_runtime'],
+    ['', 'gui.agent.fix_runtime_bare'],
+  ])('says which Node.js ran and which one is needed, with the upgrade when one is known (%s)', async (command, key) => {
+    const r = row({ name: 'Qwen Code', preset: 'qwen_code', configured: false, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: 'the English sentence', remedy: { kind: 'runtime', command, needs: '22', found: '18.20.8' } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('Qwen Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    expect(title()).toBe(say('gui.agent.bad_runtime', { agent: 'Qwen Code' }))
+    expect(lead()).toBe(say(key, { agent: 'Qwen Code', button: 'gui.retry', needs: '22', found: '18.20.8' }))
+    expect([...note()!.querySelectorAll('.extAgents-cmd code')].map((c) => c.textContent)).toEqual(command ? [command] : [])
+    expect(footOf('Qwen Code')).toEqual({ k: 'gui.agent.st_connect_bad', r: 'gui.agent.why_runtime' })
+  })
+
+  it('says only that it quit when the versions did not come with the fix', async () => {
+    const r = row({ name: 'Qwen Code', preset: 'qwen_code', configured: false, enabled: false })
+    install([r], {
+      act: async (op) => {
+        if (op === 'connect') throw { data: { detail: 'the English sentence', remedy: { kind: 'runtime' } } }
+        return [r]
+      },
+    })
+    await mount()
+    await openSheet('Qwen Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    /* The title and the card say the same as the sentence, not a Node.js
+       they cannot name. */
+    expect(title()).toBe(say('gui.agent.bad_exited', { agent: 'Qwen Code' }))
+    expect(lead()).toBe(say('gui.agent.fix_exited', { agent: 'Qwen Code', button: 'gui.retry' }))
+    expect(footOf('Qwen Code')).toEqual({ k: 'gui.agent.st_connect_bad', r: 'gui.agent.why_exited' })
+  })
+
+  it('says a failure with no fix in the reader\'s words too, and folds the server\'s sentence', async () => {
+    const r = row({ name: 'Claude Code', preset: 'claude_code', configured: false, enabled: false })
+    const said = 'sub-agent did not answer a test message: it did not answer within 180s'
+    install([r], { refuse: (op) => (op === 'connect' ? said : null) })
+    await mount()
+    await openSheet('Claude Code')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.connect'))
+    /* No fix named, so the server's sentence is the reason, and it is shown as
+       it came rather than folded. */
+    expect(title()).toBe(say('gui.agent.bad_connect', { agent: 'Claude Code' }))
+    expect(lead()).toBe(say('gui.agent.said_connect', { button: 'gui.retry' }))
+    expect(note()!.querySelector('.extAgents-cmd')).toBeNull()
+    expect(raw()).toBeNull()
+    expect(note()!.querySelector('.extAgents-note-said')!.textContent).toBe(said)
+    expect(footOf('Claude Code')).toEqual({ k: 'gui.agent.st_connect_bad', r: 'gui.agent.why_open' })
+  })
+
+  it('says a refused disconnect did not disconnect, on the card and in the sheet', async () => {
+    const r = row({ name: 'Codex', preset: 'codex', configured: true, enabled: true })
+    install([r], { refuse: (op) => (op === 'toggle' ? 'subagent not found: Codex' : null) })
+    await mount()
+    await openSheet('Codex')
+    await click([...sheet()!.querySelectorAll('.extAgents-act button')].find((b) => b.textContent === 'gui.agent.disconnect'))
+    expect(sheetStatus()).toBe('gui.agent.st_disconnect_bad · OpenAI')
+    expect(title()).toBe(say('gui.agent.bad_disconnect', { agent: 'Codex' }))
+    expect(lead()).toBe(say('gui.agent.said_disconnect', { button: 'gui.retry' }))
+    expect(footOf('Codex')).toEqual({ k: 'gui.agent.st_disconnect_bad', r: 'gui.agent.why_open' })
+  })
+
+  it('says a refused edit was not saved, rather than that the agent did not connect', async () => {
+    const r = row({ name: 'Codex', preset: 'codex' })
+    install([r], { refuse: (op) => (op === 'model' ? 'model x is not on the menu' : null) })
+    await mount()
+    await act(async () => {
+      await store.setModel(r, 'x')
+    })
+    expect(footOf('Codex')).toEqual({ k: 'gui.agent.st_save_bad', r: 'gui.agent.why_open' })
+    await openSheet('Codex')
+    expect(title()).toBe('gui.agent.bad_save')
+    expect(lead()).toBe('gui.agent.said_save')
+    expect(note()!.querySelector('.extAgents-note-said')!.textContent).toBe('model x is not on the menu')
+  })
+})
+
+/* An agent launched through npx is absent for want of Node.js, and its own
+   installer is the wrong thing to offer: without Node.js there is no npm to run
+   it with, and an agent installed some other way still launches through npx. */
+describe('an agent that is missing npx', () => {
+  const inst = (): Element | null => sheet()?.querySelector('.extAgents-inst') ?? null
+
+  it('offers Node.js, not the agent\'s own installer', async () => {
+    install([
+      row({ name: 'Claude Code', preset: 'claude_code', configured: false, enabled: false, probe_status: 'missing', probe_missing: 'npx' }),
+    ])
+    await mount()
+    await openSheet('Claude Code')
+    expect(inst()!.querySelector('.extAgents-about')!.textContent).toBe(
+      'gui.agent.needs_node ' + JSON.stringify({ agent: 'Claude Code', button: 'gui.agent.recheck' }),
+    )
+    expect(inst()!.querySelector('.extAgents-site')!.getAttribute('href')).toBe('https://nodejs.org')
+    expect(inst()!.querySelector('.extAgents-cmd')).toBeNull()
+  })
+
+  it('still offers the agent\'s own installer when the agent is what is missing', async () => {
+    install([
+      row({ name: 'Claude Code', preset: 'claude_code', configured: false, enabled: false, probe_status: 'missing' }),
+    ])
+    await mount()
+    await openSheet('Claude Code')
+    expect(inst()!.querySelector('.extAgents-about')).toBeNull()
+    expect(inst()!.querySelector('.extAgents-cmd code')!.textContent).toBe('npm install -g @anthropic-ai/claude-code')
+  })
+})
+
+describe('the model pill', () => {
+  const choices = [
+    { value: 'v/opus', name: 'Opus', group: 'Anthropic' },
+    { value: 'v/sonnet', name: 'Sonnet', group: 'Anthropic' },
+    { value: 'o/gpt', name: 'GPT', group: 'OpenAI' },
+  ]
+  const builtin = (over: Partial<ExtAgentRow> = {}): ExtAgentRow =>
+    row({
+      name: 'Raven',
+      preset: undefined,
+      kind: 'builtin',
+      builtin: true,
+      configured: false,
+      probe_status: 'unknown',
+      own: true,
+      model_source: 'raven',
+      ...over,
+    })
+  const pill = (): HTMLButtonElement | null => sheet()?.querySelector('.extAgents-pm') ?? null
+
+  /* The write can take a minute now that the server proves a new model, and a
+     row reading "Testing" beside the model it is leaving reads as though the
+     old one is what is being tested. */
+  it('shows the model it is switching to while the write is in flight', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const r = row({ name: 'Coded', kind: 'acp', model_source: 'agent', model: 'v/opus', model_choices: choices })
+    const rows = [r]
+    install(rows, {
+      act: async (op) => {
+        if (op === 'model') await gate
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('Coded')
+    expect(pill()!.textContent).toContain('Opus')
+
+    await click(pill())
+    await click(modelButton('Sonnet'))
+
+    expect(pill()!.textContent).toContain('Sonnet')
+    await act(async () => {
+      release()
+      await gate
+    })
+  })
+
+  it('shows the model cleared while the clear is in flight', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const r = row({ name: 'Coded', kind: 'acp', model_source: 'agent', model: 'v/opus', model_choices: choices })
+    const rows = [r]
+    install(rows, {
+      act: async (op) => {
+        if (op === 'model') await gate
+        return rows
+      },
+    })
+    await mount()
+    await openSheet('Coded')
+
+    await click(sheet()!.querySelector('.extAgents-pill button[aria-label="gui.agent.model_clear"]'))
+
+    expect(pill()!.textContent).not.toContain('Opus')
+    expect(pill()!.textContent).toContain('gui.agent.model_own_default')
+    await act(async () => {
+      release()
+      await gate
+    })
+  })
+  const picker = (): HTMLElement | null => sheet()?.querySelector('.model-picker') ?? null
+  const modelButton = (label: string): HTMLButtonElement | undefined =>
+    [...(picker()?.querySelectorAll<HTMLButtonElement>('.model-picker-model') ?? [])].find((b) => b.textContent!.includes(label))
+
+  it('is not drawn for a server that has no model field', async () => {
+    install([row()])
+    await mount()
+    await openSheet('claude_code')
+    expect(sheet()!.querySelector('.extAgents-pill')).toBeNull()
+  })
+
+  it('says a third party runs on its own default, opens the menu it advertised, and sends the pick verbatim', async () => {
+    const { acts } = install([row({ model_source: 'agent', model_choices: choices })])
+    await mount()
+    await openSheet('claude_code')
+    expect(pill()!.textContent).toBe('gui.agent.model_own_default⌄')
+    expect(pill()!.disabled).toBe(false)
+    expect(sheet()!.querySelector('.extAgents-mx')).toBeNull()
+    await click(pill())
+    expect(picker()!.textContent).toContain('Anthropic')
+    expect(picker()!.textContent).toContain('OpenAI')
+    await click(modelButton('Sonnet'))
+    expect(picker()).toBeNull()
+    expect(acts).toEqual([['model', 'claude_code', { model: 'v/sonnet' }]])
+  })
+
+  it('shows the chosen model by the name the agent gave it, and clears back to the default', async () => {
+    const { acts } = install([row({ model_source: 'agent', model_choices: choices, model: 'v/sonnet' })])
+    await mount()
+    await openSheet('claude_code')
+    expect(pill()!.querySelector('.extAgents-mid')!.textContent).toBe('Sonnet')
+    expect(pill()!.querySelector('.extAgents-mpv')!.textContent).toBe('Anthropic')
+    await click(sheet()!.querySelector('.extAgents-mx'))
+    expect(acts).toEqual([['model', 'claude_code', { clear_model: true }]])
+  })
+
+  it("draws the built-in row on raven's own connected providers and sends the provider with the pick", async () => {
+    hostModels.providers = [
+      { id: 'openrouter', name: 'OpenRouter', models: ['anthropic/claude-sonnet-5'], on: true },
+      { id: 'dark', name: 'Not connected', models: ['x'], on: false },
+    ]
+    const { acts } = install([builtin()])
+    await mount()
+    await openSheet('Raven')
+    expect(pill()!.textContent).toBe('gui.agent.model_follow⌄')
+    await click(pill())
+    expect(picker()!.textContent).toContain('OpenRouter')
+    expect(picker()!.textContent).not.toContain('Not connected')
+    await click(modelButton('anthropic/claude-sonnet-5'))
+    expect(acts).toEqual([['model', 'Raven', { model: 'anthropic/claude-sonnet-5', provider: 'openrouter' }]])
+  })
+
+  it('splits a stored host id into the model and the provider it is stored under', async () => {
+    hostModels.providers = [{ id: 'openrouter', name: 'OpenRouter', models: ['anthropic/claude-sonnet-5'], on: true }]
+    install([builtin({ model: 'openrouter/anthropic/claude-sonnet-5' })])
+    await mount()
+    await openSheet('Raven')
+    expect(pill()!.querySelector('.extAgents-mid')!.textContent).toBe('anthropic/claude-sonnet-5')
+    expect(pill()!.querySelector('.extAgents-mpv')!.textContent).toBe('OpenRouter')
+    expect(sheet()!.querySelector('.extAgents-mx')).not.toBeNull()
+  })
+
+  it('matches a stored prefix to the host provider it spells with a hyphen', async () => {
+    /* `stored_model_id` writes the public spelling (`openai-codex`); `model.options`
+       keys the same provider by its config slug (`openai_codex`). */
+    hostModels.providers = [{ id: 'openai_codex', name: 'OpenAI Codex', models: ['gpt-5-codex'], on: true }]
+    install([builtin({ model: 'openai-codex/gpt-5-codex' })])
+    await mount()
+    await openSheet('Raven')
+    expect(pill()!.querySelector('.extAgents-mid')!.textContent).toBe('gpt-5-codex')
+    expect(pill()!.querySelector('.extAgents-mpv')!.textContent).toBe('OpenAI Codex')
+    await click(pill())
+    const current = picker()!.querySelector('.model-picker-model[aria-pressed="true"]')
+    expect(current?.textContent).toContain('gpt-5-codex')
+  })
+
+  it('offers no typed id: the write takes the menu exactly, and adds to nothing', async () => {
+    install([row({ model_source: 'agent', model_choices: choices })])
+    await mount()
+    await openSheet('claude_code')
+    await click(pill())
+    await typeInto(picker()!.querySelector('input'), 'brand-new-model')
+    expect(picker()!.querySelector('.model-picker-add')).toBeNull()
+  })
+
+  it('asks for the host list once when it has not landed yet', async () => {
+    hostModels.providers = []
+    hostModels.loads = 0
+    install([builtin()])
+    await mount()
+    await openSheet('Raven')
+    await click(pill())
+    expect(hostModels.loads).toBe(1)
+    expect(picker()!.textContent).toContain('gui.agent.model_no_provider')
+  })
+
+  it("wears a disabled pill for a row with no menu and none of raven's to fall back on", async () => {
+    install([
+      row({ name: 'Coder', preset: undefined, kind: 'cli', model_source: 'fixed' }),
+      row({ name: 'codex', preset: 'codex', kind: 'acp', model_source: 'agent', model_choices: [] }),
+    ])
+    await mount()
+    await openSheet('Coder')
+    expect(pill()!.textContent).toBe('gui.agent.model_managed')
+    expect(pill()!.disabled).toBe(true)
+    await openSheet('codex')
+    expect(sheetName()).toBe('codex')
+    expect(pill()!.textContent).toBe('gui.agent.model_managed')
+    expect(pill()!.disabled).toBe(true)
+  })
+
+  it("lets one of raven's own rows that advertised no menu pick from raven's providers", async () => {
+    /* The server sends `raven` for such a row: it runs on this raven's
+       catalogue, so "follows the main Raven" is where it starts, not where it
+       is stuck. */
+    hostModels.providers = [{ id: 'openrouter', name: 'OpenRouter', models: ['z-ai/glm-5.3-flash'], on: true }]
+    const { acts } = install([
+      row({ name: 'Raven-Code', preset: undefined, kind: 'acp', own: true, model_source: 'raven', model_choices: [] }),
+    ])
+    await mount()
+    await openSheet('Raven-Code')
+    expect(pill()!.textContent).toBe('gui.agent.model_follow⌄')
+    expect(pill()!.disabled).toBe(false)
+    await click(pill())
+    expect(picker()!.textContent).toContain('OpenRouter')
+    await click(modelButton('z-ai/glm-5.3-flash'))
+    expect(acts).toEqual([['model', 'Raven-Code', { model: 'z-ai/glm-5.3-flash', provider: 'openrouter' }]])
+  })
+
+  it("keeps a row's own model in its column when the catalogue no longer lists it", async () => {
+    /* The reason the ACP option builder prepends a `Current` group, and the
+       reason this picker needs the same: the stored id can leave the catalogue
+       -- the provider stopped listing it, a key was removed and re-added with a
+       shorter list -- and a picker that dropped it would open with nothing
+       marked while the pill beside it still names it. */
+    hostModels.providers = [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4-pro'], configured: ['deepseek-v4-pro'], on: true }]
+    install([
+      row({
+        name: 'Raven-Code',
+        preset: undefined,
+        kind: 'acp',
+        own: true,
+        model_source: 'raven',
+        model_choices: [],
+        model: 'deepseek/retired-v3',
+      }),
+    ])
+    await mount()
+    await openSheet('Raven-Code')
+    await click(pill())
+
+    expect(modelButton('retired-v3')).toBeDefined()
+    expect(modelButton('deepseek-v4-pro')).toBeDefined()
+  })
+
+  it("offers one of raven's own the column the composer offers, shortlist and all", async () => {
+    /* A connected vendor with nothing added yet: the composer's column falls
+       back to the registry's shortlist, and this picker read the added list
+       alone -- a vendor with four models on one and none on the other. */
+    hostModels.providers = [
+      { id: 'gemini', name: 'Gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], configured: [], on: true },
+      { id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4-pro', 'deepseek-v4-flash'], configured: ['deepseek-v4-pro'], on: true },
+    ]
+    const { acts } = install([
+      row({ name: 'Raven-Code', preset: undefined, kind: 'acp', own: true, model_source: 'raven', model_choices: [] }),
+    ])
+    await mount()
+    await openSheet('Raven-Code')
+    await click(pill())
+    expect(picker()!.textContent).toContain('Gemini')
+    expect(modelButton('gemini-2.5-pro')).toBeDefined()
+    expect(modelButton('gemini-2.5-flash')).toBeDefined()
+    await click([...picker()!.querySelectorAll('.model-picker-prov')].find((b) => b.textContent!.includes('DeepSeek')))
+    expect(modelButton('deepseek-v4-pro')).toBeDefined()
+    expect(modelButton('deepseek-v4-flash')).toBeUndefined()
+    await click(modelButton('deepseek-v4-pro'))
+    expect(acts).toEqual([['model', 'Raven-Code', { model: 'deepseek-v4-pro', provider: 'deepseek' }]])
+  })
+
+  it("draws a host id one of raven's own kept across a re-measure under the provider it is stored on", async () => {
+    /* The pick was made while the row's menu was empty and its rule `raven`;
+       the handshake behind the page has given it one since, so it reads under
+       `agent` now. The stored value did not move, and it is still what the row
+       dispatches with, so neither does the way it is drawn. */
+    hostModels.providers = [{ id: 'openrouter', name: 'OpenRouter', models: ['anthropic/claude-opus-5'], on: true }]
+    const { acts } = install([
+      row({
+        name: 'Raven-Code',
+        preset: undefined,
+        kind: 'acp',
+        own: true,
+        model_source: 'agent',
+        model_choices: choices,
+        model: 'openrouter/anthropic/claude-opus-5',
+      }),
+    ])
+    await mount()
+    await openSheet('Raven-Code')
+    expect(pill()!.querySelector('.extAgents-mid')!.textContent).toBe('anthropic/claude-opus-5')
+    expect(pill()!.querySelector('.extAgents-mpv')!.textContent).toBe('OpenRouter')
+    await click(sheet()!.querySelector('.extAgents-mx'))
+    expect(acts).toEqual([['model', 'Raven-Code', { clear_model: true }]])
+  })
+
+  it("says a product on its own key manages its own model, not that it follows", async () => {
+    /* One of raven's own, so `own` is set -- but its folder carries the chat
+       credential its launcher branches on, which is the one case where an own
+       row does not inherit the host's model at all. The server says so with
+       `fixed`, and ownership must not draw over it. */
+    hostModels.providers = [{ id: 'openrouter', name: 'OpenRouter', models: ['anthropic/claude-opus-5'], on: true }]
+    install([
+      row({ name: 'Raven-Research', preset: undefined, kind: 'acp', own: true, vendored: true, model_source: 'fixed' }),
+    ])
+    await mount()
+    await openSheet('Raven-Research')
+    expect(pill()!.textContent).toBe('gui.agent.model_managed')
+    expect(pill()!.disabled).toBe(true)
+    expect(sheet()!.querySelector('.extAgents-mx')).toBeNull()
+  })
+
+  it("does not show an endpoint's configured model as a pick, and still lets a menuless acp row clear one", async () => {
+    const { acts } = install([
+      row({ name: 'mirothinker', preset: 'mirothinker', kind: 'openai', model_source: 'fixed', model: 'miro-1' }),
+      row({ name: 'quiet', preset: undefined, kind: 'acp', model_source: 'agent', model_choices: [], model: 'v/old' }),
+    ])
+    await mount()
+    await openSheet('mirothinker')
+    expect(pill()!.textContent).toBe('gui.agent.model_managed')
+    expect(sheet()!.querySelector('.extAgents-mx')).toBeNull()
+    await openSheet('quiet')
+    expect(sheetName()).toBe('quiet')
+    expect(pill()!.querySelector('.extAgents-mid')!.textContent).toBe('v/old')
+    expect(pill()!.disabled).toBe(true)
+    await click(sheet()!.querySelector('.extAgents-mx'))
+    expect(acts).toEqual([['model', 'quiet', { clear_model: true }]])
+  })
+
+  it('lets a shipped product be tested, under its own source', async () => {
+    const { acts } = install([row({ name: 'Raven-Code', preset: undefined, kind: 'acp', vendored: true, configured: false, own: true })])
+    await mount()
+    await openSheet('Raven-Code')
+    /* Part of Raven, so testable but never disconnected. */
+    expect(sheetActs()).toEqual(['gui.agent.test_label'])
+    await click(sheet()!.querySelectorAll('.extAgents-act button')[0])
+    expect(acts.map((a) => a.slice(0, 2))).toEqual([['test', 'Raven-Code']])
+  })
+})

@@ -1,0 +1,228 @@
+.PHONY: help install install-deps fetch-resources lint lint-python lint-imports lint-deps lint-types lint-tui lint-bridge test test-python test-tui build build-tui build-bridge build-ui build-core check-commits check-pr-title check-large-files check-source-language check-core-wheel fetch-templates verify-templates beta ci clean coverage coverage-shard coverage-combine coverage-summary coverage-diff coverage-ratchet coverage-baseline-check coverage-baseline-candidate docker-build docker-up docker-down docs-serve docs-build
+
+PYTHON ?= python3
+PYTHON_VERSION ?= 3.12
+PYTHON_LINT_TARGETS ?= raven evolver agents plugins-dist tests scripts docs-site
+COMMIT_RANGE ?= origin/main..HEAD
+COVERAGE_BASE_REF ?= origin/main
+# Required coverage percentage for executable lines changed by a PR.
+COVERAGE_DIFF_THRESHOLD ?= 90
+# Allowed line or branch regression in percentage points to absorb rounding noise.
+COVERAGE_RATCHET_TOLERANCE ?= 0.05
+DOCKER_IMAGE ?= raven:local
+COVERAGE_REPORT_ARGS = --cov=raven --cov=raven_everos --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=json --cov-report=html
+# One slice of the suite, K/N; the shard writes its .coverage data and no report.
+COVERAGE_SHARD ?= 1/1
+# Without an explicit encoding= Python opens text files in the locale encoding.
+# On a GBK-locale Windows checkout, the suite would read and write cp936
+# wherever a test forgot encoding=. Exported, so every recipe runs in UTF-8
+# mode; a bare `uv run pytest` does not go through this file, and
+# tests/conftest.py refuses that run instead.
+export PYTHONUTF8 := 1
+# Extra pytest flags for a shard; CI passes --idle-ceiling-strict, a local run stays warning-only.
+PYTEST_ARGS ?=
+COVERAGE_DATA_ARGS = --cov=raven --cov=raven_everos --cov-branch --cov-report=
+# Where the shards' .coverage.* files are gathered before they are combined.
+COVERAGE_DATA_DIR ?= coverage-data
+
+help:
+	@echo "Targets:"
+	@echo "  install        Install Python deps, Node deps, git hooks and the fetched resources"
+	@echo "  fetch-resources Download the tokenizer dictionary and the deepdoc models (idempotent)"
+	@echo "  install-deps   Install Python deps only (CI uses this)"
+	@echo "  lint           Run Python, TUI, and bridge lint gates"
+	@echo "  lint-python    Ruff check + format gate over raven/, evolver/, tests/, scripts/"
+	@echo "  lint-tui       TypeScript lint + RPC drift check"
+	@echo "  lint-bridge    Bridge package build check"
+	@echo "  test           Run focused Python checks and TUI tests"
+	@echo "  coverage       Run the default Python suite with line and branch coverage"
+	@echo "  coverage-shard Run slice COVERAGE_SHARD (K/N) of the suite, writing .coverage data only"
+	@echo "  coverage-combine Combine the shards' .coverage.* files in COVERAGE_DATA_DIR (CI downloads them there) into coverage.json and coverage.xml"
+	@echo "  coverage-diff  Check changed executable lines against COVERAGE_BASE_REF"
+	@echo "  coverage-ratchet Check total line and branch coverage against the baseline"
+	@echo "  coverage-baseline-check Ensure a proposed baseline never lowers the target branch"
+	@echo "  check-commits  Validate Conventional Commit subjects"
+	@echo "  check-pr-title Validate the PR title in PR_TITLE"
+	@echo "  check-large-files Validate PR files avoid blocked assets and size bloat"
+	@echo "  check-source-language Validate PR-added lines stay English outside the exemption zones"
+	@echo "  check-core-wheel  Build the raven-core wheel and smoke it in a clean venv"
+	@echo "  fetch-templates Re-pull the deck engine's ten bundled templates over the tracked copies (maintainers; needs GITLAB_TOKEN)"
+	@echo "  verify-templates Hash the tracked deck templates against their pins"
+	@echo "  docker-build   Build the container image (page + engine + nginx)"
+	@echo "  docker-up      Build if needed and start the stack from docker/"
+	@echo "  docker-down    Stop the stack (the data volume is kept)"
+	@echo "  beta           Build this checkout and publish it to the beta channel"
+	@echo "  ci             Run the local CI gate"
+	@echo "  clean          Remove generated caches and build output"
+
+install-deps:
+	uv sync --frozen --python $(PYTHON_VERSION) --extra dev --dev
+
+install: install-deps fetch-resources
+	uv run --frozen --python $(PYTHON_VERSION) pre-commit install
+	uv run --frozen --python $(PYTHON_VERSION) pre-commit install --hook-type commit-msg
+	npm ci
+	npm ci --prefix ui-web
+	npm ci --prefix ui-tui
+	npm ci --prefix bridge
+
+# The word dictionary, the nltk corpora beside it and the deepdoc vision
+# models: ~160 MB that cannot live in git (AGENTS.md section 7 caps a file at
+# 1 MiB). Idempotent, so `make install` can call it every time.
+#
+# `--optional` on purpose: a developer behind a firewall that cannot reach
+# huggingface should still get a working checkout. What they lose is Chinese
+# segmentation and PDF layout, and both say so when asked rather than failing
+# the install that would have told them nothing.
+fetch-resources:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/fetch_resources.py --optional
+
+lint: lint-python lint-imports lint-deps lint-types lint-ui lint-tui lint-bridge
+
+lint-python:
+	uv run --frozen --python $(PYTHON_VERSION) --extra dev ruff check $(PYTHON_LINT_TARGETS)
+	uv run --frozen --python $(PYTHON_VERSION) --extra dev ruff format --check $(PYTHON_LINT_TARGETS)
+
+lint-deps:
+	uv run --frozen --python $(PYTHON_VERSION) --all-extras deptry raven
+
+lint-imports:
+	uv run --frozen --python $(PYTHON_VERSION) lint-imports
+
+# Call correctness, not typing strictness -- which rules are on, and the backlog
+# behind each one that is off, are in [tool.ty] in pyproject.toml. The target
+# roster is read from PYTHON_LINT_TARGETS so it cannot drift from ruff's; tests
+# are filtered out there because they are executed, and the gate is for code
+# that is not. docs-site is filtered out for a different reason: its build
+# hooks import mkdocs, which install-deps does not install, so ty would read
+# a resolvable import as a missing module. ruff still covers that tree.
+lint-types:
+	uv run --frozen --python $(PYTHON_VERSION) --all-extras ty check $(filter-out tests docs-site,$(PYTHON_LINT_TARGETS))
+
+lint-ui:
+	npm run gen:check --prefix ui-web
+	npm run lint --prefix ui-web
+	npm run type-check --prefix ui-web
+
+lint-tui:
+	npm run lint --prefix ui-tui
+	npm run lint:rpc --prefix ui-tui
+	npm run lint:i18n --prefix ui-tui
+	npm run type-check --prefix ui-tui
+
+lint-bridge:
+	npm run build --prefix bridge
+
+test: test-python test-ui test-tui
+
+test-ui:
+	npm test --prefix ui-web
+
+test-python:
+	uv run --frozen --python $(PYTHON_VERSION) --all-extras pytest -q
+
+coverage:
+	TERM=dumb uv run --frozen --python $(PYTHON_VERSION) --all-extras pytest -q $(COVERAGE_REPORT_ARGS)
+
+coverage-shard:
+	TERM=dumb uv run --frozen --python $(PYTHON_VERSION) --all-extras pytest -q --shard $(COVERAGE_SHARD) --durations=25 $(PYTEST_ARGS) $(COVERAGE_DATA_ARGS)
+
+coverage-combine:
+	uv run --frozen --python $(PYTHON_VERSION) coverage combine --keep $(COVERAGE_DATA_DIR)
+	uv run --frozen --python $(PYTHON_VERSION) coverage json
+	uv run --frozen --python $(PYTHON_VERSION) coverage xml
+
+coverage-summary:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/coverage_gate.py summary
+
+coverage-diff:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/coverage_gate.py diff --base-ref $(COVERAGE_BASE_REF) --threshold $(COVERAGE_DIFF_THRESHOLD)
+
+coverage-ratchet:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/coverage_gate.py ratchet --tolerance $(COVERAGE_RATCHET_TOLERANCE)
+
+coverage-baseline-check:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/coverage_gate.py baseline-check --base-ref $(COVERAGE_BASE_REF)
+
+coverage-baseline-candidate:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/coverage_gate.py baseline
+
+test-tui:
+	npm test --prefix ui-tui
+
+build: build-tui build-bridge build-ui
+
+build-tui:
+	npm run build --prefix ui-tui
+
+build-ui:
+	npm ci --prefix ui-web
+	npm run --prefix ui-web build
+	# Through uv like every other python line here, rather than through
+	# whatever `python3` the shell resolves. The assembler writes the page
+	# with `Path.write_text(newline="")`, which is 3.10 and later; a stock
+	# macOS resolves `python3` to 3.9 and the build fails on a keyword
+	# argument, which reads as a defect in the script rather than as the
+	# wrong interpreter.
+	uv run --frozen --python $(PYTHON_VERSION) python ui-web/build.py
+
+build-bridge:
+	npm run build --prefix bridge
+
+build-core:
+	uv run --frozen --python $(PYTHON_VERSION) python scripts/build_core_wheel.py
+
+check-commits:
+	npx commitlint --from origin/main --to HEAD --config commitlint.config.cjs
+	PYTHONPATH=. uv run --frozen --python $(PYTHON_VERSION) --extra dev python scripts/check_commit_messages.py $(COMMIT_RANGE)
+
+check-pr-title:
+	PYTHONPATH=. uv run --frozen --python $(PYTHON_VERSION) --extra dev python scripts/check_pr_title.py
+
+check-large-files:
+	PYTHONPATH=. uv run --frozen --python $(PYTHON_VERSION) --extra dev python scripts/check_large_files.py $(COMMIT_RANGE)
+
+check-source-language:
+	PYTHONPATH=. uv run --frozen --python $(PYTHON_VERSION) --extra dev python scripts/check_source_language.py $(COMMIT_RANGE)
+
+# Out of the default pytest scope by norecursedirs (it builds a wheel and a
+# venv); this target is what CI and `make ci` run so the artifact stays honest.
+check-core-wheel:
+	uv run --frozen --python $(PYTHON_VERSION) pytest tests/integration/test_kernel_wheel_smoke.py -q -o addopts=""
+
+# The image builds the page and the Python environment itself, so these need
+# no prior `make build`. Compose reads docker/.env for ports and extras.
+docker-build:
+	docker build -t $(DOCKER_IMAGE) .
+
+docker-up:
+	cd docker && docker compose up --build $(COMPOSE_ARGS)
+
+docker-down:
+	cd docker && docker compose down
+
+beta:
+	PYTHONPATH=. uv run python scripts/publish_beta.py $(BETA_ARGS)
+
+ci: lint test build check-core-wheel
+
+clean:
+	rm -rf .pytest_cache .ruff_cache .uv-cache .mypy_cache htmlcov coverage.xml coverage.json coverage-baseline-candidate.json dist build
+	rm -rf ui-tui/dist ui-tui/coverage ui-tui/.vitest-cache ui-tui/packages/hermes-ink/dist
+	rm -rf bridge/dist
+	rm -rf ui-web/dist
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# Not an install step: the ten templates are tracked, and a clone already has
+# them. This lands a fresh cut over them, to be committed with rewritten pins.
+fetch-templates:
+	python3 plugins-dist/ppt-engine/fetch_templates.py
+
+verify-templates:
+	python3 plugins-dist/ppt-engine/fetch_templates.py --verify
+
+docs-serve:
+	uv run --frozen --python $(PYTHON_VERSION) --group docs mkdocs serve -f docs-site/mkdocs.yml
+
+docs-build:
+	uv run --frozen --python $(PYTHON_VERSION) --group docs mkdocs build -f docs-site/mkdocs.yml --strict

@@ -1,0 +1,1122 @@
+"""Typer subcommand: `raven tui` — launch the Ink+React TUI subprocess.
+
+Bootstrap stage (L2-α `tui-bootstrap`): pure Node spawn, no IPC.
+IPC stage (`tui-ipc-bridge`): we additionally open two POSIX
+pipes (request + notify), pass them to the Node child as fd 3 / fd 4, and
+run a `RpcServer` in an asyncio task that handles `system.hello` (5 s
+handshake timeout → exit 3) plus subsequent business RPC methods.
+
+Exit codes (in addition to bootstrap's 0/1/2):
+    3  — RPC handshake timeout / failure
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+from pathlib import Path
+from typing import Optional, Tuple
+
+import typer
+
+from raven.cli._helpers import report_memory_write_outcome
+from raven.cli._log_file import _strip_tty_stream_handlers, redirect_loguru_to_file
+from raven.i18n import t
+from raven.rpc.cron_events import build_cron_callback_spine, fanout_cron_missed
+from raven.utils import asyncio_runner as bounded_asyncio
+
+tui_app = typer.Typer(name="tui", help="Launch Raven native TUI (Ink+React).")
+
+# Path to the ui-tui/ source tree, relative to this file:
+# raven/cli/tui_commands.py -> ../../../ui-tui/. Only the `--dev` path (tsx from
+# source) needs this; it requires src/ + node_modules and is absent from wheels.
+_UI_TUI_DIR = Path(__file__).resolve().parent.parent.parent / "ui-tui"
+
+# Packaged location of the prebuilt, self-contained bundle inside an installed
+# wheel: raven/cli/tui_commands.py -> ../ui-tui/dist/entry.js (i.e.
+# raven/ui-tui/dist/entry.js). pyproject force-includes ui-tui/dist here so a
+# `pip`/`uv tool install` ships the TUI without a source checkout.
+_PACKAGED_DIST_ENTRY = Path(__file__).resolve().parent.parent / "ui-tui" / "dist" / "entry.js"
+
+_MIN_NODE_VERSION = (22, 0, 0)
+
+TERMINAL_SURFACE = "tui"
+"""What this host calls itself in a trace. See ``raven.tracing.set_surface``."""
+
+
+#: Read by the TUI when it launches a raven command of its own (``provider
+#: login``, ``onboard``). Named here because the child must be this install.
+_RAVEN_BIN_ENV = "RAVEN_BIN"
+
+
+def own_entry_point() -> Optional[Path]:
+    """The ``raven`` executable that started this process, if it can be named.
+
+    A console script is invoked by path, so ``argv[0]`` is the answer whenever
+    there is one; ``python -m raven`` leaves something else there, and the
+    executable's own directory holds the script in that case.
+    """
+    argv0 = Path(sys.argv[0])
+    if argv0.name.startswith("raven") and argv0.is_file():
+        return argv0.resolve()
+
+    sibling = Path(sys.executable).with_name("raven.exe" if os.name == "nt" else "raven")
+
+    return sibling if sibling.is_file() else None
+
+
+def child_env() -> dict[str, str]:
+    """Environment for the Node child, naming the raven it must call back into.
+
+    The TUI runs ``raven provider login`` for the user, and that writes a
+    credential. Resolved through PATH it can be a different install than the one
+    running -- one whose idea of where credentials live is its own, so the login
+    reports success and this process still sees an unauthenticated provider.
+
+    An explicit ``RAVEN_BIN`` is left alone: a developer pointing it somewhere
+    means it.
+    """
+    env = os.environ.copy()
+    if not env.get(_RAVEN_BIN_ENV) and (entry := own_entry_point()):
+        env[_RAVEN_BIN_ENV] = str(entry)
+    # The dist bundle historically chose its react-reconciler build from
+    # NODE_ENV at runtime, and an unset one meant the development build --
+    # whose per-commit performance.measure() entries accumulate on Node's
+    # timeline until the OS kills the session (2026-08-31/09-01). Newer
+    # bundles bake production in at build time; this covers stale ones.
+    # An explicit NODE_ENV is left alone: a developer setting it means it.
+    env.setdefault("NODE_ENV", "production")
+
+    return env
+
+
+def resolve_dist_entry() -> Optional[Path]:
+    """Locate the prebuilt ``entry.js`` bundle for production (non-dev) launch.
+
+    Tries, in order:
+      1. The packaged copy inside the installed wheel (``raven/ui-tui/dist``).
+      2. The source-tree copy a developer built locally (``ui-tui/dist``).
+
+    The bundle is self-contained (esbuild ``bundle: true``), so no sibling
+    ``node_modules`` is needed — only a Node runtime. Returns the first path
+    that exists, or ``None`` if neither does.
+    """
+    for candidate in (_PACKAGED_DIST_ENTRY, _UI_TUI_DIR / "dist" / "entry.js"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _stdout_isatty() -> bool:
+    """Whether stdout is an interactive TTY (seam for the onboarding gate test;
+    CliRunner swaps ``sys.stdout`` for a non-TTY buffer)."""
+    return sys.stdout.isatty()
+
+
+def _is_windows() -> bool:
+    """Whether the host is Windows. A seam so tests can exercise the Windows
+    runtime-layout branch by patching this, instead of patching os.name — the
+    latter makes pathlib instantiate an unusable WindowsPath on POSIX hosts."""
+    return os.name == "nt"
+
+
+def find_node() -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
+    """Find a usable node executable (>= 22).
+
+    Returns (path, version_tuple) or (None, None) if not found.
+    """
+    # Priority 1: RAVEN_NODE env var — explicit override, NO fallback.
+    # When the user sets RAVEN_NODE they are forcing a specific binary;
+    # if it is missing or unusable we must NOT silently fall back to
+    # venv/PATH (that would mask misconfiguration).
+    candidates: list[str] = []
+    if env_node := os.environ.get("RAVEN_NODE"):
+        candidates.append(env_node)
+    else:
+        # Priority 2: active venv
+        if venv := os.environ.get("VIRTUAL_ENV"):
+            if _is_windows():
+                candidates.append(str(Path(venv) / "Scripts" / "node.exe"))
+            else:
+                candidates.append(str(Path(venv) / "bin" / "node"))
+
+        # Priority 3: PATH — enumerate EVERY node on PATH, not just the first.
+        # shutil.which returns only the first hit, so a stale < 22 node earlier
+        # on PATH (e.g. an old /usr/local/bin/node or a version-manager shim)
+        # would otherwise shadow a newer one later on PATH (e.g. a Homebrew
+        # node 26). The version filter below then picks the first usable one.
+        exe = "node.exe" if _is_windows() else "node"
+        seen_path: set[str] = set()
+        for path_dir in os.environ.get("PATH", "").split(os.pathsep):
+            if not path_dir:
+                continue
+            cand = os.path.join(path_dir, exe)
+            if cand not in seen_path and os.path.isfile(cand):
+                seen_path.add(cand)
+                candidates.append(cand)
+
+        # Priority 4: Raven-managed private runtime installed by the one-line
+        # installer into ~/.raven/runtime/. This is the zero-config fallback so
+        # a user who has no system Node still gets a working `raven tui` after
+        # the installer provisioned a private Node here. Glob to tolerate the
+        # versioned dir name. The on-disk layout differs by OS: POSIX tarballs
+        # nest the binary under bin/ (node-v22.x.y-darwin-arm64/bin/node) while
+        # the Windows zip puts node.exe at the top level
+        # (node-v22.x.y-win-x64/node.exe) — install.ps1 provisions the latter.
+        from raven.config.loader import raven_home
+
+        runtime_root = raven_home() / "runtime"
+        if runtime_root.is_dir():
+            if _is_windows():
+                direct = runtime_root / "node" / "node.exe"
+                if direct.exists():
+                    candidates.append(str(direct))
+                candidates.extend(str(p) for p in sorted(runtime_root.glob("node-*/node.exe")))
+            else:
+                direct = runtime_root / "node" / "bin" / "node"
+                if direct.exists():
+                    candidates.append(str(direct))
+                candidates.extend(str(p) for p in sorted(runtime_root.glob("node-*/bin/node")))
+
+    # Return the first candidate that meets the minimum, in priority order.
+    # Track the highest below-minimum candidate seen so that when nothing
+    # qualifies the caller can still report the real version ("found 20.20.1,
+    # need >= 22") instead of a bare "not found".
+    best_below_min: Optional[Tuple[str, Tuple[int, int, int]]] = None
+    for node_path in candidates:
+        if not Path(node_path).exists():
+            continue
+        try:
+            proc = subprocess.run(
+                [node_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            )
+            match = re.match(r"v(\d+)\.(\d+)\.(\d+)", proc.stdout.strip())
+            if not match:
+                continue
+            version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            continue
+        if version >= _MIN_NODE_VERSION:
+            return (node_path, version)
+        if best_below_min is None or version > best_below_min[1]:
+            best_below_min = (node_path, version)
+
+    return best_below_min if best_below_min is not None else (None, None)
+
+
+def run_subprocess(
+    node_path: str,
+    args: list[str],
+    cwd: Path,
+    forward_signals: bool = True,
+) -> int:
+    """Spawn node subprocess, inherit stdio, forward signals, return exit code."""
+    proc = subprocess.Popen(
+        [node_path, *args],
+        cwd=str(cwd),
+        stdin=None,
+        stdout=None,
+        stderr=None,
+    )
+
+    if forward_signals:
+
+        def _forward(sig, _frame):
+            try:
+                proc.send_signal(sig)
+            except ProcessLookupError:
+                pass
+
+        signal.signal(signal.SIGINT, _forward)
+        signal.signal(signal.SIGTERM, _forward)
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, _forward)
+
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        # Already forwarded above; wait briefly for graceful exit.
+        try:
+            return proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# tui-ipc-bridge: RPC handshake + asyncio server loop
+# ---------------------------------------------------------------------------
+#
+# Handshake budget: spec 5.1 — Node must send `system.hello` within 5 s of
+# spawn or the parent aborts with exit 3.
+_RPC_HANDSHAKE_TIMEOUT_S: float = 5.0
+_RPC_HANDSHAKE_EXIT_CODE: int = 3
+
+# The production transport is a TCP loopback socket bound to
+# 127.0.0.1:<ephemeral> rather than a per-session unix domain socket,
+# because Windows has no usable AF_UNIX in CPython and
+# cannot os.dup a socket fd. The Node child connects to the host:port exported
+# in RAVEN_RPC_SOCKET and authenticates with the RAVEN_RPC_TOKEN shared secret
+# (loopback is reachable by any local process, unlike an AF_UNIX file guarded
+# by 0600 perms, so the token restores the trust boundary).
+_RPC_SOCKET_ENV: str = "RAVEN_RPC_SOCKET"
+_RPC_TOKEN_ENV: str = "RAVEN_RPC_TOKEN"  # noqa: S105 -- env var name, not a secret
+
+
+def _suppress_noisy_watchers() -> None:
+    """Raise file-watcher loggers to INFO so ``watchfiles`` per-poll DEBUG
+    chatter ('rust notify timeout') stays out of the log sink."""
+    import logging as _stdlib_logging
+
+    for _name in ("watchfiles", "watchfiles.main", "watchfiles.watcher", "watchdog", "notify"):
+        _stdlib_logging.getLogger(_name).setLevel(_stdlib_logging.INFO)
+
+
+def _drop_watcher_spam(record: dict) -> bool:
+    """Sink filter dropping watchfiles poll-timeout chatter (TUI-only, so the
+    shared gateway sink is unaffected)."""
+    return "rust notify timeout" not in record["message"]
+
+
+def _build_agent_loop(workspace: str | None = None, home: str | None = None):
+    """The TUI's loop factory: the rpc stack's :func:`build_agent_loop`, kept
+    under this name so the launcher and its tests address it here."""
+    from raven.rpc.bootstrap import build_agent_loop
+
+    return build_agent_loop(workspace=workspace, home=home)
+
+
+async def _run_rpc_server_until_done(
+    conn: socket.socket,
+    auth_token: str,
+    handshake_deadline_s: float,
+    proc_done: asyncio.Event,
+    workspace: str | None = None,
+    home: str | None = None,
+) -> bool:
+    """Run RpcServer until the child exits or we abort on handshake timeout.
+
+    Returns True if handshake succeeded (system.hello was received within the
+    deadline); False if it timed out.
+    """
+    # Declared before anything can emit a span. The terminal and the served page
+    # share one channel on purpose, so a trace needs this to say which of them
+    # produced it (see raven.tracing.set_surface).
+    from raven.tracing import set_surface
+
+    set_surface(TERMINAL_SURFACE)
+
+    # Lazy import: keeps tui_commands importable without pulling rpc on
+    # users who never touch the TUI (e.g. CLI-only workflows).
+    from raven.cli._console_feature import register_console_feature
+    from raven.rpc.approval_broker import ApprovalBroker
+    from raven.rpc.confirm_broker import ConfirmBroker
+    from raven.rpc.dispatcher import Dispatcher
+
+    register_console_feature()
+    from raven.rpc.methods import register_aligned_methods_except_system
+    from raven.rpc.methods.system import (
+        system_hello as _orig_hello,
+    )
+    from raven.rpc.methods.system import (
+        system_ping,
+        system_upgrade,
+        system_version,
+    )
+    from raven.rpc.question_broker import QuestionBroker
+    from raven.rpc.server import RpcServer
+    from raven.rpc.spine import build_rpc_spine, make_dag_progress_sink
+    from raven.rpc.subscriptions import SubscriptionEmitter
+
+    handshake_done = asyncio.Event()
+
+    async def hello_then_signal(params: dict) -> dict:
+        result = await _orig_hello(params)
+        handshake_done.set()
+        return result
+
+    dispatcher = Dispatcher()
+    # Server is constructed before umbrella registration so the
+    # SubscriptionEmitter can bind its send_frame method as the notification
+    # sink. serve_forever() is still started LAST (after all handlers are
+    # registered) — RpcServer.send_frame raises until serve_forever has set
+    # up the write transport, but emitter only emits after a subscribe call,
+    # which can only happen post-handshake / post-serve.
+    server = RpcServer(dispatcher=dispatcher, sock=conn, auth_token=auth_token)
+    emitter = SubscriptionEmitter(send_frame=server.send_frame)
+    # Prompt brokers share the gateway's send_frame sink but retain separate
+    # semantics. Shell approval is not a conversational confirmation: it binds
+    # one exact command to one turn, waits for a person rather than a clock, and
+    # always fails closed when the transport disappears.
+    confirm_broker = ConfirmBroker(send_frame=server.send_frame)
+    approval_broker = ApprovalBroker(send_frame=server.send_frame)
+    # QuestionBroker shares the same send_frame sink: the ask_user tool emits a
+    # clarify.request and awaits clarify.respond, mirroring ConfirmBroker.
+    question_broker = QuestionBroker(send_frame=server.send_frame)
+
+    # Wire AgentLoop for turn.send streaming. _build_agent_loop
+    # mirrors the minimal subset of `raven agent` boilerplate needed to
+    # serve chat turns from a TUI subprocess (no sentinel/cron — those are
+    # the gateway's responsibility). Eager build at server bring-up so a
+    # bad provider config surfaces immediately rather than on first chat.
+    # An init crash is latched into ``build_error`` and re-raised by the
+    # factory closure on first ``turn.send``; ``_spawn_agent_loop_task`` emits
+    # the typed -32603 error event to the UI through the subscription emitter.
+    from raven.rpc.errors import RpcError
+
+    agent_loop = None
+    build_error: RpcError | None = None
+    try:
+        agent_loop = _build_agent_loop(workspace=workspace, home=home)
+    except RpcError as e:
+        build_error = e
+
+    # Late-bind the QuestionBroker into the tools that ask the user mid-turn, now
+    # that the loop (and its tool registry) exists; the broker was built up-front.
+    if agent_loop is not None:
+        if (ask_tool := agent_loop.tools.get("ask_user")) is not None and hasattr(ask_tool, "set_broker"):
+            ask_tool.set_broker(question_broker)
+        # Fan run_subagent_dag progress to the turn's conversation so the TUI can
+        # draw the graph. Goes through the loop (not the tool) so a DAG tool
+        # registered later by a mid-session config apply inherits the sink too.
+        agent_loop.set_dag_progress_sink(make_dag_progress_sink(emitter))
+        # And the seam a delegated result re-enters the conversation at, so the
+        # announce's reply does not arrive as an assistant turn nobody asked.
+        agent_loop.subagents.set_delivery_sink(emitter.emit)
+        # Backfill the acp capability snapshots at startup, exactly as
+        # build_rpc_stack does for the served page: an acp row's statefulness
+        # is read from its snapshot, and with no writer on this path a fresh
+        # install reads every acp agent stateless and the /new-instance picker
+        # hides them. This server is hand-wired rather than mounted, so the
+        # bootstrap hook never runs here.
+        from raven.agent.subagent.probe import schedule_snapshot_verification
+
+        schedule_snapshot_verification(agent_loop.subagents)
+
+    def _agent_loop_factory():
+        if agent_loop is not None:
+            return agent_loop
+        if build_error is not None:
+            raise build_error
+        return None
+
+    # Wire the spine turn path: build_rpc_spine assembles the Scheduler + delivery hub
+    # + streaming sink the turn.* handlers submit onto. Only when an agent loop
+    # exists — otherwise turn.send surfaces the build error / -32008 itself.
+    from raven.rpc.methods import turn as turn_module
+
+    turn_scheduler = None
+    turn_ids: dict[str, str] = {}
+    # Owned here, not by the spine, because two collaborators need the same map:
+    # turn.send binds a turn's addressee into it and the spine's outlet/sink read
+    # it back to tag that turn's events (see build_rpc_spine).
+    direct_targets: dict[str, dict[str, str]] = {}
+    turn_teardown = None
+    if agent_loop is not None:
+        from raven.core.cron_stack import make_on_cron_job
+
+        # Build the spine before wiring cron: a reminder submits a CRON turn
+        # through this scheduler, captured non-streaming and read back via
+        # cron_readback so the wrapper can fan it out as a cron.delivered event.
+        cron_readback: dict[str, str] = {}
+        turn_scheduler, _turn_hub, turn_ids, turn_teardown = build_rpc_spine(
+            agent_loop,
+            emitter,
+            on_turn_end=turn_module.clear_active,
+            direct_targets=direct_targets,
+            readback_texts=cron_readback,
+            approval_responder=approval_broker,
+        )
+        # Subagent result re-injection submits a SUBAGENT-origin turn.
+        agent_loop.subagents.set_submit(turn_scheduler.submit)
+        # Cron reminders run as CRON turns through the scheduler; the wrapper fans
+        # the reply out as cron.delivered to every session. on_job must be wired
+        # before cron.start() so an immediately-firing job has its callback.
+        if agent_loop.cron_service is not None:
+            base_on_cron = make_on_cron_job(
+                submit=turn_scheduler.submit,
+                readback_texts=cron_readback,
+                default_channel="tui",
+                cron_service=agent_loop.cron_service,
+            )
+            agent_loop.cron_service.on_job = build_cron_callback_spine(
+                base_on_cron, emitter, direct_targets=direct_targets
+            )
+            await agent_loop.cron_service.start()
+            # start() dropped past-due one-shot reminders on this runner's
+            # partition; surface them as one cron.missed startup notice.
+            if agent_loop.cron_service.last_startup_drops:
+                await fanout_cron_missed(emitter, drops=agent_loop.cron_service.last_startup_drops)
+
+    # Wrap system.hello to latch the handshake event; the umbrella below
+    # registers everything else (cli.dispatch + setup.status + reload.mcp +
+    # config.* + session.* + terminal.* + stubs + slash routing + turn.*).
+    # Keeping production aligned with the umbrella means any future
+    # register_*_methods helper added in raven/rpc/methods/__init__.py
+    # is picked up automatically — no more registration drift where new
+    # handlers worked in the demo runner but returned -32601 in `raven tui`.
+    dispatcher.register("system.hello", hello_then_signal)
+    dispatcher.register("system.ping", system_ping)
+    dispatcher.register("system.version", system_version)
+    # Registered here too, though it only acts inside `raven serve`: the handler
+    # answers with a typed "not_serving" refusal the client can show, which is
+    # more use than the -32601 an unregistered name would give, and it keeps
+    # this path in lock-step with the umbrella (see the drift test).
+    dispatcher.register("system.upgrade", system_upgrade)
+    register_aligned_methods_except_system(
+        dispatcher,
+        emitter=emitter,
+        agent_loop_factory=_agent_loop_factory,
+        approval_broker=approval_broker,
+        confirm_broker=confirm_broker,
+        question_broker=question_broker,
+        scheduler=turn_scheduler,
+        turn_ids=turn_ids,
+        direct_targets=direct_targets,
+        build_error=build_error,
+    )
+
+    serve_task = asyncio.create_task(server.serve_forever())
+    backend_start_task: "asyncio.Task | None" = None
+
+    try:
+        # Wait until EITHER handshake completes OR deadline expires OR child exits.
+        done, pending = await asyncio.wait(
+            {
+                asyncio.create_task(handshake_done.wait()),
+                asyncio.create_task(proc_done.wait()),
+            },
+            timeout=handshake_deadline_s,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+        # Drain cancelled tasks to suppress warnings.
+        for t in pending:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if not handshake_done.is_set():
+            return False
+        # Handshake OK — start memory backend in background (may spawn
+        # EverOS server, up to 30s) so it doesn't block first render.
+        # Contributed background services: the tui is a resident host, and it
+        # assembles its rpc server by hand rather than through build_rpc_stack,
+        # so it starts them itself.
+        if agent_loop is not None:
+            try:
+                await agent_loop.start_plugin_services()
+            except Exception:
+                from loguru import logger as _logger
+
+                _logger.exception("tui: plugin services failed to start; continuing without them")
+        if agent_loop is not None and agent_loop.backend is not None:
+
+            async def _start_backend() -> None:
+                try:
+                    await agent_loop.backend.start()  # type: ignore[union-attr]
+                except Exception:
+                    from loguru import logger as _logger
+
+                    _logger.exception(
+                        "tui: memory backend start failed; continuing with degraded memory path",
+                    )
+                _strip_tty_stream_handlers()
+
+            # Held, not dropped: the event loop keeps only a weak reference to
+            # a bare task (the GC hazard the MCP event bridge already guards
+            # against), and the teardown below must be able to settle a start
+            # still spawning EverOS before it drains and stops the backend.
+            backend_start_task = asyncio.create_task(_start_backend())
+
+        await proc_done.wait()
+        return True
+    finally:
+        # Release all pending UI waits before transport teardown. Approval
+        # cancellation is always denial, preserving fail-closed behavior on a
+        # disconnect; ordinary confirms retain their configured default.
+        confirm_broker.cancel_all()
+        approval_broker.cancel_all()
+        if agent_loop is not None and agent_loop.cron_service is not None:
+            try:
+                agent_loop.cron_service.stop()
+            except Exception:
+                pass
+        # Sub-agents go first: before the spine seals, and before the memory
+        # drain in particular. Sealing is the first thing the turn teardown
+        # does, and a run that finishes after it announces its result into a
+        # submit that refuses new turns -- the only route that result has back
+        # to its conversation. And a run still going can hand the backend
+        # another write, so draining while they live is draining into a queue
+        # that is still being filled. Stopping them costs a signal and a
+        # bounded wait, where the drain costs its whole budget.
+        try:
+            from raven.acp_client.client import begin_drain
+
+            begin_drain()
+            if agent_loop is not None:
+                await agent_loop.subagents.cancel_all(reason="the TUI exited")
+        except Exception:
+            from loguru import logger as _logger
+
+            _logger.exception("tui: cancelling in-flight sub-agents failed; continuing shutdown")
+        if turn_teardown is not None:
+            try:
+                await turn_teardown()
+            except Exception:
+                pass
+        # Contributed services stop before the stores drain -- producers
+        # before drains, the order dispose follows.
+        if agent_loop is not None:
+            try:
+                await agent_loop.stop_plugin_services()
+            except Exception:
+                from loguru import logger as _logger
+
+                _logger.exception("tui: plugin services stop failed; continuing shutdown")
+        # ACP agents are launched with start_new_session, so they do not get the
+        # terminal's signals and outlive this process unless the pool is closed.
+        try:
+            from raven.acp_client.pool import close_pool
+
+            await close_pool()
+        except Exception:
+            from loguru import logger as _logger
+
+            _logger.exception("tui: acp pool close failed; continuing shutdown")
+        # The loop's skill watcher is a daemon thread parked inside watchfiles'
+        # Rust watch(). Daemon status does not make exit safe while it sits in
+        # native code: Py_FinalizeEx tears the interpreter down under that call
+        # and the process dies of SIGSEGV once this teardown has succeeded.
+        if agent_loop is not None:
+            agent_loop.context.skills.stop_file_watcher()
+        # A backend start still in flight (an EverOS spawn takes up to 30s)
+        # must not race the drain and stop below: settle it first.
+        if backend_start_task is not None and not backend_start_task.done():
+            backend_start_task.cancel()
+        if backend_start_task is not None:
+            try:
+                await backend_start_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        # Release the embedded index lock so the next process can start.
+        if agent_loop is not None and agent_loop.backend is not None:
+            try:
+                outcome = await agent_loop.drain_backend_stores()
+                report_memory_write_outcome(outcome)
+                await agent_loop.backend.stop()
+            except Exception:
+                from loguru import logger as _logger
+
+                _logger.exception(
+                    "tui: memory backend stop failed; continuing shutdown",
+                )
+        try:
+            from raven.browser import get_browser
+
+            await get_browser().close()
+        except Exception:
+            from loguru import logger as _logger
+
+            _logger.exception("tui: browser close failed; continuing shutdown")
+        serve_task.cancel()
+        try:
+            await serve_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+def _spawn_with_rpc_socket(
+    node_path: str,
+    args: list[str],
+    cwd: Path,
+) -> tuple[subprocess.Popen[bytes], socket.socket, str]:
+    """Spawn `[node_path, *args]` with a per-session TCP-loopback socket.
+
+    Topology (cross-platform: macOS / Linux / Windows):
+
+        parent: socket()/bind()/listen() on 127.0.0.1:<ephemeral>; exports the
+                ``host:port`` as ``RAVEN_RPC_SOCKET`` and a random shared secret
+                as ``RAVEN_RPC_TOKEN``
+        child:  reads ``RAVEN_RPC_SOCKET``, ``net.createConnection({host,port})``,
+                sends ``RAVEN_RPC_TOKEN`` as the first line, then emits JSON-RPC
+                frames + reads responses on the same socket
+
+    Loopback (127.0.0.1) is reachable by any local process, so the token --
+    known only to the child we spawn (passed via env) -- is what keeps a rogue
+    local process from talking to us; the parent validates it as the first line
+    (see ``RpcServer(auth_token=...)``) before any dispatch.
+
+    Returns ``(popen, listening_server_socket, auth_token)``. Caller must
+    eventually ``server_sock.close()``. The accepted client connection is NOT
+    created here -- that's done by :func:`_run_rpc_server_until_done` once the
+    asyncio loop is up so the accept can be cancelled cleanly on handshake
+    timeout.
+    """
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.bind(("127.0.0.1", 0))
+    server_sock.listen(1)
+    host, port = server_sock.getsockname()[:2]
+
+    token = secrets.token_hex(32)
+    env = child_env()
+    env[_RPC_SOCKET_ENV] = f"{host}:{port}"
+    env[_RPC_TOKEN_ENV] = token
+
+    proc = subprocess.Popen(
+        [node_path, *args],
+        cwd=str(cwd),
+        stdin=None,
+        stdout=None,
+        stderr=None,
+        env=env,
+    )
+
+    return proc, server_sock, token
+
+
+async def _accept_with_timeout(
+    server_sock: socket.socket,
+    timeout_s: float,
+) -> socket.socket | None:
+    """Accept one connection on `server_sock` or return None on timeout.
+
+    Uses ``loop.sock_accept`` so the wait is cooperatively cancellable.
+    """
+    server_sock.setblocking(False)
+    loop = asyncio.get_running_loop()
+    try:
+        conn, _addr = await asyncio.wait_for(loop.sock_accept(server_sock), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        return None
+    conn.setblocking(False)
+    return conn
+
+
+def run_subprocess_with_rpc(
+    node_path: str,
+    args: list[str],
+    cwd: Path,
+    forward_signals: bool = True,
+    workspace: str | None = None,
+    home: str | None = None,
+) -> int:
+    """Spawn Node child with a per-session TCP-loopback socket; run RpcServer; enforce handshake.
+
+    Cross-platform transport (macOS / Linux / Windows): the parent listens on
+    ``127.0.0.1:<ephemeral>`` and exports the ``host:port`` via
+    ``RAVEN_RPC_SOCKET`` plus a random shared secret via ``RAVEN_RPC_TOKEN``.
+    The Node child connects, sends the token as the first newline-terminated
+    line, then speaks newline-JSON frames. The accepted socket *object* is
+    handed to ``RpcServer`` (no os.dup of a socket fd -- unsupported on
+    Windows), which wires it via ``loop.connect_accepted_socket`` and validates
+    the token before any dispatch.
+
+    Returns the child's exit code, OR ``_RPC_HANDSHAKE_EXIT_CODE`` (3) if
+    the handshake times out (either because the child never connected, or
+    because it connected but never sent the token + ``system.hello``).
+    """
+    proc, server_sock, auth_token = _spawn_with_rpc_socket(node_path, args, cwd)
+
+    if forward_signals:
+
+        def _forward(sig, _frame):
+            try:
+                proc.send_signal(sig)
+            except ProcessLookupError:
+                pass
+
+        signal.signal(signal.SIGINT, _forward)
+        signal.signal(signal.SIGTERM, _forward)
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, _forward)
+
+    proc_done = asyncio.Event()
+
+    def _waiter() -> None:
+        try:
+            proc.wait()
+        finally:
+            try:
+                loop = _loop_holder.get("loop")
+                if loop is not None and not loop.is_closed():
+                    loop.call_soon_threadsafe(proc_done.set)
+            except RuntimeError:
+                pass
+
+    _loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+
+    _conn_holder: dict[str, socket.socket] = {}
+    _flags = {"handed_off": False}
+
+    async def _main() -> bool:
+        _loop_holder["loop"] = asyncio.get_running_loop()
+
+        # Wait for child to connect within the handshake deadline. We race
+        # `accept` against `proc.wait()` so an early-exiting child returns
+        # immediately instead of stalling for the full 5 s.
+        accept_task = asyncio.create_task(_accept_with_timeout(server_sock, _RPC_HANDSHAKE_TIMEOUT_S))
+        proc_done_task = asyncio.create_task(proc_done.wait())
+        done, pending = await asyncio.wait(
+            {accept_task, proc_done_task},
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=_RPC_HANDSHAKE_TIMEOUT_S,
+        )
+        for task in pending:
+            task.cancel()
+        for task in pending:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if accept_task not in done:
+            return False
+        conn = accept_task.result()
+        if conn is None:
+            return False
+        _conn_holder["conn"] = conn
+
+        # Hand the connected socket object straight to RpcServer. We do NOT
+        # os.dup the fd (unsupported on Windows) — connect_accepted_socket takes
+        # ownership of this one socket and closes it on teardown, so the outer
+        # cleanup must not double-close it.
+        _flags["handed_off"] = True
+        return await _run_rpc_server_until_done(
+            conn, auth_token, _RPC_HANDSHAKE_TIMEOUT_S, proc_done, workspace=workspace, home=home
+        )
+
+    waiter = threading.Thread(target=_waiter, daemon=True)
+    waiter.start()
+
+    handshake_ok = False
+    try:
+        handshake_ok = bounded_asyncio.run(_main())
+    finally:
+        # 1) Close the accepted conn only if it was never handed to RpcServer.
+        # Once handed off, the server owns it (connect_accepted_socket) and
+        # closes it on teardown; double-closing here would race that.
+        if "conn" in _conn_holder and not _flags["handed_off"]:
+            try:
+                _conn_holder["conn"].close()
+            except OSError:
+                pass
+        # 2) Close the listening socket.
+        try:
+            server_sock.close()
+        except OSError:
+            pass
+
+    if not handshake_ok:
+        print(
+            f"✗ RPC handshake timeout ({_RPC_HANDSHAKE_TIMEOUT_S:.0f}s); is the Node side using the new IPC bridge?",
+            file=sys.stderr,
+        )
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        return _RPC_HANDSHAKE_EXIT_CODE
+
+    waiter.join(timeout=5)
+    return proc.returncode if proc.returncode is not None else 0
+
+
+def _print_node_help(out=None) -> None:
+    """Print the friendly Node-missing error message."""
+    msg = t(
+        "✗ TUI failed to start: Node.js >= 22 not found.\n"
+        "  Install: https://nodejs.org/  or  brew install node@22  or  nvm install 22\n"
+        '  Or ask once:  raven agent -m "..."\n'
+    )
+    typer.echo(msg, file=out)
+
+
+def _is_abnormal_child_exit(exit_code: int) -> bool:
+    """A child exit worth surfacing to the user: not a clean exit, not one of
+    the signals the parent forwards for a graceful shutdown, and not the
+    RPC-handshake failure path (which reports itself).
+
+    The graceful signal codes mirror ui-tui gracefulExit.ts, which maps SIGHUP
+    to 129 (terminal closed), SIGINT to 130 (Ctrl+C) and SIGTERM to 143
+    (kill / process manager) through one clean-exit path. A hard SIGKILL (137)
+    is left abnormal. ``_RPC_HANDSHAKE_EXIT_CODE`` is 3."""
+    return exit_code not in (0, 129, 130, 143, _RPC_HANDSHAKE_EXIT_CODE)
+
+
+def _diagnose_crash(node_path: str, dist_entry: Path, cwd: Path) -> None:
+    """When `tui` child exits non-zero, re-run capturing stderr for diagnosis."""
+    try:
+        proc = subprocess.run(
+            [node_path, str(dist_entry)],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        stderr_tail = "\n".join(proc.stderr.splitlines()[-20:])
+        if stderr_tail:
+            print(
+                f"\n--- child stderr (last 20 lines) ---\n{stderr_tail}\n",
+                file=sys.stderr,
+            )
+    except (subprocess.SubprocessError, OSError):
+        # Diagnose failure is best-effort; never raise.
+        pass
+
+
+@tui_app.callback(invoke_without_command=True)
+def tui(
+    ctx: typer.Context,
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Smoke test: boot child then exit (no interactive TTY required).",
+    ),
+    dev: bool = typer.Option(
+        False,
+        "--dev",
+        help="Dev mode: run from TS source via tsx (no build step) instead of compiled dist.",
+    ),
+    color: Optional[str] = typer.Option(
+        None,
+        "--color",
+        help="Force color output: auto | truecolor | 256 | 16 | none.",
+    ),
+    print_colors: bool = typer.Option(
+        False,
+        "--print-colors",
+        help="Print the resolved color palette as swatches and exit (no TTY needed).",
+    ),
+    preview_colors: bool = typer.Option(
+        False,
+        "--preview-colors",
+        help="Preview color tokens in their real UI contexts and exit (no TTY needed).",
+    ),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Working directory for this run (default: current directory)",
+    ),
+    home: str | None = typer.Option(
+        None,
+        "--home",
+        help="Agent home directory (memory, skills, transcripts)",
+    ),
+    standalone: bool = typer.Option(
+        False,
+        "--standalone",
+        help="Run the embedded engine even when a gateway already hosts the page.",
+    ),
+) -> None:
+    """Launch Raven native TUI."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Validate -w before Node ever spawns. _build_agent_loop performs the
+    # same check, but by then it runs inside the RPC server's blanket
+    # except-Exception handler, which would turn a bad flag into a -32603
+    # surfaced on the user's first chat message instead of a launch-time error.
+    if workspace is not None:
+        from raven.agent.workdir import validate_override
+        from raven.cli._helpers import load_runtime_config
+
+        try:
+            validate_override(workspace, load_runtime_config(None, home=home).workspace_path)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+
+    # Startup gate: a config that cannot reach a model is settled before the TUI
+    # owns the terminal. Skipped for the no-TTY diagnostic spawns
+    # (--check / --print-colors / --preview-colors).
+    if not (check or print_colors or preview_colors) and _stdout_isatty():
+        from raven.cli.onboard_commands import ensure_ready_to_start
+
+        ensure_ready_to_start()
+
+    node_path, version = find_node()
+    if node_path is None:
+        _print_node_help()
+        raise typer.Exit(code=1)
+    if version is None or version < _MIN_NODE_VERSION:
+        ver_str = ".".join(map(str, version)) if version else "<unknown>"
+        typer.echo(
+            t(
+                "✗ Node too old (found {version}, need >= 22).\n  Upgrade: nvm install 22  or  brew upgrade node\n",
+                version=ver_str,
+            ),
+        )
+        raise typer.Exit(code=1)
+
+    # Refresh the cached latest-release version in the background (once per
+    # launch, throttled, best-effort) so the status bar can nudge
+    # `raven upgrade`. The gateway reads that cache when it builds the session
+    # info bundle.
+    from raven.updates.update_notice import maybe_refresh_async
+
+    maybe_refresh_async()
+
+    # `--dev` runs tsx from the source tree, so it requires the ui-tui/ checkout.
+    # The production path resolves a packaged or source-built bundle separately
+    # (see resolve_dist_entry), so it must NOT hard-require the source tree —
+    # a wheel install legitimately has no ui-tui/ source directory.
+    if dev and not _UI_TUI_DIR.exists():
+        print(t("✗ TUI sources missing (--dev needs the source tree): {path}", path=_UI_TUI_DIR), file=sys.stderr)
+        raise typer.Exit(code=2)
+
+    # Color override flows to the child via env (entry.tsx -> colorTier.ts).
+    # Only set it when --color was passed so a shell-level RAVEN_TUI_COLOR
+    # isn't clobbered by the "auto" default.
+    if color is not None:
+        os.environ["RAVEN_TUI_COLOR"] = color
+
+    # `--check` is a smoke test: tell the child to boot, prove stub init,
+    # then exit 0 (no Ink render, no interactive TTY). The child reads
+    # RAVEN_TUI_CHECK from the environment it inherits from this process.
+    # See ui-tui/src/entry.tsx for the matching handler.
+    if check:
+        os.environ["RAVEN_TUI_CHECK"] = "1"
+
+    # `--print-colors` / `--preview-colors` are no-IPC diagnostics: the child
+    # dumps the resolved palette (swatches / in-context) and exits. Like
+    # --check they skip the RPC handshake.
+    if print_colors:
+        os.environ["RAVEN_TUI_PRINT_COLORS"] = "1"
+    if preview_colors:
+        os.environ["RAVEN_TUI_COLOR_PREVIEW"] = "1"
+
+    # --check / --print-colors / --preview-colors are no-RPC, stdio-only spawns.
+    no_rpc = check or print_colors or preview_colors
+
+    # Redirect parent loguru to a file so RpcServer / cli.dispatch / etc.
+    # logs don't corrupt the Ink reconciler. (Skipped for the no-RPC paths
+    # which exit before Ink renders.) The file is created here at startup and
+    # a normal run/exit only writes INFO lifecycle records, so the path is
+    # surfaced to the user only on an abnormal child exit (see below).
+    if not no_rpc:
+        _suppress_noisy_watchers()
+        log_path = redirect_loguru_to_file(
+            "tui.log",
+            retention=3,
+            record_filter=_drop_watcher_spam,
+        )
+
+    # When a gateway already hosts the page, relay to its engine instead of
+    # building a second one — unless this launch opts out (--standalone /
+    # tui.attach_gateway=false) or points at another agent home, whose engine
+    # the recorded gateway is not.
+    attach_plan = None
+    if not no_rpc and not standalone and home is None:
+        from raven.cli._tui_relay import plan_attach
+
+        attach_plan = plan_attach(workspace)
+
+    if dev:
+        # tsx watch via local node_modules.
+        # Derive npx from the validated node_path so RAVEN_NODE's
+        # version-pin semantics are honored end-to-end. Only fall back to
+        # PATH when the derived path is absent (rare; e.g. operator points
+        # RAVEN_NODE at a standalone node binary with no sibling npx).
+        derived_npx = Path(node_path).parent / "npx"
+        if derived_npx.exists():
+            npx = str(derived_npx)
+        else:
+            fallback = shutil.which("npx")
+            if fallback is not None and os.environ.get("RAVEN_NODE"):
+                typer.echo(
+                    f"⚠ RAVEN_NODE was set but no `npx` next to {node_path};\n"
+                    f"  falling back to PATH npx at {fallback}. Node version\n"
+                    f"  used by tsx may differ from the validated one.\n",
+                    err=True,
+                )
+            npx = fallback or "npx"
+        # Use npx to run tsx (source mode, no build step); npx ships with
+        # node >= 22. `--watch` is intentionally dropped: the interactive path
+        # requires a one-shot RPC handshake (parent accepts a
+        # single socket connection), and a watch-triggered restart would drop
+        # that connection. --check stays on the plain spawn because entry.tsx
+        # short-circuits on RAVEN_TUI_CHECK before the socket guard, so it
+        # needs no RPC server; the interactive path must open the socket or
+        # entry.tsx exits 2 ("RAVEN_RPC_SOCKET env var required").
+        tsx_args = ["tsx", "src/entry.tsx"]
+        if no_rpc:
+            exit_code = run_subprocess(npx, tsx_args, cwd=_UI_TUI_DIR)
+        elif attach_plan is not None:
+            from raven.cli._tui_relay import run_subprocess_attached
+
+            exit_code = run_subprocess_attached(npx, tsx_args, cwd=_UI_TUI_DIR, plan=attach_plan, workspace=workspace)
+        else:
+            exit_code = run_subprocess_with_rpc(npx, tsx_args, cwd=_UI_TUI_DIR, workspace=workspace, home=home)
+    else:
+        dist_entry = resolve_dist_entry()
+        if dist_entry is None and not check:
+            print(
+                t(
+                    "✗ TUI bundle missing: {entry} (or the source tree {dev_entry})\n"
+                    "  Developers: cd {dir} && npm install && npm run build\n"
+                    "  Users: reinstall with  curl -fsSL https://raven.evermind.ai/install.sh | sh\n",
+                    entry=_PACKAGED_DIST_ENTRY,
+                    dev_entry=_UI_TUI_DIR / "dist" / "entry.js",
+                    dir=_UI_TUI_DIR,
+                ),
+                file=sys.stderr,
+            )
+            raise typer.Exit(code=2)
+        # On the `--check` smoke path a missing bundle is tolerated (the test
+        # only proves Node was found and a child can spawn). Use the expected
+        # packaged path as the spawn target so the command stays well-formed.
+        if dist_entry is None:
+            dist_entry = _PACKAGED_DIST_ENTRY
+        # The self-contained bundle needs no node_modules; run it from its own
+        # directory so any relative resource resolution stays well-defined.
+        dist_cwd = dist_entry.parent
+        # `--check` smoke path keeps the simple stdio-only spawn so the
+        # bootstrap-era tests (which don't speak JSON-RPC) still pass; the
+        # interactive run path opens the RPC pipes and enforces handshake.
+        if no_rpc:
+            exit_code = run_subprocess(node_path, [str(dist_entry)], cwd=dist_cwd)
+        elif attach_plan is not None:
+            from raven.cli._tui_relay import run_subprocess_attached
+
+            exit_code = run_subprocess_attached(
+                node_path, [str(dist_entry)], cwd=dist_cwd, plan=attach_plan, workspace=workspace
+            )
+        else:
+            exit_code = run_subprocess_with_rpc(
+                node_path, [str(dist_entry)], cwd=dist_cwd, workspace=workspace, home=home
+            )
+        if _is_abnormal_child_exit(exit_code):
+            _diagnose_crash(node_path, dist_entry, dist_cwd)
+
+    # tui.log stays silent on a clean run; surface it only when the child
+    # exited abnormally (see _is_abnormal_child_exit).
+    if not no_rpc and _is_abnormal_child_exit(exit_code):
+        typer.echo(f"📝 TUI logs → {log_path} (exit {exit_code})", err=True)
+
+    if check:
+        # --check passes when Node was found and child process spawned,
+        # regardless of child's exit code (the child may exit early on
+        # non-TTY stdin, which is the expected smoke path in CI).
+        raise typer.Exit(code=0)
+
+    raise typer.Exit(code=exit_code)

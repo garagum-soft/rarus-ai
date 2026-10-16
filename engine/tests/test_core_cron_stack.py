@@ -1,0 +1,646 @@
+"""Trigger-path tests for ``make_on_cron_job`` (raven/core/cron_stack.py).
+
+Distinct scope from ``test_cron_handler_ledger.py``, which covers the
+sentinel ledger write side-effect.
+
+Fire-at-origin contract: every cron turn runs through the spine ``submit``
+with the job's creation-time binding ``(payload.channel, payload.to)`` as
+the request source — the hub routes the reply to that one outlet. There is
+no trigger-time resolution, forwarding, or broadcast to test anymore; what
+matters is the source binding, reply read-back, heartbeat suppression, and the
+failure path.
+"""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from raven.core.cron_stack import make_on_cron_job
+from raven.proactive_engine.schedulers.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronSchedule,
+)
+from raven.spine import Origin, TurnFailed, TurnOutcome, Usage
+
+
+def _make_job(
+    *,
+    channel: str | None = "tui",
+    to: str | None = "direct",
+    name: str = "test_job",
+    kind: str = "at",
+) -> CronJob:
+    schedule = (
+        CronSchedule(kind="at", at_ms=1000)
+        if kind == "at"
+        else CronSchedule(kind="every", every_ms=60_000)
+        if kind == "every"
+        else CronSchedule(kind="cron", expr="0 9 * * *")
+    )
+    return CronJob(
+        id=f"job_{name}",
+        name=name,
+        enabled=True,
+        schedule=schedule,
+        payload=CronPayload(
+            message="reminder body source",
+            channel=channel,
+            to=to,
+        ),
+        state=CronJobState(),
+    )
+
+
+@pytest.fixture
+def spine() -> SimpleNamespace:
+    """Spine submit mock + readback map, mimicking the gateway capturing runner:
+    submit records the request and stores the reply text under req.conversation
+    before result() resolves (so the handler reads it back)."""
+    readback: dict[str, str] = {}
+    captured: list = []
+
+    class _Handle:
+        async def result(self):
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+    def _submit(req):
+        captured.append(req)
+        readback[req.conversation] = "resolved body"
+        return _Handle()
+
+    return SimpleNamespace(submit=_submit, readback=readback, captured=captured)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Source binding: the stored (channel, to) IS the delivery target
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_source_binding_is_the_delivery_target(spine):
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback)
+
+    response = await handler(_make_job(channel="telegram", to="tg_user_1", name="b1"))
+
+    assert len(spine.captured) == 1
+    req = spine.captured[0]
+    assert req.origin is Origin.CRON
+    assert req.source.channel == "telegram"
+    assert req.source.chat_id == "tg_user_1"
+    assert req.conversation == "cron:job_b1"
+    assert response == "resolved body"
+
+
+async def test_tui_binding_passes_through_unchanged(spine):
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, default_channel="tui")
+
+    await handler(_make_job(channel="tui", to="default", name="b2"))
+
+    req = spine.captured[0]
+    assert req.source.channel == "tui"
+    assert req.source.chat_id == "default"
+
+
+async def test_legacy_job_without_channel_uses_default(spine):
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback)
+
+    await handler(_make_job(channel=None, to=None, name="b3"))
+
+    req = spine.captured[0]
+    assert req.source.channel == "tui"
+    assert req.source.chat_id == "direct"
+
+
+async def test_reminder_note_carries_schedule_origin(spine):
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback)
+
+    await handler(_make_job(name="b4"))
+
+    text = spine.captured[0].text
+    assert "Scheduled instruction: reminder body source" in text
+    assert "set at" in text
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Reply read-back and heartbeat suppression
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_spine_path_returns_reply_without_waking_heartbeat():
+    system_events = MagicMock()
+    wake = MagicMock()
+    readback_texts: dict[str, str] = {}
+    captured: dict[str, object] = {}
+
+    class _Handle:
+        async def result(self):
+            # The gateway runner stores the reply before result() resolves.
+            readback_texts["cron:job_t1"] = "reminder done at 17:05"
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+    def _submit(req):
+        captured["req"] = req
+        return _Handle()
+
+    handler = make_on_cron_job(
+        submit=_submit,
+        readback_texts=readback_texts,
+        system_events=system_events,
+        wake=wake,
+    )
+
+    response = await handler(_make_job(channel="telegram", to="c1", name="t1"))
+
+    assert captured["req"].origin is Origin.CRON
+    assert captured["req"].conversation == "cron:job_t1"
+    assert response == "reminder done at 17:05"
+    system_events.enqueue.assert_not_called()
+    assert "cron:job_t1" not in readback_texts
+    wake.request_wake_now.assert_not_called()
+
+
+@pytest.mark.parametrize("explicit_reply", [True, False])
+async def test_spine_path_missing_readback_uses_turn_reply_state(explicit_reply: bool):
+    system_events = MagicMock()
+    wake = MagicMock()
+
+    class _Handle:
+        async def result(self):
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=explicit_reply)
+
+    handler = make_on_cron_job(
+        submit=lambda req: _Handle(),
+        readback_texts={},
+        system_events=system_events,
+        wake=wake,
+    )
+
+    assert await handler(_make_job(channel="telegram", to="c1", name="t2")) is None
+
+    if explicit_reply:
+        system_events.enqueue.assert_not_called()
+        wake.request_wake_now.assert_not_called()
+    else:
+        system_events.enqueue.assert_called_once()
+        assert "(no response)" in system_events.enqueue.call_args.args[0].text
+        wake.request_wake_now.assert_called_once_with("cron:job_t2")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Failure path
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_turn_failure_emits_failed_event_and_reraises():
+    system_events = MagicMock()
+    wake = MagicMock()
+
+    class _Handle:
+        async def result(self):
+            raise RuntimeError("provider down")
+
+    handler = make_on_cron_job(
+        submit=lambda req: _Handle(),
+        readback_texts={},
+        system_events=system_events,
+        wake=wake,
+    )
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        await handler(_make_job(name="f1"))
+
+    system_events.enqueue.assert_called_once()
+    event = system_events.enqueue.call_args.args[0]
+    assert "failed" in event.text
+    assert "RuntimeError: provider down" in event.text
+    assert event.context_key.endswith(":fail")
+    wake.request_wake_now.assert_called_once_with("cron:job_f1:fail")
+
+
+async def test_a_failed_turns_own_wording_is_what_the_job_records():
+    """The lane hands its ``TurnFailed`` back, so the job's error reads as the
+    turn worded it -- a rate limit, an auth failure -- instead of the one
+    sentence this handler used to invent for every non-delivery."""
+    system_events = MagicMock()
+    wake = MagicMock()
+
+    class _Handle:
+        async def result(self):
+            return TurnFailed(error="RateLimitError: 429 slow down", cancelled=False, turn_id="t1")
+
+    handler = make_on_cron_job(
+        submit=lambda req: _Handle(),
+        readback_texts={},
+        system_events=system_events,
+        wake=wake,
+    )
+
+    with pytest.raises(RuntimeError, match="^RateLimitError: 429 slow down$"):
+        await handler(_make_job(name="f2"))
+
+    event = system_events.enqueue.call_args.args[0]
+    assert "RateLimitError: 429 slow down" in event.text
+    assert "RuntimeError:" not in event.text, "the handler's own wrapper is not part of the report"
+    assert event.context_key.endswith(":fail")
+
+
+async def test_a_cancelled_turn_says_it_was_cut_rather_than_that_it_failed():
+    """None is now only ever a cancel -- a reload cutting an in-flight turn --
+    so the record says that instead of offering both readings."""
+
+    class _Handle:
+        async def result(self):
+            return None
+
+    system_events = MagicMock()
+    wake = MagicMock()
+    handler = make_on_cron_job(submit=lambda req: _Handle(), readback_texts={}, system_events=system_events, wake=wake)
+
+    with pytest.raises(RuntimeError, match="cancelled before it completed"):
+        await handler(_make_job(name="f3"))
+
+    system_events.enqueue.assert_called_once()
+    assert "cancelled before it completed" in system_events.enqueue.call_args.args[0].text
+    wake.request_wake_now.assert_called_once_with("cron:job_f3:fail")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Anti-runaway count point: record_fire after a successful recurring turn
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_record_fire_called_on_successful_recurring_turn(spine):
+    cron_service = MagicMock()
+    cron_service.record_fire.return_value = False
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, cron_service=cron_service)
+
+    job = _make_job(name="r1", kind="every")
+    await handler(job)
+
+    cron_service.record_fire.assert_called_once_with("job_r1")
+    assert job.enabled is True
+
+
+async def test_record_fire_not_called_on_turn_failure():
+    cron_service = MagicMock()
+
+    class _Handle:
+        async def result(self):
+            raise RuntimeError("provider down")
+
+    handler = make_on_cron_job(submit=lambda req: _Handle(), readback_texts={}, cron_service=cron_service)
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        await handler(_make_job(name="r2", kind="every"))
+
+    cron_service.record_fire.assert_not_called()
+
+
+async def test_record_fire_not_called_for_oneshot_at_job(spine):
+    cron_service = MagicMock()
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, cron_service=cron_service)
+
+    await handler(_make_job(name="r3", kind="at"))
+
+    cron_service.record_fire.assert_not_called()
+
+
+async def test_auto_disable_flips_the_inflight_job(spine):
+    """record_fire returning True (limit hit) must flip the in-memory job:
+    the service's post-run writeback patches enabled/next_run from it and
+    would otherwise clobber the persisted disable."""
+    cron_service = MagicMock()
+    cron_service.record_fire.return_value = True
+    system_events = MagicMock()
+    wake = MagicMock()
+    handler = make_on_cron_job(
+        submit=spine.submit,
+        readback_texts=spine.readback,
+        cron_service=cron_service,
+        system_events=system_events,
+        wake=wake,
+    )
+
+    job = _make_job(name="r4", kind="cron")
+    job.state.next_run_at_ms = 999_999
+    await handler(job)
+
+    assert job.enabled is False
+    assert job.state.next_run_at_ms is None
+    system_events.enqueue.assert_called_once()
+    assert system_events.enqueue.call_args.args[0].context_key == f"cron:{job.id}:autodisabled"
+    wake.request_wake_now.assert_called_once_with(f"cron:{job.id}:autodisabled")
+
+
+async def test_record_fire_error_does_not_fail_the_turn(spine):
+    cron_service = MagicMock()
+    cron_service.record_fire.side_effect = OSError("store locked")
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, cron_service=cron_service)
+
+    response = await handler(_make_job(name="r5", kind="every"))
+
+    assert response == "resolved body"
+
+
+async def test_without_cron_service_no_counting(spine):
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback)
+    job = _make_job(name="r6", kind="every")
+
+    assert await handler(job) == "resolved body"
+    assert job.enabled is True
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Anti-runaway reset point: chain_cron_activity_reset
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _user_req(*, origin=None, channel: str = "telegram", chat_id: str = "chat9"):
+    from raven.spine import ChatType, Origin, Source, TurnRequest
+
+    return TurnRequest(
+        origin=origin or Origin.USER,
+        source=Source(
+            channel=channel,
+            chat_id=chat_id,
+            sender_id="u1",
+            chat_type=ChatType.DM,
+        ),
+        text="hello",
+    )
+
+
+def test_chain_resets_on_user_origin():
+    from raven.core.cron_stack import chain_cron_activity_reset
+
+    cron_service = MagicMock()
+    hook = chain_cron_activity_reset(cron_service)
+
+    hook(_user_req(channel="telegram", chat_id="chat9"))
+
+    cron_service.notify_user_active.assert_called_once_with("telegram", "chat9")
+
+
+def test_chain_ignores_non_user_origins():
+    """CRON / HEARTBEAT turns run the user-inbound hook chain too (only
+    SENTINEL / SUBAGENT are skipped at the AgentLoop gate) — a cron fire
+    resetting its own counter would defeat the guard."""
+    from raven.core.cron_stack import chain_cron_activity_reset
+    from raven.spine import Origin
+
+    cron_service = MagicMock()
+    hook = chain_cron_activity_reset(cron_service)
+
+    hook(_user_req(origin=Origin.CRON))
+    hook(_user_req(origin=Origin.HEARTBEAT))
+
+    cron_service.notify_user_active.assert_not_called()
+
+
+def test_chain_calls_inner_first_and_returns_its_result():
+    from raven.core.cron_stack import chain_cron_activity_reset
+
+    calls: list[str] = []
+    cron_service = MagicMock()
+    cron_service.notify_user_active.side_effect = lambda *a: calls.append("reset")
+    sentinel_result = object()
+
+    def inner(req):
+        calls.append("sentinel")
+        return sentinel_result
+
+    hook = chain_cron_activity_reset(cron_service, inner=inner)
+
+    assert hook(_user_req()) is sentinel_result
+    assert calls == ["sentinel", "reset"]
+
+
+def test_chain_reset_error_is_swallowed():
+    from raven.core.cron_stack import chain_cron_activity_reset
+
+    cron_service = MagicMock()
+    cron_service.notify_user_active.side_effect = OSError("store locked")
+    inner = MagicMock(return_value=None)
+    hook = chain_cron_activity_reset(cron_service, inner=inner)
+
+    assert hook(_user_req()) is None
+    inner.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Interactive-surface assembly: cron wired with submit=a spine scheduler
+# whose hub owns the "tui" outlet. A tui-bound job renders once via that
+# outlet — the source binding is the outlet, nothing else fires.
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_interactive_assembly_cron_renders_once_via_outlet():
+    from raven.cli._one_shot_spine import build_one_shot_spine
+    from raven.spine import Text, TurnOutcome, Usage
+
+    class _CronEchoLoop:
+        async def run_turn(self, req, emit, drain, *, stream) -> TurnOutcome:
+            await emit(Text(content=f"cron-reply<{req.conversation}>", source=req.source))
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+    rendered: list[str] = []
+    scheduler, hub, teardown = build_one_shot_spine(_CronEchoLoop(), "tui", rendered.append)
+    handler = make_on_cron_job(submit=scheduler.submit)
+
+    try:
+        await handler(_make_job(channel="tui", to="direct", name="tui1"))
+        await hub.wait_idle("tui")
+    finally:
+        await teardown()
+
+    assert rendered == ["cron-reply<cron:job_tui1>"]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A wake addressed to a sub-agent instance runs as that instance's turn
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _instance_job(*, agent: str = "Raven-Oncall", handle: str = "inst-7", name: str = "d1") -> CronJob:
+    job = _make_job(channel="tui", to="default", name=name)
+    job.payload.message = "[Ops campaign 'beam-limit-load' round 2 due] Call ops_tune_status(...)"
+    job.payload.direct_agent = agent
+    job.payload.direct_handle = handle
+    return job
+
+
+@pytest.mark.parametrize("destination", ["default", "issue#42"])
+async def test_a_wake_naming_an_instance_runs_as_that_instance_turn(spine, destination):
+    """The gap this closes, measured 2026-08-25 through ``/new-instance``.
+
+    An on-call wake's message is addressed to the agent holding the campaign --
+    "call ops_tune_status on this ledger, then decide". Handed to the main agent
+    as a reminder it can only be paraphrased, because the main agent has no ops
+    tools at all. ``direct_target`` puts the round in the instance that owns the
+    campaign instead, on that instance's own lane, which is the lane the pane the
+    operator is looking at subscribes to.
+    """
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, default_channel="tui")
+
+    job = _instance_job()
+    job.payload.to = destination
+    response = await handler(job)
+
+    req = spine.captured[0]
+    assert req.direct_target == ("Raven-Oncall", "inst-7")
+    # Derived from this job's own (channel, to), not hardcoded: the direct lane
+    # hangs off the session key the main-agent lane for this outlet uses, which
+    # is what lets RpcOutlet map it back to the client's one subscription.
+    assert req.conversation == f"tui:{destination}#Raven-Oncall/inst-7"
+    assert req.parent_session == f"tui:{destination}"
+    # Read back off the lane the request actually used, not "cron:<job id>".
+    assert response == "resolved body"
+
+
+async def test_the_instance_gets_the_wake_message_not_the_reminder_wrapper(spine):
+    """A wake turn arrives with no conversation history, so its message is the
+    whole of what it has. Wrapping it in "[Scheduled Task] Timer finished ... When
+    you reply, mention when the reminder was originally set" would hand the
+    on-call loop an instruction written for a different addressee."""
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, default_channel="tui")
+    job = _instance_job(name="d2")
+
+    await handler(job)
+
+    assert spine.captured[0].text == job.payload.message
+    assert "[Scheduled Task]" not in spine.captured[0].text
+
+
+async def test_an_ordinary_reminder_is_untouched_by_the_instance_branch(spine):
+    """Half a target is no target. The two fields are written together by one
+    producer, and a job carrying only one of them is a reminder, not a wake --
+    guessing the other half would run somebody's meds reminder as a sub-agent
+    turn against an instance that may not exist."""
+    handler = make_on_cron_job(submit=spine.submit, readback_texts=spine.readback, default_channel="tui")
+    job = _make_job(channel="tui", to="default", name="d3")
+    job.payload.direct_agent = "Raven-Oncall"  # handle missing
+
+    await handler(job)
+
+    req = spine.captured[0]
+    assert req.direct_target is None
+    assert req.conversation == "cron:job_d3"
+    assert "[Scheduled Task]" in req.text
+
+
+def test_every_process_opens_the_one_cron_store(monkeypatch, tmp_path) -> None:
+    from raven.core.cron_stack import build_cron_service
+
+    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    service = build_cron_service(allowed_channels={"tui"})
+
+    assert service.store_path == tmp_path / "cron" / "jobs.json"
+    assert service.allowed_channels == {"tui"}
+
+
+# --- make_on_session_wake: a wake runs on the session that armed it ------------
+
+
+class _Handle:
+    def __init__(self, outcome):
+        self._outcome = outcome
+
+    async def result(self):
+        return self._outcome
+
+
+def _capturing_submit(outcome="ok"):
+    seen: list = []
+
+    def submit(req):
+        seen.append(req)
+        return _Handle(outcome)
+
+    return submit, seen
+
+
+@pytest.mark.asyncio
+async def test_a_session_wake_runs_on_the_conversation_that_armed_it():
+    """The job's (channel, to) is the session key the ACP client subscribed to,
+    so the wake's events stream to it as an ordinary session/update -- the
+    reminder shape on ``cron:<job_id>`` reaches no ACP subscriber at all
+    (measured 2026-09-04: a whole campaign ran and closed unseen)."""
+    from raven.core.cron_stack import make_on_session_wake
+
+    submit, seen = _capturing_submit()
+    on_job = make_on_session_wake(submit=submit, channel="acp")
+    job = _make_job(channel="acp", to="20260904_111956_61f0b5", name="wake oncall-flow:beam")
+
+    assert await on_job(job) is None
+    (req,) = seen
+    assert req.conversation == "acp:20260904_111956_61f0b5"
+    assert req.origin is Origin.CRON
+    assert (req.source.channel, req.source.chat_id, req.source.sender_id) == ("acp", "20260904_111956_61f0b5", "cron")
+    assert req.text == "reminder body source", "the wake's own words, unwrapped: the agent is the addressee"
+    assert getattr(on_job, "runs_on_session", False) is True
+
+
+@pytest.mark.asyncio
+async def test_a_session_wake_without_a_binding_falls_back_to_the_stacks_channel():
+    from raven.core.cron_stack import make_on_session_wake
+
+    submit, seen = _capturing_submit()
+    await make_on_session_wake(submit=submit, channel="acp")(_make_job(channel=None, to=None))
+    assert seen[0].conversation == "acp:default"
+
+
+@pytest.mark.asyncio
+async def test_a_session_wake_whose_turn_died_raises_so_the_job_records_a_failure():
+    from raven.core.cron_stack import make_on_session_wake
+
+    submit, _ = _capturing_submit(outcome=None)
+    with pytest.raises(RuntimeError, match="cancelled before it completed"):
+        await make_on_session_wake(submit=submit, channel="acp")(_make_job(channel="acp", to="s1"))
+
+
+@pytest.mark.asyncio
+async def test_a_session_wake_that_failed_raises_the_turns_own_words():
+    """This path files no system event, so the raised sentence is the whole of
+    what reaches the job record."""
+    from raven.core.cron_stack import make_on_session_wake
+
+    submit, _ = _capturing_submit(outcome=TurnFailed(error="AuthenticationError: 401", cancelled=False))
+    with pytest.raises(RuntimeError, match="^AuthenticationError: 401$"):
+        await make_on_session_wake(submit=submit, channel="acp")(_make_job(channel="acp", to="s1"))
+
+
+@pytest.mark.asyncio
+async def test_a_failed_turn_reaches_the_job_record_through_the_real_scheduler(tmp_path):
+    """End to end over the seam this PR opens: a runner that raises, a real
+    Scheduler and a real CronService, and the job file holding the turn's own
+    wording rather than a handler-invented sentence."""
+    from raven.proactive_engine.schedulers.cron.service import CronService
+    from raven.spine import OriginPools, Scheduler
+
+    class _FailingRunner:
+        async def run(self, req, emit, drain):
+            raise ValueError("the provider refused the call")
+
+    async def _sink(event) -> None:
+        pass
+
+    sched = Scheduler(_FailingRunner(), OriginPools(user=1, system=1), _sink)
+    svc = CronService(tmp_path / "jobs.json", on_job=make_on_cron_job(submit=sched.submit, readback_texts={}))
+    job = svc.add_job(
+        name="failing",
+        schedule=CronSchedule(kind="every", every_ms=3_600_000),
+        message="do the thing",
+        channel="tui",
+        to="direct",
+    )
+
+    assert await svc.run_job(job.id, force=True) is True
+
+    stored = json.loads((tmp_path / "jobs.json").read_text(encoding="utf-8"))["jobs"][0]["state"]
+    assert stored["lastStatus"] == "error"
+    assert stored["lastError"] == "ValueError: the provider refused the call"

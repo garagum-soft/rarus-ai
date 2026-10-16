@@ -1,0 +1,633 @@
+"""The capability table must describe what AgentLoop actually does.
+
+A second description of an existing rule is only worth having while it stays
+true. These drive a real ``AgentLoop`` and compare what it offers the model
+against what the table predicts, for every combination that changes an answer --
+so the table cannot quietly become a third opinion about which tools are
+available. Registration stopped being the gate: every gated tool is registered
+now and *withheld* while unconfigured, so the predicate a deployer feels is
+``offers_by_name``, never ``has``.
+"""
+
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from raven.agent.loop import AgentLoop
+from raven.agent.tools.capabilities import (
+    CAPABILITIES,
+    Need,
+    borrowable_credential,
+    configured_from,
+    disabled_by,
+    has_credential,
+    is_configured,
+    is_disabled,
+    is_offered,
+)
+from raven.config.loader import load_config
+from raven.providers.base import LLMProvider, LLMResponse
+from tests._wiring import wire
+
+
+class _StubProvider(LLMProvider):
+    def __init__(self) -> None:
+        super().__init__(api_key="test")
+
+    async def chat(
+        self,
+        messages,
+        tools=None,
+        model=None,
+        max_tokens=4096,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    ):
+        return LLMResponse(content="stub", finish_reason="stop")
+
+    def get_default_model(self) -> str:
+        return "stub"
+
+
+@pytest.fixture
+def workspace():
+    with tempfile.TemporaryDirectory() as td:
+        yield Path(td)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every credential here also resolves from the environment, so a developer
+    who exported one would otherwise see these pass for the wrong reason.
+
+    ``OPENROUTER_API_KEY`` matters as much as the search key: it is a third
+    source for the media family, behind the section and the borrow, and a case
+    asserting that nothing was available to borrow silently stops testing that
+    on any machine that exports it.
+    """
+    for var in ("SERPER_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def _config(tmp_path: Path):
+    """A real Config with genuine defaults, independent of whoever runs this."""
+    return load_config(tmp_path / "absent.json")
+
+
+def _resolved(config, attr):
+    return getattr(config.effective_media_config(), attr)
+
+
+def _media_attrs() -> list[str]:
+    """Every media tool the schema declares, asked of the schema.
+
+    Listing them here instead would make the coverage test below blind to the
+    one case it exists to catch: a media tool added to the schema and to
+    registration but not to the table. A hardcoded list never configures the new
+    tool, so it never appears among the gated ones, so the assertion holds while
+    the table is already wrong.
+    """
+    from raven.config.schema import MediaGenConfig, MediaToolConfig
+
+    return [
+        n
+        for n, f in MediaGenConfig.model_fields.items()
+        if isinstance(f.annotation, type) and issubclass(f.annotation, MediaToolConfig)
+    ]
+
+
+def _loop(workspace: Path, config, **kw) -> AgentLoop:
+    return AgentLoop(
+        provider=_StubProvider(),
+        workspace=workspace,
+        model="stub",
+        **wire(media_config=config.effective_media_config(), **kw),
+    )
+
+
+def test_the_table_names_exactly_the_credential_gated_tools(workspace, tmp_path: Path) -> None:
+    """Derived rather than listed: the tools that appear only once credentials
+    are supplied *are* the credential-gated ones, so this catches both halves --
+    a table entry for a tool that no longer exists, and a newly gated tool whose
+    author forgot the table. The second is the one that puts a deployer back to
+    guessing what is missing."""
+    bare = _config(tmp_path)
+    loop_bare = _loop(workspace, bare)
+
+    full = _config(tmp_path)
+    full.tools.web.search.api_key = "sk-serper"
+    # image_search is gated on a key like web_search, but registered only where
+    # `tools.web.search.images` asks for it, so "everything supplied" has to
+    # turn the switch on too or the tool never appears among the gated ones.
+    full.tools.web.search.images = True
+    for attr in _media_attrs():
+        getattr(full.tools.media, attr).model = "some/model"
+    full.providers.openrouter.api_key = "sk-or-test"
+    loop_full = _loop(workspace, full, search_api_key="sk-serper", image_search=True)
+
+    def offered(loop) -> set[str]:
+        return {n for n in loop.tools.tool_names if loop.tools.offers_by_name(n)}
+
+    gated = offered(loop_full) - offered(loop_bare)
+    declared = {c.tool for c in CAPABILITIES if c.need is not Need.NOTHING}
+
+    assert gated == declared, (
+        f"gated but undeclared: {sorted(gated - declared)}; declared but not gated: {sorted(declared - gated)}"
+    )
+
+
+@pytest.mark.parametrize("cap", CAPABILITIES, ids=lambda c: c.tool)
+def test_the_table_agrees_with_the_loop_when_unconfigured(cap, workspace, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    loop = _loop(workspace, config)
+
+    assert is_configured(cap, config) is loop.tools.offers_by_name(cap.tool), (
+        f"{cap.tool}: table says configured={is_configured(cap, config)}, "
+        f"loop offers={loop.tools.offers_by_name(cap.tool)}"
+    )
+
+
+def test_a_configured_search_key_agrees_on_both_sides(workspace, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.tools.web.search.api_key = "sk-serper"
+    loop = _loop(workspace, config, search_api_key="sk-serper")
+
+    cap = next(c for c in CAPABILITIES if c.tool == "web_search")
+    assert is_configured(cap, config) and loop.tools.offers_by_name("web_search")
+    assert configured_from(cap, config) == "tools.web.search.apiKey"
+
+
+def test_the_env_var_alone_agrees_on_both_sides(workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The half of the deploys a config-only reading would answer wrong."""
+    monkeypatch.setenv("SERPER_API_KEY", "sk-from-env")
+    config = _config(tmp_path)
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == "web_search")
+    assert is_configured(cap, config) and loop.tools.offers_by_name("web_search")
+    assert configured_from(cap, config) == "SERPER_API_KEY"
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_a_media_model_alone_agrees_on_both_sides(attr, tool, workspace, tmp_path: Path) -> None:
+    """A model with no key is the switch-on case: the key is borrowed."""
+    config = _config(tmp_path)
+    getattr(config.tools.media, attr).model = "some/model"
+    config.providers.openrouter.api_key = "sk-or-test"
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert is_configured(cap, config) and loop.tools.offers_by_name(tool)
+    assert configured_from(cap, config) == "borrowed: providers.openrouter.apiKey"
+
+
+def test_an_openrouter_key_alone_switches_nothing_on(workspace, tmp_path: Path) -> None:
+    """The property that makes the media rule "model *or* key" rather than
+    "resolved key": a chat credential must not silently enable three paid tools."""
+    config = _config(tmp_path)
+    config.providers.openrouter.api_key = "sk-or-test"
+    loop = _loop(workspace, config)
+
+    for cap in (c for c in CAPABILITIES if c.media_attr):
+        assert not is_configured(cap, config), cap.tool
+        assert not loop.tools.offers_by_name(cap.tool), cap.tool
+
+
+def test_the_free_capability_needs_no_credential(workspace, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.need is Need.NOTHING)
+    assert is_configured(cap, config) and loop.tools.offers_by_name(cap.tool)
+    assert configured_from(cap, config) == "", "nothing was required, so nothing supplied it"
+
+
+def test_every_entry_carries_what_a_deployer_has_to_act_on() -> None:
+    """The table is read by someone deciding what to go and do, so the fields
+    that tell them are not optional for the needs that require action."""
+    for cap in CAPABILITIES:
+        assert cap.summary and cap.tool
+        if cap.need is Need.NEW_ACCOUNT:
+            assert cap.obtain_from, f"{cap.tool}: no url for an account the deployer must create"
+            assert cap.config_path, f"{cap.tool}: no config path to put the key in"
+        if cap.need is Need.OWN_CREDENTIAL:
+            assert cap.cost_note, f"{cap.tool}: switched on without saying it bills per call"
+            # The row that says "you already have this key" has to name where,
+            # and the doctor prints both unguarded -- a blank one renders as an
+            # instruction with the answer missing.
+            assert cap.env_var, f"{cap.tool}: reuses a credential without naming the variable"
+            assert cap.key_path != cap.config_path, f"{cap.tool}: model path doubling as the key path"
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_a_media_model_with_no_key_to_borrow_still_counts(attr, tool, workspace, tmp_path: Path) -> None:
+    """The half of the media rule the borrow hides.
+
+    With an OpenRouter key present, `effective_media_config` fills `api_key` in,
+    so a rule reading only the key still answers correctly and a test that sets
+    both proves nothing about the `or model` half. With no key to borrow, the
+    model is the only thing making this configured -- and the loop registers it,
+    so the table must agree.
+    """
+    config = _config(tmp_path)
+    getattr(config.tools.media, attr).model = "some/model"
+    assert not config.providers.openrouter.api_key, "this case needs nothing to borrow"
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert not _resolved(config, attr).api_key, "nothing should have been borrowed"
+    assert is_configured(cap, config) and loop.tools.offers_by_name(tool)
+    # Offered, and unusable: no key resolves from the section, the borrow, or
+    # the environment, so every call returns the tool's missing-key error. There
+    # is no source to name, and naming the model path -- the only path this
+    # capability has -- would tell the deployer a key sits somewhere it does not.
+    assert configured_from(cap, config) == ""
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_a_media_key_is_reported_at_its_own_path_not_the_model_path(attr, tool, workspace, tmp_path: Path) -> None:
+    """``config_path`` names the model for this family, so reusing it as the
+    credential source sends the deployer to edit a line holding no key."""
+    config = _config(tmp_path)
+    getattr(config.tools.media, attr).api_key = "sk-tool-own"
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert is_configured(cap, config) and loop.tools.offers_by_name(tool)
+    assert configured_from(cap, config) == f"tools.media.{attr}.apiKey"
+    assert configured_from(cap, config) != cap.config_path
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_a_media_key_from_the_environment_is_a_source_like_any_other(
+    attr, tool, monkeypatch: pytest.MonkeyPatch, workspace, tmp_path: Path
+) -> None:
+    """The tool resolves ``OPENROUTER_API_KEY`` at call time, so a report that
+    consults only config answers "no credential" for a working install."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
+    config = _config(tmp_path)
+    getattr(config.tools.media, attr).model = "some/model"
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert is_configured(cap, config) and loop.tools.offers_by_name(tool)
+    assert configured_from(cap, config) == "OPENROUTER_API_KEY"
+    # The half that decides whether the row carries a warning. This install
+    # works, so calling it keyless would send a deployer to fix what is not
+    # broken -- and only the tool's chain reaches the variable to know that.
+    assert has_credential(cap, config)
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_no_borrow_is_claimed_when_there_is_nothing_to_borrow(attr, tool, tmp_path: Path) -> None:
+    """The instruction "reuse the key you already have" is wrong when no key
+    exists, and wrong in the expensive direction: it is the reason a deployer
+    sets a model, gets a registered tool, and sees every call fail."""
+    config = _config(tmp_path)
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert not config.providers.openrouter.api_key, "this case needs nothing to borrow"
+
+    assert borrowable_credential(cap, config) == ""
+
+    config.providers.openrouter.api_key = "sk-or-test"
+    assert borrowable_credential(cap, config) == "providers.openrouter.apiKey"
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_an_exported_key_is_reusable_too(attr, tool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A deployment that exports the key and configures nothing needs the model
+    and nothing else, so telling it to go and set a key is the same misreport in
+    the other direction."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
+    config = _config(tmp_path)
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert not config.providers.openrouter.api_key, "the environment must be the only source"
+
+    assert borrowable_credential(cap, config) == "OPENROUTER_API_KEY"
+
+
+def test_a_media_section_on_a_named_provider_is_paid_by_that_provider(workspace, tmp_path: Path) -> None:
+    """The provider the section names supplies its address and its key together; the
+    OpenRouter key on the same install is not consulted."""
+    config = _config(tmp_path)
+    config.tools.media.image.model = "openai/gpt-image-2"
+    config.tools.media.image.provider = "openai"
+    config.providers.openai.api_key = "sk-openai"
+    config.providers.openrouter.api_key = "sk-or-test"
+    loop = _loop(workspace, config)
+
+    cap = next(c for c in CAPABILITIES if c.tool == "image_generate")
+    resolved = _resolved(config, "image")
+    assert (resolved.api_base, resolved.api_key) == ("https://api.openai.com/v1", "sk-openai")
+    assert is_configured(cap, config) and loop.tools.offers_by_name("image_generate")
+    assert configured_from(cap, config) == "borrowed: providers.openai.apiKey"
+    assert has_credential(cap, config)
+
+
+def test_a_named_provider_whose_section_does_not_validate_lends_nothing_at_boot() -> None:
+    """An undeclared provider's section loads as raw data and is validated only when
+    read, so the boot resolution reads it as absent rather than raising on start."""
+    from raven.config.schema import Config
+
+    config = Config.model_validate(
+        {
+            "providers": {"weirdvendor": {"apiKey": 123}},
+            "tools": {"media": {"image": {"model": "m", "provider": "weirdvendor"}}},
+        }
+    )
+    resolved = _resolved(config, "image")
+    assert (resolved.api_base, resolved.api_key) == ("", "")
+
+
+def test_an_unconfigured_section_on_a_named_provider_would_borrow_that_providers_key(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.tools.media.image.provider = "openai"
+    config.providers.openrouter.api_key = "sk-or-test"
+    cap = next(c for c in CAPABILITIES if c.tool == "image_generate")
+    assert borrowable_credential(cap, config) == ""
+
+    config.providers.openai.api_key = "sk-openai"
+    assert borrowable_credential(cap, config) == "providers.openai.apiKey"
+
+
+@pytest.mark.parametrize(
+    ("attr", "tool"),
+    [("image", "image_generate"), ("speech", "text_to_speech"), ("video", "video_generate")],
+)
+def test_a_media_section_pointed_elsewhere_claims_no_openrouter_key(
+    attr, tool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Neither OpenRouter credential reaches a section whose address is somewhere else,
+    so neither may be reported as its source -- that row would read as working."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
+    config = _config(tmp_path)
+    config.providers.openrouter.api_key = "sk-or-test"
+    section = getattr(config.tools.media, attr)
+    section.api_base = "https://relay.test/v1"
+    cap = next(c for c in CAPABILITIES if c.tool == tool)
+    assert borrowable_credential(cap, config) == ""
+
+    section.model = "some/model"
+    assert not _resolved(config, attr).api_key
+    assert configured_from(cap, config) == ""
+    assert not has_credential(cap, config)
+
+
+def test_only_the_media_family_borrows(tmp_path: Path) -> None:
+    """web_search cannot reuse anything -- its row already names what to get --
+    and web_fetch needs nothing at all."""
+    config = _config(tmp_path)
+    config.providers.openrouter.api_key = "sk-or-test"
+
+    for cap in (c for c in CAPABILITIES if not c.media_attr):
+        assert borrowable_credential(cap, config) == "", cap.tool
+
+
+def _on_offer(loop, tool: str) -> bool:
+    """What the agent is actually handed: registered, and not withheld now.
+
+    Registry membership alone is not the answer here -- a disabled tool stays
+    registered and is dropped when the tool array is built.
+    """
+    return loop.tools.offers_by_name(tool) and tool not in loop._withheld_tool_names()
+
+
+def test_a_switched_off_tool_is_configured_and_still_not_offered(workspace, tmp_path: Path) -> None:
+    """The combination the report used to get wrong.
+
+    A key is set, so the credential gate is satisfied and saying "unconfigured"
+    would send the deployer to set it again. What decides whether the agent is
+    offered the tool is `tools.disabledTools` -- so the predicate that has to
+    agree with the loop is `is_offered`, not `is_configured`.
+
+    Upstream compared `is_offered` against registry membership, because there a
+    disabled tool is unregistered at startup. This loop keeps it registered and
+    withholds it per request (`_withheld_tool_names`), so that a switch flipped
+    now takes effect on the next turn instead of destroying its own subject.
+    What the agent is offered is therefore "registered and not withheld".
+    """
+    config = _config(tmp_path)
+    config.tools.web.search.api_key = "sk-serper"
+    config.tools.disabled_tools = ["web_search"]
+    # Passed in, the way the CLI entry points do: the loop takes the list as an
+    # argument rather than reading the config.
+    loop = _loop(workspace, config, search_api_key="sk-serper", disabled_tools=config.tools.disabled_tools)
+    cap = next(c for c in CAPABILITIES if c.tool == "web_search")
+
+    assert _on_offer(loop, "web_search") is False
+    assert is_configured(cap, config) is True
+    assert is_disabled(cap, config) is True
+    assert is_offered(cap, config) is _on_offer(loop, "web_search")
+
+
+@pytest.mark.parametrize("cap", CAPABILITIES, ids=lambda c: c.tool)
+def test_being_offered_matches_the_registry_for_every_capability(cap, workspace, tmp_path: Path) -> None:
+    """Every entry, switched on and then off by name, against the real loop.
+
+    Parametrised rather than written for web_search alone: the disabled list
+    covers any tool, and a family that stops agreeing is exactly the drift the
+    rest of this file exists to catch.
+    """
+    config = _config(tmp_path)
+    config.tools.web.search.api_key = "sk-serper"
+    config.tools.web.search.images = True
+    for attr in _media_attrs():
+        getattr(config.tools.media, attr).model = "some/model"
+    config.providers.openrouter.api_key = "sk-or-test"
+
+    on = _loop(workspace, config, search_api_key="sk-serper", image_search=True)
+    assert is_offered(cap, config) is _on_offer(on, cap.tool)
+
+    config.tools.disabled_tools = [cap.tool]
+    off = _loop(
+        workspace,
+        config,
+        search_api_key="sk-serper",
+        image_search=True,
+        disabled_tools=config.tools.disabled_tools,
+    )
+    assert is_offered(cap, config) is _on_offer(off, cap.tool)
+    assert _on_offer(off, cap.tool) is False
+
+
+def test_the_picture_switch_reads_as_off_rather_than_unconfigured(workspace, tmp_path: Path) -> None:
+    """A Serper key with `tools.web.search.images` left off.
+
+    The credential gate is satisfied and the loop still holds no image_search,
+    so a table that answered on the key alone would tick a capability the agent
+    does not have -- and would send the deployer to set a key already there.
+    """
+    config = _config(tmp_path)
+    config.tools.web.search.api_key = "sk-serper"
+    loop = _loop(workspace, config, search_api_key="sk-serper")
+    cap = next(c for c in CAPABILITIES if c.tool == "image_search")
+
+    assert _on_offer(loop, "image_search") is False
+    assert is_configured(cap, config) is True
+    assert is_disabled(cap, config) is True
+    assert is_offered(cap, config) is _on_offer(loop, "image_search")
+    # The setting a report must name: `disabledTools` need not contain the
+    # tool, and editing it cannot turn this one on.
+    assert disabled_by(cap, config) == "tools.web.search.images"
+
+
+def test_the_off_switch_each_capability_names_is_the_one_that_undoes_it(workspace, tmp_path: Path) -> None:
+    """Both branches of the field, and the order where both are shut.
+
+    The registration gate is named ahead of the deny list because taking
+    image_search out of `disabledTools` with pictures off restarts into the
+    same missing tool.
+    """
+    config = _config(tmp_path)
+    config.tools.web.search.api_key = "sk-serper"
+    config.tools.web.search.images = True
+    pictures = next(c for c in CAPABILITIES if c.tool == "image_search")
+    search = next(c for c in CAPABILITIES if c.tool == "web_search")
+
+    assert disabled_by(pictures, config) == ""
+    assert disabled_by(search, config) == ""
+
+    config.tools.disabled_tools = ["web_search", "image_search"]
+    assert disabled_by(search, config) == "tools.disabledTools"
+    assert disabled_by(pictures, config) == "tools.disabledTools"
+
+    config.tools.web.search.images = False
+    assert disabled_by(pictures, config) == "tools.web.search.images"
+
+
+def test_a_media_key_added_after_start_surfaces_the_tool(workspace, tmp_path: Path, monkeypatch) -> None:
+    """The whole point of moving the gate to the withheld axis: the user edits
+    the config file, nothing re-registers, and the next assembly offers the tool
+    with the very key the call will use."""
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setattr("raven.home._current_config_path", cfg_file)
+    loop = _loop(workspace, _config(tmp_path))
+    assert not loop.tools.offers_by_name("image_generate")
+
+    cfg_file.write_text(json.dumps({"tools": {"media": {"image": {"apiKey": "sk-added"}}}}), encoding="utf-8")
+
+    assert loop.tools.offers_by_name("image_generate")
+    assert loop.tools.get("image_generate").api_key == "sk-added"
+
+
+def test_a_media_key_removed_after_start_withdraws_the_tool(workspace, tmp_path: Path, monkeypatch) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"tools": {"media": {"image": {"apiKey": "sk-was-here"}}}}), encoding="utf-8")
+    monkeypatch.setattr("raven.home._current_config_path", cfg_file)
+    config = load_config(cfg_file)
+    loop = _loop(workspace, config)
+    assert loop.tools.offers_by_name("image_generate")
+
+    cfg_file.write_text(json.dumps({"tools": {"media": {"image": {}}}}), encoding="utf-8")
+
+    assert not loop.tools.offers_by_name("image_generate")
+
+
+def test_a_plugin_shadowing_a_media_tool_is_not_gated_by_the_builtin_config(workspace, tmp_path: Path) -> None:
+    from raven.contracts.tool import Tool
+
+    class _PluginImage(Tool):
+        name = "image_generate"
+        description = "plugin image tool with its own credential story"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs):
+            return "plugin ran"
+
+    plugin = _PluginImage()
+    loop = _loop(workspace, _config(tmp_path), plugin_tools=[plugin])
+
+    assert loop.tools.get("image_generate") is plugin
+    assert loop.tools.offers_by_name("image_generate"), "the built-in's empty section must not gate the plugin"
+
+
+def test_a_plugin_tool_that_declares_configured_rides_the_live_withheld_lane(workspace, tmp_path: Path) -> None:
+    """The paper in plugin_surface.py: a contributed tool that declares `configured()`
+    is asked per assembly and withheld while it answers False -- offered the moment
+    the deployment configures it, withdrawn the moment it does not, no restart."""
+    from raven.contracts.tool import Tool
+
+    state = {"configured": False}
+
+    class _DeckPicture(Tool):
+        name = "deck_picture"
+        description = "a plugin tool that bills against a credential the host may not have"
+        parameters = {"type": "object", "properties": {}}
+
+        def configured(self) -> bool:
+            return state["configured"]
+
+        async def execute(self, **kwargs):
+            return "drawn"
+
+    loop = _loop(workspace, _config(tmp_path), plugin_tools=[_DeckPicture()])
+    assert loop.tools.has("deck_picture"), "withheld, not unregistered"
+    assert not loop.tools.offers_by_name("deck_picture")
+    state["configured"] = True
+    assert loop.tools.offers_by_name("deck_picture")
+    state["configured"] = False
+    assert not loop.tools.offers_by_name("deck_picture")
+
+
+def test_a_plugin_subclass_of_a_media_tool_is_not_gated_either(workspace, tmp_path: Path) -> None:
+    from raven.agent.tools.media_gen import ImageGenerateTool
+    from raven.config.schema import MediaToolConfig
+
+    class _PluginSubclassImage(ImageGenerateTool):
+        def __init__(self) -> None:
+            super().__init__(MediaToolConfig(api_key="sk-plugin-own", model="plugin/model"))
+
+    plugin = _PluginSubclassImage()
+    loop = _loop(workspace, _config(tmp_path), plugin_tools=[plugin])
+
+    assert loop.tools.get("image_generate") is plugin
+    assert loop.tools.offers_by_name("image_generate"), "identity, not type: a subclass is not the built-in"
+
+
+def test_the_web_rows_resolve_to_the_selected_vendor(tmp_path: Path) -> None:
+    """The table is static; the deployer's instructions are not. A Tavily
+    deployment is sent to Tavily's slot, env var and sign-up page, and the
+    source named for a satisfied row is the slot that actually holds the key."""
+    from raven.agent.tools.capabilities import configured_from, resolve
+
+    config = _config(tmp_path)
+    config.tools.web.search.provider = "tavily"
+    config.tools.web.fetch.provider = "firecrawl"
+    rows = {c.tool: resolve(c, config) for c in CAPABILITIES}
+    assert rows["web_search"].config_path == "tools.web.providers.tavily.apiKey"
+    assert rows["web_search"].env_var == "TAVILY_API_KEY"
+    assert rows["web_search"].obtain_from == "https://tavily.com"
+    assert rows["web_fetch"].config_path == "tools.web.providers.firecrawl.apiKey"
+    assert rows["web_fetch"].need is Need.NOTHING, "web_fetch is always offered; a keyless reader falls back to Jina"
+
+    search = next(c for c in CAPABILITIES if c.tool == "web_search")
+    config.tools.web.providers.tavily.api_key = "tv"
+    assert configured_from(search, config) == "tools.web.providers.tavily.apiKey"
+
+    legacy = _config(tmp_path)
+    legacy.tools.web.search.api_key = "sk-serper"
+    assert configured_from(search, legacy) == "tools.web.search.apiKey", "the pre-vendor leaf is named as itself"

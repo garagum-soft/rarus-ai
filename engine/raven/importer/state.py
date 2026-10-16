@@ -1,0 +1,183 @@
+"""Idempotent state tracker for cold-start import."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from collections import Counter
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
+from raven.utils.atomic_io import atomic_replace
+
+
+def _default_state_path() -> Path:
+    from raven.config.paths import get_data_dir
+
+    return get_data_dir() / "import_state.json"
+
+
+class ImportState:
+    """Tracks which sources have been imported to enable resume.
+
+    Storage layout (``~/.raven/import_state.json``, configurable)::
+
+        {
+          "meta": {"total": 42},
+          "entries": {
+            "claude_code:proj-memory": {"status": "submitted", ...},
+            ...
+          }
+        }
+
+    The state dict is cached in memory after the first read.  Mutations
+    update the cache and flush to disk atomically via
+    :func:`raven.utils.atomic_io.atomic_replace`.
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
+        self._path = path or _default_state_path()
+        self._cache: dict[str, Any] | None = None
+
+    @property
+    def path(self) -> Path:
+        """Where this state is kept; a caller asks it whether an import exists."""
+        return self._path
+
+    @property
+    def cancel_path(self) -> Path:
+        return self._path.parent / "import_cancel"
+
+    def is_submitted(self, platform: str, source_key: str) -> bool:
+        entry = self._entries().get(f"{platform}:{source_key}")
+        return entry is not None and entry.get("status") == "submitted"
+
+    def mark_submitted(self, platform: str, source_key: str) -> None:
+        self._mark(platform, source_key, "submitted")
+
+    def mark_failed(self, platform: str, source_key: str, error: str) -> None:
+        self._mark(platform, source_key, "failed", error=error)
+
+    def set_total(
+        self,
+        total: int,
+        *,
+        keys: Iterable[str] | None = None,
+        tier: str | None = None,
+        platforms: Iterable[str] | None = None,
+    ) -> None:
+        """Record the units of a run: how many, and -- when given -- which.
+
+        Entries outlive the run that wrote them (they are what lets a later
+        run skip a source), so a status read that counts every entry against
+        this run's total contradicts itself after a subset run. A caller that
+        names the run's ``platform:source_key`` keys scopes that read to them;
+        one that does not (``raven import run``) leaves every entry in scope,
+        which is how ``raven import status`` has always counted.
+
+        ``tier`` and ``platforms`` are the run's own request, kept so a client
+        that finds a run stopped short (the gateway restarted under it) can
+        start the same one again without having remembered what was asked.
+        """
+        data = self._ensure_loaded()
+        data.setdefault("entries", {})
+        meta = data.setdefault("meta", {})
+        meta["total"] = total
+        for name, value in (("keys", keys), ("platforms", platforms)):
+            if value is None:
+                meta.pop(name, None)
+            else:
+                meta[name] = sorted(value)
+        if tier is None:
+            meta.pop("tier", None)
+        else:
+            meta["tier"] = tier
+        # A new run's phases have not happened yet; the previous run's verdict
+        # must not read as this one's.
+        meta.pop("phases", None)
+        self._flush()
+
+    def set_phases(self, status: str, errors: Iterable[str] = ()) -> None:
+        """Record how the post-import phases stand for the run on file.
+
+        ``pending`` while they run, then ``done``, ``failed`` (with what went
+        wrong) or ``cancelled``. The message counts alone cannot tell a run
+        whose phases finished from one the gateway lost halfway through them,
+        since every source is already settled by the time the phases begin.
+        """
+        data = self._ensure_loaded()
+        meta = data.setdefault("meta", {})
+        meta["phases"] = {"status": status, "errors": list(errors)}
+        self._flush()
+
+    def get_summary(self) -> dict[str, int]:
+        """Return ``{"total", "submitted", "failed"}`` counts."""
+        entries = self._entries()
+        counts = Counter(v.get("status") for v in entries.values())
+        meta = self._ensure_loaded().get("meta", {})
+        return {
+            "total": meta.get("total", len(entries)),
+            "submitted": counts.get("submitted", 0),
+            "failed": counts.get("failed", 0),
+        }
+
+    def get_progress(self) -> dict[str, Any]:
+        return {
+            "meta": dict(self._ensure_loaded().get("meta", {})),
+            "entries": dict(self._entries()),
+        }
+
+    # -- internals ----------------------------------------------------------
+
+    def _mark(
+        self,
+        platform: str,
+        source_key: str,
+        status: str,
+        *,
+        error: str | None = None,
+    ) -> None:
+        self._entries()[f"{platform}:{source_key}"] = {
+            "status": status,
+            "timestamp": time.time(),
+            "error": error,
+        }
+        self._flush()
+
+    def _entries(self) -> dict[str, dict[str, Any]]:
+        return self._ensure_loaded().setdefault("entries", {})
+
+    def _ensure_loaded(self) -> dict[str, Any]:
+        if self._cache is None:
+            self._cache = self._read_from_disk()
+        return self._cache
+
+    def _read_from_disk(self) -> dict[str, Any]:
+        if not self._path.exists():
+            return {}
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            backup = self._path.with_suffix(".json.corrupt")
+            logger.warning(
+                "Corrupt import state at {} -- backing up to {}",
+                self._path,
+                backup,
+            )
+            os.replace(self._path, backup)
+            return {}
+        if "entries" in raw:
+            return raw
+        # Migrate flat layout from earlier drafts.
+        return {"entries": raw}
+
+    def _flush(self) -> None:
+        data = self._ensure_loaded()
+        atomic_replace(self._path, json.dumps(data, indent=2))
+
+
+__all__ = ["ImportState"]

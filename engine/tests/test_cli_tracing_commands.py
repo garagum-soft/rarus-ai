@@ -1,0 +1,404 @@
+"""Unit tests for ``raven/cli/tracing_commands.py`` viewer-launch helpers.
+
+Focus: the port-reuse guard. A live port must only be reused when it is *our*
+tracing viewer (answers ``/api/health`` with ``{"ok": true}``); a foreign or
+stale server holding the port must be detected so the launcher can move on.
+
+Also covers the background-viewer lifecycle: pid file written on spawn,
+``raven tracing stop`` (idempotent, never kills an unverified pid), and
+start-time reuse of a live instance recorded in the pid file. Real process
+reaping is left to integration/manual checks — Popen is monkeypatched here.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import socket
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from raven.cli import tracing_commands as tc
+from raven.cli.commands import app
+from raven.tracing.compact import CompactResult
+
+runner = CliRunner()
+
+
+def _free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+class _Handler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler API
+        if self.path == "/api/health" and getattr(self.server, "health_ok", False):
+            body = json.dumps({"ok": True, "port": 0, "stateDir": "/x"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == tc._VIEWER_UI_PROBE and getattr(self.server, "ui_ok", False):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.end_headers()
+            self.wfile.write(b"// app\n")
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not found")
+
+    def log_message(self, *_a):  # silence test server logging
+        pass
+
+
+def _serve(port: int, health_ok: bool, ui_ok: bool = True) -> HTTPServer:
+    srv = HTTPServer(("127.0.0.1", port), _Handler)
+    srv.health_ok = health_ok  # type: ignore[attr-defined]
+    srv.ui_ok = ui_ok  # type: ignore[attr-defined]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_viewer_health_false_when_nothing_listening():
+    assert tc._viewer_health(_free_port()) is False
+
+
+def test_viewer_health_false_for_foreign_server():
+    port = _free_port()
+    srv = _serve(port, health_ok=False)
+    try:
+        assert tc._viewer_health(port) is False
+    finally:
+        srv.shutdown()
+
+
+def test_viewer_health_true_for_our_viewer():
+    port = _free_port()
+    srv = _serve(port, health_ok=True)
+    try:
+        assert tc._viewer_health(port) is True
+    finally:
+        srv.shutdown()
+
+
+def test_viewer_health_false_when_ui_assets_are_gone():
+    """The observed failure: a viewer whose install directory was replaced.
+
+    Health and the HTML shell come from memory, so the process keeps reporting
+    itself healthy while every asset read 404s -- reusing it hands the user an
+    unstyled page that never connects. Both probes must pass, not just health.
+    """
+    port = _free_port()
+    srv = _serve(port, health_ok=True, ui_ok=False)
+    try:
+        assert tc._viewer_health(port) is False
+    finally:
+        srv.shutdown()
+
+
+def test_find_free_port_skips_occupied():
+    port = _free_port()
+    srv = _serve(port, health_ok=False)  # occupy `port`
+    try:
+        got = tc._find_free_port(port)
+        assert got is not None
+        assert got != port
+    finally:
+        srv.shutdown()
+
+
+class _FakeProc:
+    pid = 4242
+
+
+def test_tracing_writes_pidfile(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    spawned = {}
+
+    def fake_popen(*args, **kwargs):
+        spawned["cmd"] = args[0]
+        return _FakeProc()
+
+    monkeypatch.setattr(tc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tc, "_resolve_node", lambda: "/usr/bin/node")
+    monkeypatch.setattr(tc, "_viewer_health", lambda port: bool(spawned))
+    monkeypatch.setattr(tc.webbrowser, "open", lambda url: None)
+    port = _free_port()
+
+    tc._open_dashboard(port)
+
+    data = json.loads((tmp_path / "viewer.pid").read_text(encoding="utf-8"))
+    assert data["pid"] == 4242
+    assert data["port"] == port
+
+
+def test_tracing_stop_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+
+    r = runner.invoke(app, ["tracing", "stop"])
+    assert r.exit_code == 0
+    assert "not running" in r.output.lower()
+
+    r2 = runner.invoke(app, ["tracing", "stop"])
+    assert r2.exit_code == 0
+    assert "not running" in r2.output.lower()
+
+
+def test_tracing_stop_kills_verified_viewer(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    pidfile = tmp_path / "viewer.pid"
+    pidfile.write_text(json.dumps({"pid": 4242, "port": 4318}), encoding="utf-8")
+    killed = []
+    monkeypatch.setattr(tc, "_pid_is_viewer", lambda pid: pid == 4242)
+    monkeypatch.setattr(tc.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    r = runner.invoke(app, ["tracing", "stop"])
+
+    assert r.exit_code == 0
+    assert killed == [(4242, signal.SIGTERM)]
+    assert not pidfile.exists()
+
+
+def test_tracing_stop_never_kills_unverified_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    pidfile = tmp_path / "viewer.pid"
+    pidfile.write_text(json.dumps({"pid": 4242, "port": 4318}), encoding="utf-8")
+    killed = []
+    monkeypatch.setattr(tc, "_pid_is_viewer", lambda pid: False)
+    monkeypatch.setattr(tc.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    r = runner.invoke(app, ["tracing", "stop"])
+
+    assert r.exit_code == 0
+    assert killed == []
+    assert not pidfile.exists()
+
+
+def test_tracing_reuses_live_instance_from_pidfile(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    (tmp_path / "viewer.pid").write_text(json.dumps({"pid": 4242, "port": 5555}), encoding="utf-8")
+    monkeypatch.setattr(tc, "_pid_is_viewer", lambda pid: pid == 4242)
+    monkeypatch.setattr(tc, "_viewer_health", lambda port: port == 5555)
+    opened = []
+    monkeypatch.setattr(tc.webbrowser, "open", lambda url: opened.append(url))
+
+    def no_spawn(*args, **kwargs):
+        raise AssertionError("must reuse the live viewer, not spawn a new one")
+
+    monkeypatch.setattr(tc.subprocess, "Popen", no_spawn)
+
+    tc._open_dashboard(4318)
+
+    assert opened == ["http://127.0.0.1:5555/"]
+
+
+def test_pid_is_viewer_rejects_foreign_process():
+    assert tc._pid_is_viewer(os.getpid()) is False
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("node /opt/raven/cli/tracing_viewer/server.js", True),
+        ("nodejs /opt/raven/cli/tracing_viewer/server.js", True),
+        ("node22 /opt/raven/cli/tracing_viewer/server.js", True),
+        ("/usr/bin/node-22 /opt/raven/cli/tracing_viewer/server.js", True),
+        ("/usr/bin/node-v22.16.0 /opt/raven/cli/tracing_viewer/server.js", True),
+        (r'"C:\Node\nodejs.exe" "C:\Raven\tracing_viewer\server.js"', True),
+        ('"C:\\Program Files\\nodejs\\node.exe" "C:\\Raven\\tracing_viewer\\server.js"', True),
+        ('"/opt/node runtime/node" /opt/raven/cli/tracing_viewer/server.js', True),
+        ("/Users/x/Raven copy/.venv/bin/node /opt/raven/cli/tracing_viewer/server.js", True),
+        ("/Users/x/node copy/bin/node22 /opt/raven/cli/tracing_viewer/server.js", True),
+        ("/usr/bin/python /opt/node server.js", False),
+        ("python /opt/node server.js", False),
+        (None, None),
+        ("", None),
+        ("node.exe unrelated.js", False),
+        ("python server.js", False),
+        ("notnode server.js", False),
+    ],
+)
+def test_pid_is_viewer_uses_the_shared_command_line_reader(monkeypatch, line, expected):
+    from raven.utils import processes
+
+    seen: list[int] = []
+
+    def read(pid):
+        seen.append(pid)
+        return line
+
+    monkeypatch.setattr(processes, "command_line", read)
+    monkeypatch.setattr("raven.utils.pid.pid_alive", lambda _pid: True)
+    assert tc._pid_is_viewer(4242) is expected
+    assert seen == [4242]
+
+
+@pytest.mark.parametrize("action", [[], ["stop"]])
+def test_tracing_keeps_an_unreadable_live_viewer_record(tmp_path, monkeypatch, action):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    pidfile = tmp_path / "viewer.pid"
+    entry = {"pid": 4242, "port": 4318}
+    pidfile.write_text(json.dumps(entry), encoding="utf-8")
+    monkeypatch.setattr("raven.utils.processes.command_line", lambda _pid: None)
+    monkeypatch.setattr("raven.utils.pid.pid_alive", lambda _pid: True)
+    monkeypatch.setattr(tc.os, "kill", lambda *_args: pytest.fail("signalled an unverified viewer"))
+    monkeypatch.setattr(tc, "_resolve_node", lambda: pytest.fail("started beside an unverified viewer"))
+    monkeypatch.setattr(tc, "_port_live", lambda _port: False)
+
+    result = runner.invoke(app, ["tracing", *action])
+
+    assert result.exit_code == 1
+    assert "cannot verify" in result.output.lower()
+    assert "viewer.pid" in result.output.replace("\n", "")
+    assert "after confirming the record is stale" in " ".join(result.output.split())
+    assert "stop it manually" not in result.output
+    assert json.loads(pidfile.read_text(encoding="utf-8")) == entry
+
+
+def test_tracing_stops_a_viewer_with_an_unquoted_spaced_node_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    pidfile = tmp_path / "viewer.pid"
+    pidfile.write_text(json.dumps({"pid": 4242, "port": 4318}), encoding="utf-8")
+    monkeypatch.setattr(
+        "raven.utils.processes.command_line",
+        lambda _pid: "/Users/x/Raven copy/.venv/bin/node /opt/raven/cli/tracing_viewer/server.js",
+    )
+    killed = []
+    monkeypatch.setattr(tc.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    result = runner.invoke(app, ["tracing", "stop"])
+
+    assert result.exit_code == 0
+    assert killed == [(4242, signal.SIGTERM)]
+    assert not pidfile.exists()
+
+
+def test_an_unreadable_dead_viewer_record_can_be_cleared(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    pidfile = tmp_path / "viewer.pid"
+    pidfile.write_text(json.dumps({"pid": 4242, "port": 4318}), encoding="utf-8")
+    monkeypatch.setattr("raven.utils.processes.command_line", lambda _pid: None)
+    monkeypatch.setattr("raven.utils.pid.pid_alive", lambda _pid: False)
+    monkeypatch.setattr(tc.os, "kill", lambda *_args: pytest.fail("signalled a dead viewer"))
+
+    result = runner.invoke(app, ["tracing", "stop"])
+
+    assert result.exit_code == 0
+    assert "stale pid file" in result.output
+    assert not pidfile.exists()
+
+
+def _aged_artifact(state_dir: Path, name: str, text: str) -> Path:
+    path = state_dir / "logs" / "audit-artifacts" / "llm.input" / "2026-08-01" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    stamp = time.time() - 3600
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_tracing_compact_folds_duplicates(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    a = _aged_artifact(tmp_path, "a.json", '{"m":"same"}')
+    b = _aged_artifact(tmp_path, "b.json", '{"m":"same"}')
+
+    r = runner.invoke(app, ["tracing", "compact"])
+
+    assert r.exit_code == 0
+    assert "scanned 2" in r.output
+    assert "folded 1" in r.output
+    assert a.stat().st_ino == b.stat().st_ino
+
+
+def test_tracing_compact_dry_run_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    a = _aged_artifact(tmp_path, "a.json", '{"m":"same"}')
+    b = _aged_artifact(tmp_path, "b.json", '{"m":"same"}')
+
+    r = runner.invoke(app, ["tracing", "compact", "--dry-run"])
+
+    assert r.exit_code == 0
+    assert "folded 1" in r.output
+    assert a.stat().st_ino != b.stat().st_ino
+    assert not (tmp_path / "logs" / "audit-artifacts" / "_blobs").exists()
+
+
+def test_tracing_compact_without_artifacts_is_not_an_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+
+    r = runner.invoke(app, ["tracing", "compact"])
+
+    assert r.exit_code == 0
+    assert "no artifacts" in r.output.lower()
+
+
+def test_tracing_compact_error_message_is_not_corrupted_by_rich_markup(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    (tmp_path / "logs" / "audit-artifacts").mkdir(parents=True)
+    message = "[Errno 13] Permission denied: /a/[foo]/b.json"
+    monkeypatch.setattr("raven.tracing.compact.compact", lambda *args, **kwargs: CompactResult(errors=[message]))
+
+    r = runner.invoke(app, ["tracing", "compact"])
+
+    assert r.exit_code == 0
+    assert message in r.output
+
+
+def test_tracing_compact_reports_dropped_error_count(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+    (tmp_path / "logs" / "audit-artifacts").mkdir(parents=True)
+    canned = CompactResult(errors=[f"err-{i}" for i in range(15)], errors_dropped=5)
+    monkeypatch.setattr("raven.tracing.compact.compact", lambda *args, **kwargs: canned)
+
+    r = runner.invoke(app, ["tracing", "compact"])
+
+    assert r.exit_code == 0
+    assert "... and 10 more" in r.output
+
+
+def test_tracing_rejects_an_unknown_action(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+
+    r = runner.invoke(app, ["tracing", "wat"])
+
+    assert r.exit_code == 2
+    assert "compact" in r.output
+    assert "stop" in r.output
+
+
+def test_tracing_rejects_an_unknown_action_with_bracketed_markup(tmp_path, monkeypatch):
+    """Rich markup in the echoed action must not corrupt the message or the
+    exit-2 contract: unescaped, '[/x]' raises rich.errors.MarkupError instead
+    of printing.
+    """
+    monkeypatch.setenv("RAVEN_TRACING_DIR", str(tmp_path))
+
+    r = runner.invoke(app, ["tracing", "[/x]"])
+
+    assert r.exit_code == 2
+    assert "[/x]" in r.output
+    assert "compact" in r.output
+    assert "stop" in r.output
+
+
+def test_a_below_minimum_node_is_refused(monkeypatch):
+    """find_node deliberately returns the best node it saw even below the
+    minimum; the viewer used to discard the version and run on it anyway."""
+    import pytest
+    import typer
+
+    import raven.cli.tracing_commands as tc
+
+    monkeypatch.setattr("raven.cli.tui_commands.find_node", lambda: ("/usr/bin/node", (20, 0, 0)))
+    with pytest.raises(typer.Exit):
+        tc._resolve_node()

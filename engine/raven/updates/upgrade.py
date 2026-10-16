@@ -1,0 +1,1413 @@
+"""The upgrade engine: release lookup, version keys, the plan, the detached handoff.
+
+Upgrades the installed Raven in place without rebuilding the whole
+environment: resolve the target version, swap the package, and refuse to
+serve out of a half-written installation (see the guard in the serve
+path). Everything here is transport: rendering, prompts and exit codes.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+import zlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from importlib import metadata
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+from urllib.request import url2pathname
+
+import httpx
+
+from raven.security.tls import system_ca_in_use
+from raven.updates import install_guard as _install_guard
+
+LATEST_RELEASE_API = "https://api.github.com/repos/EverMind-AI/Raven/releases/latest"
+LATEST_RELEASE_WEB = "https://github.com/EverMind-AI/Raven/releases/latest"
+RELEASE_TAG_PREFIX = "https://github.com/EverMind-AI/Raven/releases/tag/"
+RELEASE_DOWNLOAD_PREFIX = "https://github.com/EverMind-AI/Raven/releases/download/"
+_VERSION_RE = re.compile(r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_REQUEST_TIMEOUT = 10.0
+# The fallback exists to rescue a failing command, so it may not add another full
+# timeout to the wait: three sequential requests at 10s would triple the worst case.
+_FALLBACK_TIMEOUT = 5.0
+
+
+class UpgradeError(RuntimeError):
+    pass
+
+
+class ReleaseLookupError(UpgradeError):
+    """Latest-release discovery failed. The local installation is fine, so the
+    caller must not advise reinstalling."""
+
+
+@dataclass(frozen=True)
+class ReleaseInfo:
+    version: str
+    wheel_url: str
+
+
+@dataclass(frozen=True)
+class ToolInstallTarget:
+    tool_dir: Path
+    bin_dir: Path
+
+
+_UPGRADE_HELPER_SOURCE = r"""import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+# How long to wait for the process being replaced to exit. Sized for a real
+# `raven serve` shutdown, which cancels detached sub-agents, closes every MCP
+# server, flushes the memory backend and closes the browser driver first, and so
+# takes tens of seconds routinely and minutes at worst. A tight bound is not a
+# safety margin here: the parent is going away either way, and giving up early
+# means the install never runs and the surface the upgrade was clicked from
+# never comes back. Waiting too long costs one sleeping helper; waiting too
+# little costs the user a Raven they have to restart by hand.
+PARENT_EXIT_TIMEOUT_S = 300
+
+# How long one size probe may take. Deliberately well under the socket
+# default: the sizes are a courtesy, and four unanswered probes must not add
+# minutes of silence to the very wait they exist to explain.
+SIZE_TIMEOUT_S = 5
+
+# How long a failure stays readable on the page's port before the Raven it
+# replaced is brought back. The page polls about once a second, so this is
+# several chances to see it; the ceiling is what a reader waits for the old
+# Raven when nobody is looking.
+STATUS_HOLD_S = 5
+
+WAITING_PAGE = (
+    b'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="3">'
+    b"<title>Raven</title><p>Raven is upgrading...</p>"
+)
+
+
+class Progress:
+    # What the page shows while this helper is the only thing on its port.
+    # Written by the download loop, read by the status server's threads.
+
+    def __init__(self, to_version):
+        self._lock = threading.Lock()
+        self._state = {
+            "upgrading": True,
+            "to": to_version,
+            "phase": "starting",
+            "done": 0,
+            "total": 0,
+            "rate": 0,
+            "message": None,
+        }
+        self._samples = []
+        self.failure_seen = threading.Event()
+
+    def set(self, **fields):
+        with self._lock:
+            self._state.update(fields)
+
+    def advance(self, count):
+        now = time.monotonic()
+        with self._lock:
+            self._state["done"] += count
+            self._samples.append((now, self._state["done"]))
+            self._samples = [sample for sample in self._samples if sample[0] >= now - 3.0]
+            (first_at, first_done), (last_at, last_done) = self._samples[0], self._samples[-1]
+            if last_at > first_at:
+                self._state["rate"] = int((last_done - first_done) / (last_at - first_at))
+
+    def snapshot(self):
+        with self._lock:
+            state = dict(self._state)
+        if state["phase"] == "failed":
+            self.failure_seen.set()
+        return state
+
+
+def recorded_port():
+    # The port the page is on, written into the marker by the side that spawned
+    # this helper. Absent for the terminal, which has no page to answer.
+    if not MARKER_PATH:
+        return None
+    try:
+        with open(MARKER_PATH, encoding="utf-8") as handle:
+            port = json.load(handle).get("port")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return port if isinstance(port, int) and 0 < port < 65536 else None
+
+
+def serve_status(port, progress):
+    # Once the Raven being replaced has exited, nothing answers on the port its
+    # page is pointed at, and the page can only spin. This answers in its place
+    # until the new Raven is started: `/upgrade/status` with the progress, and
+    # 503 for everything else, so the page's "is it back?" probe keeps waiting
+    # instead of reloading onto this helper.
+    import http.server
+
+    allowed = {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def reply(self, status, body, content_type):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            if status == 503:
+                self.send_header("Retry-After", "2")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def do_GET(self):
+            # Only the page's own origin: a site the reader has open could
+            # otherwise rebind a host name of its own to this port.
+            if self.headers.get("Host") not in allowed:
+                self.reply(421, b"", "text/plain")
+                return
+            if self.path.split("?", 1)[0] == "/upgrade/status":
+                self.reply(200, json.dumps(progress.snapshot()).encode("utf-8"), "application/json")
+                return
+            # A reload during the upgrade lands here, not on the page. It asks
+            # again every few seconds, so it becomes the page once Raven is back.
+            self.reply(503, WAITING_PAGE, "text/html; charset=utf-8")
+
+        do_HEAD = do_GET
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        return None
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+# Where the spawning side recorded that this environment is being replaced. The
+# helper runs under `python -I` outside the environment it is rewriting, so it
+# cannot import raven to ask; the path is handed over instead.
+MARKER_PATH = os.environ.get("RAVEN_UPGRADE_MARKER") or None
+
+# The spawning side verifies TLS against the operating system's store, and this
+# helper's downloads should succeed wherever its release lookup did. truststore
+# is handed over as a copy for the same reason as the marker path: the original
+# sits in the environment being rewritten, beside packages it would pull in.
+# Taken out of the environment, so the Raven relaunched below does not inherit
+# a path this helper deletes.
+TRUSTSTORE_COPY = os.environ.pop("RAVEN_UPGRADE_TRUSTSTORE", None) or None
+
+
+def use_system_ca():
+    if not TRUSTSTORE_COPY:
+        return
+    sys.path.insert(0, TRUSTSTORE_COPY)
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception as exc:
+        print(f"Warning: could not verify downloads against the system certificate store ({exc}).", file=sys.stderr)
+    finally:
+        sys.path.remove(TRUSTSTORE_COPY)
+        shutil.rmtree(TRUSTSTORE_COPY, ignore_errors=True)
+
+
+def uv_environment(uv_path):
+    # uv keeps its own bundled roots unless told otherwise. It is told when the
+    # system store was handed over, and only uv is: the Raven relaunched after
+    # the install inherits this helper's own environment.
+    env = dict(os.environ)
+    if TRUSTSTORE_COPY:
+        env.setdefault("UV_SYSTEM_CERTS", "1")
+        # The name uv read before 0.11. Later releases still honour it but call
+        # it deprecated, from 0.11.9 to 0.12.15 even beside UV_SYSTEM_CERTS, so
+        # it goes only to a uv older than that, or one that does not say.
+        if uv_version(uv_path) < (0, 11):
+            env.setdefault("UV_NATIVE_TLS", "1")
+    return env
+
+
+def uv_version(uv_path):
+    # `uv 0.12.3 (...)` reads as (0, 12); one that cannot be read as (0,),
+    # older than every release.
+    try:
+        out = subprocess.run([uv_path, "--version"], capture_output=True, text=True, timeout=30, check=False)
+        return tuple(int(part) for part in out.stdout.split()[1].split(".")[:2])
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return (0,)
+
+
+def stamp_marker():
+    # Claim the marker for this helper. The pid is the only thing that tells an
+    # install still running from one whose helper was killed, and those two need
+    # opposite answers from whoever is starting up.
+    if not MARKER_PATH:
+        return
+    try:
+        with open(MARKER_PATH, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            payload = {}
+    except (OSError, ValueError):
+        payload = {}
+    payload.setdefault("started_at", time.time())
+    payload["pid"] = os.getpid()
+    try:
+        with open(MARKER_PATH, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+    except OSError:
+        pass
+
+
+def clear_marker():
+    if not MARKER_PATH:
+        return
+    try:
+        os.unlink(MARKER_PATH)
+    except OSError:
+        pass
+
+
+def wait_for_parent(parent_pid):
+    if sys.platform != "win32":
+        return wait_for_parent_posix(parent_pid)
+    return wait_for_parent_windows(parent_pid)
+
+
+def wait_for_parent_posix(parent_pid):
+    # POSIX has no waitable handle for a non-child process, so poll the pid.
+    # Bounded, so a parent that refuses to die cannot leave the helper resident.
+    deadline = time.monotonic() + PARENT_EXIT_TIMEOUT_S
+    while time.monotonic() < deadline:
+        try:
+            os.kill(parent_pid, 0)
+        except ProcessLookupError:
+            return 0
+        except PermissionError:
+            # The pid exists but belongs to someone else, i.e. the parent is
+            # gone and its pid was recycled. Treat that as exited.
+            return 0
+        except OSError as exc:
+            print(f"Unable to upgrade Raven: could not watch Raven ({exc}).", file=sys.stderr)
+            return 1
+        time.sleep(0.2)
+    print("Unable to upgrade Raven: waiting for Raven to exit timed out.", file=sys.stderr)
+    return 1
+
+
+def wait_for_parent_windows(parent_pid):
+    import ctypes
+    from ctypes import wintypes
+
+    synchronize = 0x00100000
+    wait_object_0 = 0x00000000
+    wait_timeout = 0x00000102
+    wait_failed = 0xFFFFFFFF
+    error_invalid_parameter = 87
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(synchronize, False, parent_pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == error_invalid_parameter:
+            return 0
+        print(
+            f"Unable to upgrade Raven: could not wait for Raven to exit "
+            f"(Windows error {error}).",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        wait_status = kernel32.WaitForSingleObject(handle, PARENT_EXIT_TIMEOUT_S * 1000)
+        wait_error = ctypes.get_last_error()
+    finally:
+        kernel32.CloseHandle(handle)
+
+    if wait_status == wait_object_0:
+        return 0
+    if wait_status == wait_timeout:
+        detail = "timed out"
+    elif wait_status == wait_failed:
+        detail = f"failed with Windows error {wait_error}"
+    else:
+        detail = f"returned unexpected status {wait_status}"
+    print(f"Unable to upgrade Raven: waiting for Raven to exit {detail}.", file=sys.stderr)
+    return 1
+
+
+def main(argv=None):
+    # Before anything builds a TLS context, as the CLI's own entry settles it.
+    use_system_ca()
+    # Claimed before the argument check, and released however this ends: a
+    # helper that exits without clearing the marker leaves every later start
+    # waiting on an install that is not running.
+    stamp_marker()
+    try:
+        return run(argv)
+    finally:
+        clear_marker()
+
+
+def stop_leftovers_of(env_dir):
+    # Windows cannot replace an executable that is running. The parent waited
+    # for above is gone, but what it started from this environment need not be:
+    # the memory plugin's server runs on the environment's python and outlives
+    # the gateway by design, and `uv tool install` then fails on its everos.exe.
+    # Anything still executing from under the environment is raven's, and the
+    # install cannot proceed around it. Returns (stopped, survivors); survivors
+    # is None when the question could not be asked.
+    root = env_dir.rstrip("\\/") + "\\"
+    select = (
+        "$root = '" + root.replace("'", "''") + "'; "
+        "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and "
+        "$_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) }"
+    )
+    powershell = shutil.which("powershell") or os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+    )
+
+    def ask(script):
+        try:
+            out = subprocess.run(
+                [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.split()
+
+    stopped = ask(select + " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }")
+    if stopped is None:
+        return [], None
+    if stopped:
+        print("Stopped what was still running from the old install (pid " + ", ".join(stopped) + ").")
+        time.sleep(2)
+    # Asked again rather than trusted: Stop-Process is denied on a process of
+    # another user or a higher integrity level, and `uv tool install --force`
+    # deletes the environment before it writes, so a survivor would cost the
+    # user every file except the one that could not be removed.
+    return stopped, ask(select + " | ForEach-Object { $_.ProcessId }")
+
+
+def run(argv=None):
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) not in (4, 5, 6):
+        print("Unable to upgrade Raven: invalid upgrade helper arguments.", file=sys.stderr)
+        return 2
+
+    uv_path, wheel_url, current_version, latest_version = args[:4]
+    # A 6th argument is a JSON argv the helper runs after a successful install:
+    # `raven serve` uses it to bring the gateway back up on the same port, so an
+    # open GUI can reconnect instead of dying with the process it asked to
+    # replace. The CLI passes 4 args and keeps the old exec-in-place behaviour.
+    relaunch = None
+    if len(args) == 6:
+        try:
+            relaunch = json.loads(args[5])
+        except ValueError:
+            print("Unable to upgrade Raven: invalid upgrade helper arguments.", file=sys.stderr)
+            return 2
+        if not (isinstance(relaunch, list) and relaunch and all(isinstance(x, str) for x in relaunch)):
+            print("Unable to upgrade Raven: invalid upgrade helper arguments.", file=sys.stderr)
+            return 2
+    if len(args) >= 5:
+        try:
+            parent_pid = int(args[4])
+        except (TypeError, ValueError):
+            print("Unable to upgrade Raven: invalid upgrade helper arguments.", file=sys.stderr)
+            return 2
+        if parent_pid <= 0:
+            print("Unable to upgrade Raven: invalid upgrade helper arguments.", file=sys.stderr)
+            return 2
+        parent_status = wait_for_parent(parent_pid)
+        if parent_status != 0:
+            return parent_status
+
+    # Only once the parent is gone, which is what frees the port, and only for a
+    # page: the terminal has no port and sees the progress on its own screen.
+    progress = Progress(latest_version)
+    port = recorded_port() if relaunch is not None else None
+    status_server = serve_status(port, progress) if port is not None else None
+
+    def run_uv(requirement, mode, plugin_list):
+        command = [uv_path, "tool", "install"] + mode
+        if constraints_path:
+            command += ["-c", constraints_path]
+        if plugin_list:
+            command += ["--with-requirements", plugin_list]
+        command.append(requirement)
+        return subprocess.run(command, check=False, env=uv_environment(uv_path)).returncode
+
+    def install(requirement, plugin_list):
+        # Cheap shape first. `--force` tears the whole environment down and
+        # writes 150-odd packages back even when the only thing that moved is
+        # raven's own wheel; `--reinstall-package raven` replaces that wheel and
+        # leaves the dependencies -- and their bytecode -- where they are. It
+        # still resolves and syncs the rest, so a dependency the constraints
+        # moved is moved here too; it is not a shortcut past correctness.
+        #
+        # `--force` stays as the fallback for the failures the cheap shape
+        # reports. The reachable one is a stale entry on the executable name --
+        # which is what a helper killed between writing the launcher and
+        # finishing leaves: uv refuses with "Executable already exists: raven
+        # (use `--force` to overwrite)" and only `--force` gets past it.
+        #
+        # What the fallback does NOT cover, said out loud because the shape of
+        # the code invites the opposite assumption: a dependency whose files are
+        # gone while its metadata survives. uv cannot see that, so the cheap
+        # shape reports success, the fallback never runs, and the environment
+        # stays broken. `--force` used to repair it by accident on every
+        # upgrade. Nothing repairs it now short of rerunning the installer.
+        status = run_uv(requirement, ["--reinstall-package", "raven"], plugin_list)
+        if status == 0:
+            return 0
+        return run_uv(requirement, ["--force"], plugin_list)
+
+    def restart(failure=None):
+        # Called on every path out of the install, not just the successful one.
+        # Once the parent has exited, this helper holds the only handle to the
+        # surface the user was sitting in -- so a failed install must still put
+        # it back. Leaving nothing running is strictly worse than not upgrading:
+        # the page the upgrade was clicked from cannot even reconnect to say
+        # what went wrong, and the user is left with a dead window.
+        #
+        # A failure is held on the page's port until the page has read it, or
+        # for STATUS_HOLD_S: one nobody saw reads, once the old Raven is back, as
+        # an upgrade that quietly did nothing. Then the port is let go, because
+        # the Raven started below binds it strictly.
+        if status_server is not None:
+            if failure is not None:
+                progress.set(phase="failed", message=failure)
+                progress.failure_seen.wait(STATUS_HOLD_S)
+            status_server.shutdown()
+            status_server.server_close()
+        # The marker goes first, before anything is launched: the process being
+        # started here reads it, and would wait out an upgrade that is over.
+        clear_marker()
+        if relaunch is None:
+            return True
+        try:
+            kwargs = {} if sys.platform == "win32" else {"start_new_session": True}
+            subprocess.Popen(relaunch, **kwargs)
+        except OSError as exc:
+            print(f"Could not restart Raven: {exc}.", file=sys.stderr)
+            return False
+        print("Raven restarted.")
+        return True
+
+    # Everything a version's install is made of sits beside its wheel in the
+    # release directory: raven-constraints.txt, the locked pins, and
+    # raven-plugins.txt, the plugin wheels the release ships alongside raven as
+    # one `name @ url` line each. The list is what keeps an upgrade from
+    # dropping the plugins the installer put in: uv replaces the tool's
+    # requirement set with what one command names, so anything not named again
+    # is uninstalled. Installing raven alone would be exactly that loss, so no
+    # list means no upgrade.
+    import base64
+    import pathlib
+    import socket
+    import tempfile
+    import urllib.parse
+    import urllib.request
+
+    socket.setdefaulttimeout(30)
+    release_dir = wheel_url.rsplit("/", 1)[0]
+    wheel_parts = urllib.parse.urlsplit(wheel_url)
+
+    def authorize(url):
+        # A beta wheel URL carries its deploy token as userinfo, and uv reads
+        # credentials only from the URL, so its siblings on the same host get
+        # the same ones. Release URLs carry none and pass through untouched.
+        parts = urllib.parse.urlsplit(url)
+        if not wheel_parts.username or parts.username or parts.hostname != wheel_parts.hostname:
+            return url
+        return urllib.parse.urlunsplit(parts._replace(netloc=wheel_parts.netloc))
+
+    def unwrap_credentials(url):
+        # urllib takes `user:token@host` for the host name, so the credentials
+        # move into the header and out of the URL before the request is made.
+        parts = urllib.parse.urlsplit(url)
+        if not parts.username:
+            return url, {}
+        creds = urllib.parse.unquote(parts.username) + ":" + urllib.parse.unquote(parts.password or "")
+        host = parts.hostname if parts.port is None else f"{parts.hostname}:{parts.port}"
+        headers = {"Authorization": "Basic " + base64.b64encode(creds.encode("utf-8")).decode("ascii")}
+        return urllib.parse.urlunsplit(parts._replace(netloc=host)), headers
+
+    def download(url, prefix):
+        url, headers = unwrap_credentials(url)
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=".txt")
+        request = urllib.request.Request(url, headers=headers)
+        with os.fdopen(fd, "wb") as handle, urllib.request.urlopen(request) as response:
+            handle.write(response.read())
+        return path
+
+    def asset_size(url):
+        url, headers = unwrap_credentials(url)
+        request = urllib.request.Request(url, headers=headers, method="HEAD")
+        with urllib.request.urlopen(request, timeout=SIZE_TIMEOUT_S) as response:
+            return int(response.headers.get("Content-Length") or 0)
+
+    def announce_download(assets):
+        # uv draws one bar per package and no overall total, so an upgrade whose
+        # engines are tens of megabytes reads exactly like one that has stopped.
+        # The size up front is what separates a slow link from a dead one, and
+        # the line comes before the probes so a probe that hangs adds no silence.
+        #
+        # Flushed by hand: from the page, this output goes to web.log, a file,
+        # where Python buffers it by the block -- and uv writes to the same file
+        # straight away, so an unflushed manifest landed after uv's own lines.
+        noun = "package" if len(assets) == 1 else "packages"
+        print(f"Downloading {len(assets)} {noun} for Raven {latest_version}.", flush=True)
+        sizes = []
+        for name, url in assets:
+            try:
+                sizes.append((name, asset_size(url)))
+            except Exception:
+                sizes.append((name, 0))
+        if not any(size for _, size in sizes):
+            return [0 for _ in sizes]
+        width = max(len(name) for name, _ in sizes)
+        for name, size in sizes:
+            print(f"  {name.ljust(width)}  " + (f"{size / 1048576:6.1f} MiB" if size else "     unknown"))
+        print(f"  {'total'.ljust(width)}  {sum(size for _, size in sizes) / 1048576:6.1f} MiB", flush=True)
+        return [size for _, size in sizes]
+
+    def progress_line():
+        state = progress.snapshot()
+        of = f" / {state['total'] / 1048576:.1f}" if state["total"] else ""
+        # No rate until there is one: "0 KB/s" on the first frame reads as a stall.
+        rate = f"  {state['rate'] / 1024:.0f} KB/s" if state["rate"] else ""
+        return f"  {state['done'] / 1048576:.1f}{of} MiB{rate}   "
+
+    def fetch(url, path):
+        url, headers = unwrap_credentials(url)
+        request = urllib.request.Request(url, headers=headers)
+        partial = path + ".part"
+        live = sys.stdout.isatty()
+        shown = 0.0
+        with urllib.request.urlopen(request) as response, open(partial, "wb") as handle:
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                progress.advance(len(chunk))
+                if live and time.monotonic() - shown > 0.25:
+                    shown = time.monotonic()
+                    print("\r" + progress_line(), end="", flush=True)
+        os.replace(partial, path)
+
+    def download_assets(assets, sizes):
+        # Fetched here rather than by uv, because here the bytes can be counted.
+        # uv draws no progress when it is not writing to a terminal -- the page's
+        # case, where its output is a log file -- and tens of megabytes with
+        # nothing moving on screen reads as a hang. uv is handed the local files
+        # and only resolves dependencies. All or nothing: if any asset cannot be
+        # fetched, uv gets the original URLs and downloads them itself, exactly
+        # as it did before this existed.
+        home = os.path.dirname(MARKER_PATH) if MARKER_PATH else None
+        root = os.path.join(home, "cache", "upgrade") if home else tempfile.mkdtemp(prefix="raven-upgrade-")
+        target = os.path.join(root, latest_version)
+        progress.set(phase="downloading", done=0, total=sum(sizes))
+        local = {}
+        try:
+            os.makedirs(target, exist_ok=True)
+            for _name, url in assets:
+                path = os.path.join(target, urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
+                fetch(url, path)
+                local[url] = pathlib.Path(path).as_uri()
+        except Exception as exc:
+            if sys.stdout.isatty():
+                print()
+            print(f"Warning: could not download the release directly ({exc}); uv will fetch it.", file=sys.stderr)
+            shutil.rmtree(target if home else root, ignore_errors=True)
+            progress.set(phase="installing")
+            return None
+        if sys.stdout.isatty():
+            print()
+        print(f"Downloaded {progress.snapshot()['done'] / 1048576:.1f} MiB.", flush=True)
+        # Earlier versions' files go. This version's stay: the tool's receipt
+        # names them as where it was installed from.
+        if home:
+            for entry in os.listdir(root):
+                if entry != latest_version:
+                    shutil.rmtree(os.path.join(root, entry), ignore_errors=True)
+        progress.set(phase="installing")
+        return local
+
+    def write_list(lines, prefix):
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("".join(line + "\n" for line in lines))
+        return path
+
+    constraints_path = None
+    try:
+        constraints_path = download(authorize(release_dir + "/raven-constraints.txt"), "raven-constraints-")
+    except Exception:
+        print(
+            "Warning: could not download locked constraints; upgrading without version pinning.",
+            file=sys.stderr,
+        )
+
+    try:
+        with open(download(authorize(release_dir + "/raven-plugins.txt"), "raven-plugins-"), encoding="utf-8") as handle:
+            plugin_lines = [line.strip() for line in handle if line.strip() and not line.lstrip().startswith("#")]
+    except Exception as exc:
+        why = f"could not download the plugin list for {latest_version} ({exc}). Nothing was changed; retry later."
+        print(f"Unable to upgrade Raven: {why}", file=sys.stderr)
+        restart(why)
+        return 1
+
+    def authorize_line(line):
+        name, sep, url = line.partition(" @ ")
+        return name + sep + authorize(url) if sep else line
+
+    plugin_lines = [authorize_line(line) for line in plugin_lines]
+
+    assets = [("raven", wheel_url)]
+    for line in plugin_lines:
+        name, sep, url = line.partition(" @ ")
+        if sep:
+            assets.append((name.strip(), url.strip()))
+    local = download_assets(assets, announce_download(assets))
+    wheel_source = wheel_url
+    if local is not None:
+        wheel_source = local[wheel_url]
+
+        def relocate(line):
+            name, sep, url = line.partition(" @ ")
+            return f"{name.strip()} @ {local[url.strip()]}" if sep and url.strip() in local else line
+
+        plugin_lines = [relocate(line) for line in plugin_lines]
+    memory_lines = [line for line in plugin_lines if line.partition(" @ ")[0].strip() == "everos-memory"]
+
+    # Two independent things can fail: the channel extras, and the plugins
+    # (the engines' native builds first, the memory plugin after). A failed
+    # attempt does not say which, so the rungs walk both axes and stop at the
+    # first that lands -- the largest install this machine can build -- and
+    # report exactly what that rung lacks:
+    #   1 channels + all plugins      4 base + memory plugin
+    #   2 base + all plugins          5 channels, no plugins
+    #   3 channels + memory plugin    6 base, no plugins
+    lost_channels = "Channel dependencies failed to install; some channels stay unavailable (see: raven channels list)."
+    lost_engines = "A product engine failed to install; Raven-Design and Raven-PPT stay disabled (raven doctor explains)."
+    lost_plugins = (
+        "No plugin could be installed; long-term memory, Raven-Design and Raven-PPT stay off (raven doctor explains)."
+    )
+    lost_sandbox = (
+        "The sandbox runtime (boxlite) could not be reinstalled; a configured boxlite backend "
+        "will fail to start (raven doctor explains)."
+    )
+    full = write_list(plugin_lines, "raven-plugins-") if plugin_lines else None
+    memory = write_list(memory_lines, "raven-plugins-memory-") if memory_lines and memory_lines != plugin_lines else None
+    keep_sandbox = os.environ.get("RAVEN_UPGRADE_KEEP_SANDBOX") == "1"
+    rungs = [(full, "raven[channels]", []), (full, "raven", [lost_channels])]
+    if memory is not None:
+        rungs.append((memory, "raven[channels]", [lost_engines]))
+        rungs.append((memory, "raven", [lost_engines, lost_channels]))
+    if full is not None:
+        rungs.append((None, "raven[channels]", [lost_plugins]))
+        rungs.append((None, "raven", [lost_plugins, lost_channels]))
+    # The rebuild syncs the tool environment to the requirement set it is given,
+    # so a boxlite the sandbox advice installed survives only when the rung
+    # that names it comes first. Per rung rather than once at the top, because
+    # the extras and the plugins fail on independent axes; the plain rung stays
+    # behind each sandbox variant as the fallback, and the platform gate on the
+    # extra makes this a no-op where boxlite never installs at all.
+    if keep_sandbox:
+        rungs = [
+            stepped
+            for plugin_list, spec, losses in rungs
+            for stepped in (
+                (plugin_list, f"{spec[:-1]},sandbox]" if spec.endswith("]") else f"{spec}[sandbox]", losses),
+                (plugin_list, spec, losses),
+            )
+        ]
+
+    try:
+        status = 0
+        if sys.platform == "win32" and os.environ.get("UV_TOOL_DIR"):
+            # After the downloads, so a list that cannot be fetched leaves
+            # everything running, and right before uv, so nothing starts again
+            # in between.
+            stopped, survivors = stop_leftovers_of(os.path.join(os.environ["UV_TOOL_DIR"], "raven"))
+            if survivors is None or survivors:
+                what = (
+                    "could not check for Raven processes still running from the current install"
+                    if survivors is None
+                    else "these processes are still running from the current install and Windows cannot "
+                    "replace a running executable: pid " + ", ".join(survivors)
+                )
+                why = what + ". Stop them and run the upgrade again. Nothing was changed."
+                print("Unable to upgrade Raven: " + why, file=sys.stderr)
+                restart(why)
+                return 1
+        for plugin_list, spec, losses in rungs:
+            requirement = wheel_source if spec == "raven" else f"{spec} @ {wheel_source}"
+            status = install(requirement, plugin_list)
+            if status == 0:
+                for loss in losses:
+                    print(f"Warning: {loss}", file=sys.stderr)
+                if keep_sandbox and "sandbox" not in spec:
+                    print(f"Warning: {lost_sandbox}", file=sys.stderr)
+                break
+        else:
+            why = f"uv exited with status {status}."
+            print(f"Unable to upgrade Raven: {why}", file=sys.stderr)
+            restart(why)
+            return status
+    except OSError as exc:
+        why = f"could not run uv: {exc}."
+        print(f"Unable to upgrade Raven: {why}", file=sys.stderr)
+        restart(why)
+        return 1
+
+    if current_version == latest_version:
+        print(f"Raven {latest_version} reinstalled with its plugins.")
+    else:
+        print(f"Raven upgraded: {current_version} -> {latest_version}")
+    if relaunch is None:
+        print("Restart any other running Raven process to use the new version.")
+        return 0
+    return 0 if restart() else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+
+def _upgrade_helper_bootstrap() -> str:
+    # Compressed because the whole helper travels on the command line, and
+    # Windows caps a command line at 32,767 characters: base64 of the plain
+    # source grew past that and the helper could not even be started there
+    # (WinError 206). zlib ships with every Python, `-I` included.
+    encoded = base64.b64encode(zlib.compress(_UPGRADE_HELPER_SOURCE.encode("utf-8"), 9)).decode("ascii")
+    return (
+        'exec(compile(__import__("zlib").decompress(__import__("base64").b64decode('
+        f'"{encoded}")),"<raven-upgrade>","exec"))'
+    )
+
+
+def _version_key(value: str) -> tuple[int, int, int]:
+    match = _VERSION_RE.fullmatch(value)
+    if match is None:
+        raise UpgradeError(f"Unsupported Raven version: {value!r}")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)
+
+
+def _current_version() -> str:
+    return metadata.version("raven")
+
+
+def _user_agent() -> str:
+    return f"raven/{_current_version()}"
+
+
+def _release_wheel_name(version: str) -> str:
+    return f"raven-{version}-py3-none-any.whl"
+
+
+def _release_wheel_url(version: str) -> str:
+    return f"{RELEASE_DOWNLOAD_PREFIX}v{version}/{_release_wheel_name(version)}"
+
+
+def _parse_release_payload(payload: object) -> ReleaseInfo:
+    if not isinstance(payload, dict):
+        raise ReleaseLookupError("Malformed GitHub release payload")
+
+    draft = payload.get("draft")
+    prerelease = payload.get("prerelease")
+    if not isinstance(draft, bool) or not isinstance(prerelease, bool):
+        raise ReleaseLookupError("Malformed GitHub release payload")
+    if draft or prerelease:
+        raise ReleaseLookupError("Latest Raven release is not stable")
+
+    tag_name = payload.get("tag_name")
+    if not isinstance(tag_name, str) or not tag_name.startswith("v"):
+        raise ReleaseLookupError("Malformed GitHub release payload")
+    version = ".".join(str(part) for part in _version_key(tag_name))
+
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        raise ReleaseLookupError("Malformed GitHub release payload")
+
+    wheel_name = _release_wheel_name(version)
+    exact_wheels: list[str] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            raise ReleaseLookupError("Malformed GitHub release payload")
+        name = asset.get("name")
+        wheel_url = asset.get("browser_download_url")
+        if not isinstance(name, str) or not isinstance(wheel_url, str):
+            raise ReleaseLookupError("Malformed GitHub release payload")
+        if name == wheel_name:
+            exact_wheels.append(wheel_url)
+
+    if len(exact_wheels) != 1:
+        raise ReleaseLookupError(f"Expected exactly one release wheel named {wheel_name}")
+
+    wheel_url = exact_wheels[0]
+    if wheel_url != _release_wheel_url(version):
+        raise ReleaseLookupError(f"Untrusted Raven release wheel URL: {wheel_url}")
+
+    return ReleaseInfo(version=version, wheel_url=wheel_url)
+
+
+def _rate_limit_detail(response: httpx.Response) -> str:
+    detail = "GitHub rate limit exhausted (unauthenticated requests share 60 per hour per IP)"
+    try:
+        resets_at = datetime.fromtimestamp(int(response.headers["x-ratelimit-reset"]))
+    except (KeyError, ValueError, OSError, OverflowError):
+        return detail
+    return f"{detail}, resetting at {resets_at:%H:%M:%S}"
+
+
+def _github_failure_detail(error: Exception) -> str:
+    if isinstance(error, httpx.HTTPStatusError):
+        response = error.response
+        if response.status_code in (403, 429):
+            if response.headers.get("x-ratelimit-remaining") == "0":
+                return _rate_limit_detail(response)
+            # The secondary (abuse) limit leaves the primary budget untouched and
+            # says when to come back instead.
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                return f"GitHub asked us to retry in {retry_after}s (HTTP {response.status_code})"
+        return f"HTTP {response.status_code} {response.reason_phrase}".strip()
+    return str(error).strip() or type(error).__name__
+
+
+def _sentence(error: Exception) -> str:
+    """Terminate the message with a period unless it already ends in one.
+
+    Strips a single trailing period rather than the whole run, so a message ending in
+    an ellipsis keeps it.
+    """
+    return f"{str(error).removesuffix('.')}."
+
+
+def _fetch_latest_release_via_api(client: httpx.Client) -> ReleaseInfo:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": _user_agent(),
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    response = client.get(LATEST_RELEASE_API, headers=headers)
+    response.raise_for_status()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        # A proxy or captive portal answering 200 with HTML is a remote failure the
+        # release page can recover from, so it has to reach the fallback: DecodingError
+        # is an httpx.HTTPError but not a TransportError, so it never reads as "offline".
+        raise httpx.DecodingError("GitHub API returned a non-JSON body", request=response.request) from exc
+    return _parse_release_payload(payload)
+
+
+def _fetch_latest_version_via_redirect(client: httpx.Client, *, timeout: float = _REQUEST_TIMEOUT) -> str:
+    """Read the latest stable version off the release page, which no API quota applies to.
+
+    The timeout belongs to the caller: this is one of three sequential requests when
+    `raven upgrade` falls back, but the only request the update notice makes.
+    """
+    response = client.get(
+        LATEST_RELEASE_WEB,
+        headers={"User-Agent": _user_agent()},
+        follow_redirects=False,
+        timeout=timeout,
+    )
+    location = response.headers.get("location", "")
+    tag = location[len(RELEASE_TAG_PREFIX) :] if location.startswith(RELEASE_TAG_PREFIX) else ""
+    if not response.has_redirect_location or not tag:
+        raise ReleaseLookupError(f"HTTP {response.status_code} without a release tag redirect")
+    return ".".join(str(part) for part in _version_key(tag))
+
+
+def _fetch_latest_release_via_redirect(client: httpx.Client) -> ReleaseInfo:
+    version = _fetch_latest_version_via_redirect(client, timeout=_FALLBACK_TIMEOUT)
+    wheel_url = _release_wheel_url(version)
+    try:
+        client.head(
+            wheel_url,
+            headers={"User-Agent": _user_agent()},
+            follow_redirects=True,
+            timeout=_FALLBACK_TIMEOUT,
+        ).raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ReleaseLookupError(
+            f"release {version} has no wheel at the expected URL ({_github_failure_detail(exc)})"
+        ) from exc
+    return ReleaseInfo(version=version, wheel_url=wheel_url)
+
+
+def _resolve_latest_release(client: httpx.Client) -> ReleaseInfo:
+    try:
+        return _fetch_latest_release_via_api(client)
+    except httpx.HTTPError as error:
+        # Only transport / status / decoding failures fall back. No payload-level
+        # failure is routed around, because the release page cannot re-check what the
+        # payload carries -- above all the draft / prerelease flags, where falling
+        # back would install exactly what the API rejected.
+        api_error = error
+
+    try:
+        return _fetch_latest_release_via_redirect(client)
+    except (UpgradeError, httpx.HTTPError) as web_error:
+        message = (
+            f"could not resolve the latest Raven release "
+            f"(GitHub API: {_github_failure_detail(api_error)}; "
+            f"release page: {_github_failure_detail(web_error)})"
+        )
+        if isinstance(api_error, httpx.TransportError) and isinstance(web_error, httpx.TransportError):
+            message += "; check your network and try again"
+        raise ReleaseLookupError(message) from web_error
+
+
+def _fetch_latest_release(client: httpx.Client | None = None) -> ReleaseInfo:
+    if client is not None:
+        return _resolve_latest_release(client)
+    with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True) as owned_client:
+        return _resolve_latest_release(owned_client)
+
+
+def fetch_latest_version(client: httpx.Client | None = None) -> str:
+    """Return the latest stable version, resolved without touching the API quota.
+
+    The update notice needs a version string and nothing else -- no payload, no wheel
+    URL -- so it stays off `api.github.com` entirely. That budget is 60 requests per
+    hour per IP for unauthenticated callers, and a daily check from every install
+    behind one egress is what drains it.
+    """
+    if client is not None:
+        return _fetch_latest_version_via_redirect(client)
+    with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True) as owned_client:
+        return _fetch_latest_version_via_redirect(owned_client)
+
+
+PLUGIN_LIST_NAME = "raven-plugins.txt"
+
+
+def plugin_list_url(release: ReleaseInfo) -> str:
+    """The release's plugin list, beside its wheel like the constraints are."""
+    return release.wheel_url.rsplit("/", 1)[0] + "/" + PLUGIN_LIST_NAME
+
+
+def plugin_names(text: str) -> list[str]:
+    """Distribution names from a plugin list: one ``name @ url`` line each."""
+    names: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        names.append(line.partition(" @ ")[0].strip())
+    return names
+
+
+def missing_plugins(release: ReleaseInfo, client: httpx.Client | None = None) -> list[str]:
+    """Plugin distributions ``release`` ships beside its wheel that this environment lacks.
+
+    Read from the release's own list, the file the upgrade helper installs
+    from, never guessed here. A release without a list (older than the list
+    itself) has nothing to miss, and a list that cannot be fetched counts as
+    nothing missing: this check exists to offer a repair to an up-to-date
+    install, not to stand between the reader and "up to date".
+    """
+
+    def fetch(owned: httpx.Client) -> str:
+        response = owned.get(plugin_list_url(release), headers={"User-Agent": _user_agent()})
+        if response.status_code == 404:
+            return ""
+        response.raise_for_status()
+        return response.text
+
+    try:
+        if client is not None:
+            text = fetch(client)
+        else:
+            with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True) as owned_client:
+                text = fetch(owned_client)
+    except httpx.HTTPError:
+        return []
+    missing: list[str] = []
+    for name in plugin_names(text):
+        try:
+            metadata.distribution(name)
+        except metadata.PackageNotFoundError:
+            missing.append(name)
+    return missing
+
+
+def _direct_url_data() -> dict[str, object] | None:
+    raw = metadata.distribution("raven").read_text("direct_url.json")
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise UpgradeError("Malformed Raven installation metadata") from exc
+    if not isinstance(data, dict):
+        raise UpgradeError("Malformed Raven installation metadata")
+
+    url = data.get("url")
+    origins = [key for key in ("archive_info", "dir_info", "vcs_info") if key in data]
+    if not isinstance(url, str) or not url.strip() or not urlparse(url).scheme or len(origins) != 1:
+        raise UpgradeError("Malformed Raven installation metadata")
+
+    origin_name = origins[0]
+    origin = data[origin_name]
+    if not isinstance(origin, dict):
+        raise UpgradeError("Malformed Raven installation metadata")
+
+    if origin_name == "archive_info":
+        archive_hash = origin.get("hash")
+        hashes = origin.get("hashes")
+        if archive_hash is not None and (not isinstance(archive_hash, str) or not archive_hash.strip()):
+            raise UpgradeError("Malformed Raven installation metadata")
+        if hashes is not None and (
+            not isinstance(hashes, dict)
+            or any(
+                not isinstance(algorithm, str)
+                or not algorithm.strip()
+                or not isinstance(digest, str)
+                or not digest.strip()
+                for algorithm, digest in hashes.items()
+            )
+        ):
+            raise UpgradeError("Malformed Raven installation metadata")
+    elif origin_name == "dir_info":
+        editable = origin.get("editable", False)
+        if not isinstance(editable, bool):
+            raise UpgradeError("Malformed Raven installation metadata")
+    elif origin_name == "vcs_info":
+        vcs = origin.get("vcs")
+        commit_id = origin.get("commit_id")
+        requested_revision = origin.get("requested_revision")
+        if (
+            not isinstance(vcs, str)
+            or not vcs.strip()
+            or not isinstance(commit_id, str)
+            or not commit_id.strip()
+            or (requested_revision is not None and not isinstance(requested_revision, str))
+        ):
+            raise UpgradeError("Malformed Raven installation metadata")
+    return data
+
+
+def _is_editable_install() -> bool:
+    data = _direct_url_data()
+    if data is None or "dir_info" not in data:
+        return False
+    directory = data["dir_info"]
+    editable = directory.get("editable", False)
+    return editable
+
+
+def editable_checkout_status() -> tuple[Path, int, int]:
+    """Read the installed checkout against its last fetched origin/main."""
+    data = _direct_url_data()
+    if data is None:
+        raise UpgradeError("Editable source checkout metadata is unavailable")
+    source_url = data["url"]
+    if not isinstance(source_url, str):
+        raise UpgradeError("Editable source checkout URL must be a string")
+    url = urlparse(source_url)
+    if url.scheme != "file" or url.netloc not in ("", "localhost"):
+        raise UpgradeError("Editable source checkout must be a local directory")
+    checkout = Path(url2pathname(url.path))
+    if not checkout.is_absolute():
+        raise UpgradeError("Editable source checkout path must be absolute")
+    try:
+        git = shutil.which("git")
+        if git is None:
+            raise FileNotFoundError("Git is not installed")
+        result = subprocess.run(
+            [git, "-C", str(checkout), "rev-list", "--left-right", "--count", "origin/main...HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        behind, ahead = map(int, result.stdout.split())
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise UpgradeError(
+            "Cannot compare the source checkout with origin/main; ensure Git is installed "
+            "and run git fetch origin main in the source checkout"
+        ) from exc
+    return checkout, ahead, behind
+
+
+def _uv_tool_target() -> ToolInstallTarget | None:
+    prefix = Path(sys.prefix)
+    if not prefix.is_absolute():
+        raise UpgradeError("Malformed Raven uv tool receipt")
+
+    receipt_path = prefix / "uv-receipt.toml"
+    if not receipt_path.is_file():
+        return None
+    try:
+        receipt = tomllib.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise UpgradeError("Malformed Raven uv tool receipt") from exc
+
+    tool = receipt.get("tool")
+    if not isinstance(tool, dict):
+        raise UpgradeError("Malformed Raven uv tool receipt")
+    requirements = tool.get("requirements")
+    if not isinstance(requirements, list):
+        raise UpgradeError("Malformed Raven uv tool receipt")
+    if any(not isinstance(item, dict) for item in requirements):
+        raise UpgradeError("Malformed Raven uv tool receipt")
+    if not any(item.get("name") == "raven" for item in requirements):
+        return None
+
+    entrypoints = tool.get("entrypoints")
+    if not isinstance(entrypoints, list) or any(not isinstance(item, dict) for item in entrypoints):
+        raise UpgradeError("Malformed Raven uv tool receipt")
+    raven_entrypoints = [item for item in entrypoints if item.get("name") == "raven"]
+    if len(raven_entrypoints) != 1:
+        raise UpgradeError("Malformed Raven uv tool receipt")
+
+    install_path_value = raven_entrypoints[0].get("install-path")
+    if not isinstance(install_path_value, str) or not install_path_value.strip():
+        raise UpgradeError("Malformed Raven uv tool receipt")
+    install_path = Path(install_path_value)
+    if not install_path.is_absolute():
+        raise UpgradeError("Malformed Raven uv tool receipt")
+
+    return ToolInstallTarget(tool_dir=prefix.parent, bin_dir=install_path.parent)
+
+
+def _is_uv_tool_install() -> bool:
+    return _uv_tool_target() is not None
+
+
+def _external_executable(value: object, *, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise UpgradeError(f"{label} was not found")
+    try:
+        executable = Path(value).resolve(strict=True)
+        prefix = Path(sys.prefix).resolve(strict=True)
+    except OSError as exc:
+        raise UpgradeError(f"{label} is unavailable") from exc
+    if not executable.is_file() or executable.is_relative_to(prefix):
+        raise UpgradeError(f"{label} must be outside the active Raven tool environment")
+    return executable
+
+
+def _boxlite_installed() -> bool:
+    """Whether this raven's environment holds a boxlite install the rebuild would drop.
+
+    Read here, in the parent, rather than in the helper: the helper runs under
+    ``-I`` with the base interpreter, so importlib.metadata there sees the base
+    environment, not the tool environment this answer is about.
+    """
+    try:
+        metadata.version("boxlite")
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+def _hand_over_system_ca(env: dict[str, str]) -> Path | None:
+    """Hand the helper the certificate store this process verifies against.
+
+    The helper runs on the base interpreter, which cannot import this
+    environment's truststore, so it gets a copy; it tells uv in turn. The copy
+    is the helper's to discard once loaded, and the caller's when no helper
+    starts. Since the helper deletes the directory it is handed, only one this
+    process just made is ever passed on. A process that never switched -- opted
+    out, or started some way other than `cli.entry` -- has nothing to hand over,
+    and is not asked to import truststore to find that out.
+    """
+    env.pop("RAVEN_UPGRADE_TRUSTSTORE", None)
+    if not system_ca_in_use():
+        return None
+
+    copy: Path | None = None
+    try:
+        copy = Path(tempfile.mkdtemp(prefix="raven-upgrade-truststore-"))
+        shutil.copytree(
+            Path(sys.modules["truststore"].__file__).parent,
+            copy / "truststore",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    except OSError as exc:
+        if copy is not None:
+            shutil.rmtree(copy, ignore_errors=True)
+        print(f"Warning: the upgrade will not verify against the system certificate store ({exc}).", file=sys.stderr)
+        return None
+    env["RAVEN_UPGRADE_TRUSTSTORE"] = str(copy)
+    return copy
+
+
+def _handoff_upgrade(
+    release: ReleaseInfo,
+    current_version: str,
+    target: ToolInstallTarget,
+) -> None:
+    uv_value = shutil.which("uv")
+    if uv_value is None:
+        raise UpgradeError("uv was not found on PATH")
+    uv_path = _external_executable(uv_value, label="uv")
+    base_python = _external_executable(getattr(sys, "_base_executable", None), label="Raven base Python")
+
+    env = os.environ.copy()
+    env["UV_TOOL_DIR"] = str(target.tool_dir)
+    env["UV_TOOL_BIN_DIR"] = str(target.bin_dir)
+    env["RAVEN_UPGRADE_MARKER"] = str(_install_guard.write_marker(to_version=release.version))
+    trust_copy = _hand_over_system_ca(env)
+    env["RAVEN_UPGRADE_KEEP_SANDBOX"] = "1" if _boxlite_installed() else "0"
+    argv = [
+        str(base_python),
+        "-I",
+        "-c",
+        _upgrade_helper_bootstrap(),
+        str(uv_path),
+        release.wheel_url,
+        current_version,
+        release.version,
+    ]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        if sys.platform == "win32":
+            argv.append(str(os.getppid()))
+            subprocess.Popen(argv, env=env)
+            print("Raven upgrade started. Wait for the completion message before running Raven again.")
+            return
+        os.execve(str(base_python), argv, env)
+    except OSError as exc:
+        _install_guard.clear_marker()
+        if trust_copy is not None:
+            shutil.rmtree(trust_copy, ignore_errors=True)
+        raise UpgradeError(f"Could not start the Raven upgrade helper: {exc}") from exc
+    raise UpgradeError("The Raven upgrade helper returned unexpectedly")
+
+
+@dataclass(frozen=True)
+class UpgradePlan:
+    current_version: str
+    release: ReleaseInfo
+    target: ToolInstallTarget
+
+
+def fetch_latest_for_channel() -> tuple[ReleaseInfo, Callable[[str], tuple[int, ...]]]:
+    """The newest build this install should see, and the ordering to judge it by.
+
+    Imported lazily because ``beta_channel`` imports this module for its release
+    type. Its comparison reads a plain ``X.Y.Z`` too, so the beta channel can
+    keep using it after a tester's build catches up with a stable one.
+    """
+    from raven.updates import beta_channel
+
+    chan = beta_channel.channel()
+    if chan is None:
+        return _fetch_latest_release(), _version_key
+    return beta_channel.fetch_latest(chan), beta_channel.release_key
+
+
+def plan_upgrade() -> UpgradePlan:
+    """Resolve what an upgrade would install, or raise ``UpgradeError`` with why.
+
+    Network-bound (fetches the latest release), so callers on an event loop must
+    run it in a thread.
+    """
+    current_version = _current_version()
+    release, version_key = fetch_latest_for_channel()
+    if version_key(current_version) >= version_key(release.version):
+        raise UpgradeError(f"Raven {current_version} is already up to date")
+    if _is_editable_install():
+        raise UpgradeError("Editable Raven installations cannot be upgraded automatically")
+    target = _uv_tool_target()
+    if target is None:
+        raise UpgradeError("This Raven installation is not managed by uv")
+    return UpgradePlan(current_version=current_version, release=release, target=target)
+
+
+def spawn_detached_upgrade(
+    plan: UpgradePlan,
+    *,
+    parent_pid: int,
+    relaunch: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    status_port: int | None = None,
+) -> None:
+    """Start the upgrade helper as a process that outlives this one.
+
+    The CLI's ``_handoff_upgrade`` execs the helper in place, which a server
+    cannot do: it still owes its caller a reply. So the helper is detached
+    instead, told which pid to wait for, and optionally given a command to run
+    once the install lands (see the helper's 6th argument).
+    """
+    uv_value = shutil.which("uv")
+    if uv_value is None:
+        raise UpgradeError("uv was not found on PATH")
+    uv_path = _external_executable(uv_value, label="uv")
+    base_python = _external_executable(getattr(sys, "_base_executable", None), label="Raven base Python")
+
+    env = os.environ.copy()
+    env["UV_TOOL_DIR"] = str(plan.target.tool_dir)
+    env["UV_TOOL_BIN_DIR"] = str(plan.target.bin_dir)
+    # Written here rather than by the helper: the window this marker exists for
+    # opens the moment the caller lets go of the port, which is before the
+    # helper has run its first instruction.
+    env["RAVEN_UPGRADE_MARKER"] = str(_install_guard.write_marker(to_version=plan.release.version, port=status_port))
+    env["RAVEN_UPGRADE_KEEP_SANDBOX"] = "1" if _boxlite_installed() else "0"
+    trust_copy = _hand_over_system_ca(env)
+    if extra_env:
+        env.update(extra_env)
+
+    argv = [
+        str(base_python),
+        "-I",
+        "-c",
+        _upgrade_helper_bootstrap(),
+        str(uv_path),
+        plan.release.wheel_url,
+        plan.current_version,
+        plan.release.version,
+        str(parent_pid),
+    ]
+    if relaunch is not None:
+        argv.append(json.dumps(relaunch))
+
+    kwargs: dict[str, Any] = {} if sys.platform == "win32" else {"start_new_session": True}
+    try:
+        subprocess.Popen(argv, env=env, **kwargs)  # noqa: S603 - argv is built from resolved executables
+    except OSError as exc:
+        _install_guard.clear_marker()
+        if trust_copy is not None:
+            shutil.rmtree(trust_copy, ignore_errors=True)
+        raise UpgradeError(f"Could not start the Raven upgrade helper: {exc}") from exc

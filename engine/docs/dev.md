@@ -1,0 +1,92 @@
+# Raven Developer Guide
+
+## Build & Run from Source
+
+The project uses **Python + `uv`** with `hatchling` as the build backend.
+
+### 0. System prerequisites
+
+`uv` installs everything raven imports. One program it cannot: **LibreOffice**,
+which converts a deck (or any Office source document) to PDF. The deck engine
+renders, measures and previews through that conversion, and the gateway's PDF
+viewer serves it, so without LibreOffice a deck still builds but nothing that
+reads the rendered page runs, and several integration tests skip.
+
+```bash
+apt install libreoffice                          # Debian / Ubuntu
+brew install --cask libreoffice                  # macOS
+winget install TheDocumentFoundation.LibreOffice # Windows
+```
+
+The browser tool's chromium binary is also not a Python package: a source
+checkout downloads it with
+`uv sync --all-extras && uv run playwright install chromium`
+(install.sh does this for tool installs).
+
+`raven doctor` reports it under **External tools**.
+
+### 1. Install dependencies
+
+```bash
+cd /path/to/raven
+uv sync
+```
+
+This creates/updates `.venv` with all core dependencies from `uv.lock`.
+
+For optional extras:
+
+```bash
+uv sync --extra channels   # messaging integrations (Telegram, Slack, etc.)
+uv sync --extra sandbox    # boxlite sandbox execution
+uv sync --extra tools      # web/readability tools
+# or all at once:
+uv sync --all-extras
+```
+
+### 2. Install the package in editable mode
+
+```bash
+uv pip install -e .
+```
+
+This wires up the `raven` CLI script to your source code so changes take effect immediately.
+
+### 3. Run the CLI
+
+```bash
+# via uv run (uses .venv automatically, no activation needed):
+uv run raven --help
+
+# or activate the venv first:
+source .venv/bin/activate
+raven --help
+```
+
+### 4. First-time setup
+
+```bash
+uv run raven onboard
+```
+
+Creates `~/.raven/config.json` and the workspace directory. Edit the config to add your API key (default provider: OpenRouter — get a key at https://openrouter.ai/keys).
+
+### 5. Common commands
+
+| Command | Description |
+|---|---|
+| `raven tui` | Start the interactive chat TUI |
+| `raven agent -m "Hello"` | Send a single message and exit |
+| `raven gateway` | Start full server (all channels + heartbeat + cron) |
+| `raven status` | Show config path, workspace, and API key status |
+| `raven channels status` | Show which messaging channels are enabled |
+| `raven provider login <name>` | Authenticate with an OAuth provider (for example `openai-codex`, `minimax-global`, or `minimax-cn`) |
+
+### 6. Run tests
+
+```bash
+uv run pytest tests/
+```
+
+Requires Python >= 3.12, and LibreOffice for the tests that render a deck (they skip without it).
+Test configuration is in `pyproject.toml` (`asyncio_mode = "auto"`).

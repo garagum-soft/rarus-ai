@@ -1,0 +1,24 @@
+/* The subagents domain's own rules: the list/office switch and the office floor.
+
+   Every class carries this domain's prefix (scripts/check-class-namespace.mjs);
+   every colour is a page.css token. */
+
+.subagents-views { display: flex; gap: 4px; margin: 0 0 10px; }
+.subagents-views button {
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+}
+.subagents-views button[aria-selected="true"] { color: var(--text); border-color: var(--text); }
+
+.subagents-office { display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.subagents-office-canvas { display: block; max-width: 100%; }
+.subagents-office-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.subagents-office-legend li { display: flex; gap: 8px; color: var(--muted); }
+.subagents-office-legend li b { color: var(--text); font-weight: 600; }
+.subagents-office-legend li[data-activity="working"] span { color: var(--text); }
+
+/* How long a working instance has been quiet (TurnClock.tsx), beside its turn
+   clock in a pane head and on the office legend. */
+.subagents-quiet { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--amber);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.subagents-quiet-stalled { color: var(--clay); }

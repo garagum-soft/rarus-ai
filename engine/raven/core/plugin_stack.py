@@ -1,0 +1,856 @@
+"""Assembly-root builders for the plugin / memory-backend stack.
+
+Two functions that bridge the gap between RavenConfig (user-facing
+settings under ``plugins`` / ``memory``) and the runtime objects
+AgentLoop expects (a ready-to-use :class:`MemoryBackend` instance):
+
+- :func:`build_plugin_registry` — discover all installed plugins
+  (bundled + user-level + project-level + pip entry points), filter
+  by ``config.plugins.disabled``, return an activated registry.
+- :func:`maybe_build_memory_backend` — resolve ``config.memory.backend``
+  to a concrete :class:`MemoryBackend` instance via the registry, or
+  return ``None`` when no backend is selected / the requested
+  contribution isn't available.
+
+Both functions are intentionally lenient: a plugin that fails to
+activate is skipped alone and said to the user, and a missing backend falls
+through to ``None`` rather than crashing the host.
+
+Lifecycle (``backend.start()`` / ``backend.stop()``) is the **caller's**
+responsibility. These helpers only construct; CLI bootstrap code does
+the await around them.
+
+The same leniency has to reach the host surfaces that talk to the EverOS
+plugin directly rather than through the registry -- ``raven doctor``,
+``raven onboard``, ``raven import``, the ``memory.*`` RPC methods and the
+sub-agent trace writer. :func:`everos_plugin_installed` and
+:func:`everos_plugin_missing_note` are what they ask before importing it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sys
+from collections.abc import Callable
+from contextlib import suppress
+from importlib.util import find_spec
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from raven.plugins import (
+    PluginActivationFailure,
+    PluginNotFoundError,
+    PluginRegistry,
+    ServiceLocator,
+    assemble_plugin_registry,
+)
+
+if TYPE_CHECKING:
+    from raven.config.raven import RavenConfig
+    from raven.contracts.llm_provider import LLMProvider
+    from raven.contracts.memory import MemoryBackend
+    from raven.contracts.onboard import OnboardStep
+    from raven.plugins.discover import DiscoveredPlugin
+
+logger = logging.getLogger(__name__)
+
+EVEROS_PLUGIN_DISTRIBUTION = "everos-memory"
+"""The distribution that contributes the ``everos`` memory backend."""
+
+SHIPPED_DEFAULT_BACKEND = "everos"
+"""The value ``memory.backend`` carries when nobody has chosen one.
+
+Named rather than compared inline, because the three places that test for it
+are not treating this backend as special -- they are answering "the default
+names something that is not here", which is the commonest way an install
+reaches those lines and the only one where the reader did not pick the name
+themselves. A reader who wrote a backend name into their config already knows
+what they asked for; a reader who never touched it needs to be told what the
+default was and where it went.
+"""
+
+_EVEROS_PLUGIN_PACKAGE = "raven_everos"
+
+
+def everos_plugin_installed() -> bool:
+    """Whether the ``everos-memory`` distribution is present in this install.
+
+    Asked of the import system instead of by importing: a spec lookup executes
+    no line of the plugin, so a plugin that IS installed and raises
+    ``ImportError`` from inside itself stays a visible bug rather than being
+    read as an absence. An imported module is present by definition, and asking
+    ``find_spec`` about one whose spec was never set raises instead of
+    answering.
+    """
+    if sys.modules.get(_EVEROS_PLUGIN_PACKAGE) is not None:
+        return True
+    return find_spec(_EVEROS_PLUGIN_PACKAGE) is not None
+
+
+def everos_plugin_missing_note() -> str:
+    """What every host surface says when the plugin it wanted is not installed.
+
+    One sentence in one place because five entry points say it, each in its own
+    register. Plain text and no markup, so a Rich console, a JSON-RPC error and
+    a log line can all carry it. It names what the default is rather than what
+    this config says: two of those callers run for reasons other than the
+    configured backend, and a sentence that assumed the config would be wrong
+    for them.
+    """
+    return (
+        f"the {EVEROS_PLUGIN_DISTRIBUTION} distribution is not installed, so the everos memory "
+        f"backend -- the shipped default for memory.backend -- has nothing behind it. Install "
+        f"{EVEROS_PLUGIN_DISTRIBUTION}, or set memory.backend to null to stop asking for it."
+    )
+
+
+def plugin_discovery_sources() -> dict:
+    """Resolve the four fixed discovery-source locations the host scans.
+
+    Shared by :func:`build_plugin_registry` (live boot) and the
+    ``raven plugins`` CLI command so both see the same set:
+
+    - bundled — ``raven/plugins/bundled/`` inside the installed package: the
+      wheel's own plugin shelf (the playbook entry tools live there), scanned
+      first and shadowed by nothing.
+    - user    — ``<raven home>/plugins/`` (``RAVEN_HOME`` or ``~/.raven``).
+    - project — ``./.raven/plugins/``.
+    - entry_points — the ``raven.plugins`` group.
+
+    The roots a config names itself (``plugins.dirs``) are the fourth source;
+    :func:`named_plugin_roots` resolves them, so this set stays the fixed one.
+    """
+    import raven.plugins
+    from raven.home import raven_home
+
+    return {
+        "bundled_dir": Path(raven.plugins.__file__).parent / "bundled",
+        "user_dir": raven_home() / "plugins",
+        "project_dir": Path.cwd() / ".raven" / "plugins",
+        "entry_points_group": "raven.plugins",
+    }
+
+
+def named_plugin_roots(config: "RavenConfig | None") -> tuple[Path, ...]:
+    """The extra plugin roots ``plugins.dirs`` names, scanned with project priority.
+
+    Relative paths resolve against the working directory. A config without the
+    field (a stub, an older shape) names no roots.
+    """
+    named = getattr(getattr(config, "plugins", None), "dirs", None) or ()
+    return tuple(Path(d).expanduser() for d in named)
+
+
+def discover_plugins(config: "RavenConfig | None" = None) -> "list[DiscoveredPlugin]":
+    """Every manifest the sources hold, before activation: what ``raven
+    plugins`` and ``ext.list`` show, shadowed and disabled ones included."""
+    from raven.plugins.discover import PluginDiscovery
+
+    return PluginDiscovery(**plugin_discovery_sources(), extra_dirs=named_plugin_roots(config)).discover()
+
+
+def plugin_access_policy(config: "RavenConfig | None", sources: dict | None = None):
+    """The activation policy the host applies: roles from ``plugins.roles``, grants from the grant store.
+
+    A plugin discovery found in ``./.raven/plugins`` plays the ``project``
+    role and one in a ``plugins.dirs`` root, named by the operator, plays
+    ``installed``; the source discovery records says which (``sources`` is
+    accepted for callers that already hold them, and no longer read).
+    """
+    from raven.plugins.access import policy_from_config
+
+    return policy_from_config(config)
+
+
+def build_plugin_registry(
+    config: "RavenConfig",
+    *,
+    notify: "Callable[[str], None] | None" = None,
+) -> PluginRegistry:
+    """Discover + activate every installed plugin admitted by ``config``.
+
+    Reads ``config.plugins.disabled`` and forwards it to
+    :func:`assemble_plugin_registry`. A plugin that fails to activate is
+    skipped on its own -- the rest of the registry is unaffected -- and each
+    one is said to the user through ``notify`` when the host lent one, else on
+    stderr, because a plugin that vanished leaves no other trace a user sees.
+
+    Discovery spans three fixed sources plus the roots ``plugins.dirs``
+    names (priority user > project = named roots > entry_points):
+
+    - **user** — ``~/.raven/plugins/<id>/`` drop-in directories.
+    - **project** — ``./.raven/plugins/<id>/`` drop-in directories.
+    - **entry_points** — the ``raven.plugins`` group, where
+      third-party pip-installed plugins register their factories.
+    """
+    sources = plugin_discovery_sources()
+    registry = assemble_plugin_registry(
+        **sources,
+        extra_dirs=named_plugin_roots(config),
+        disabled=frozenset(config.plugins.disabled),
+        access=plugin_access_policy(config, sources),
+    )
+    for failure in registry.activation_failures():
+        message = plugin_failure_note(failure)
+        if notify is not None:
+            notify(message)
+        else:
+            print(message, file=sys.stderr)
+    return registry
+
+
+PLUGIN_FAILURE_MARKER = "did not load and is off for this session"
+"""The words every failed-plugin notice carries; the agent smoke check reads a
+child's stderr for them, so the notice and that check change together."""
+
+
+def _failure_cause(failure: "PluginActivationFailure") -> str:
+    """The failure's reason without the plugin-id prefix the sentence already carries."""
+    return failure.reason.removeprefix(f"plugin {failure.plugin_id!r}: ").rstrip(".")
+
+
+def plugin_failure_note(failure: "PluginActivationFailure") -> str:
+    """The sentence a user reads about one plugin that did not load."""
+    return (
+        f"Plugin {failure.plugin_id!r} {PLUGIN_FAILURE_MARKER}: {_failure_cause(failure)}. "
+        f"Other plugins continue loading. Fix or remove it, or add {failure.plugin_id!r} "
+        f"to plugins.disabled to stop loading it."
+    )
+
+
+def maybe_build_memory_backend(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    notify: "Callable[[str], None] | None" = None,
+) -> "MemoryBackend | None":
+    """Construct the configured memory backend, if any.
+
+    Resolution order:
+
+    1. If ``config.memory.backend`` is ``None``, return ``None``
+       immediately — user explicitly disabled the plugin path.
+    2. Look up the backend factory in the (possibly host-supplied)
+       :class:`PluginRegistry`. If absent (e.g. the ``everos-memory``
+       distribution isn't installed), log a warning and return ``None``.
+    3. Resolve the per-plugin config slice from
+       ``config.plugins.config`` — first by plugin id (the canonical
+       key, e.g. ``"everos-memory"``), then by backend contribution
+       name (the friendlier key, e.g. ``"everos"``) as a fallback.
+
+    The returned backend has **not** been ``await``-started — the
+    caller (CLI bootstrap) is responsible for the
+    ``await backend.start()`` / ``await backend.stop()`` lifecycle so
+    those awaits sit in the right async context.
+    """
+    name = config.memory.backend
+    if name is None:
+        return None
+    if registry is None:
+        registry = build_plugin_registry(config)
+    plugin_slice = _resolve_plugin_config_slice(registry, config, name)
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        notify=notify,
+        embedding=config.embedding,
+    )
+    try:
+        backend = registry.build_memory_backend(
+            name,
+            config=plugin_slice,
+            services=services,
+        )
+    except PluginNotFoundError:
+        logger.warning(
+            "memory.backend=%r requested but no plugin contributes it. "
+            "The everos backend is its own distribution — install "
+            "`everos-memory` — and registers itself in the `raven.plugins` "
+            "entry-point group. Continuing without a plugin backend.",
+            name,
+        )
+        # Said to the user, not only to the log: a backend the config names and
+        # nothing provides is the hardest "no memory" to diagnose. Through the
+        # host's notifier when it lent one, else plain stderr -- this layer
+        # renders through no terminal toolkit.
+        message = (
+            f"Long-term memory is off: memory.backend={name!r} but no installed plugin provides it "
+            f"(installed: {', '.join(registry.memory_backend_names()) or 'none'})."
+        )
+        # A provider that is installed but failed to activate is not "no
+        # installed plugin": name it and its reason, so the reader fixes the
+        # plugin instead of reinstalling something that is there.
+        failed = [
+            f
+            for f in registry.activation_failures()
+            if any(c.name == name for c in f.manifest.contributes.memory_backends)
+        ]
+        if failed:
+            message = (
+                f"Long-term memory is off: memory.backend={name!r} is provided by plugin "
+                f"{failed[0].plugin_id!r}, which did not load: {_failure_cause(failed[0])}."
+            )
+        # The shipped default names a backend that ships separately, so the
+        # commonest way to reach this line is an install that simply lacks the
+        # distribution. Saying only which backends are installed leaves that
+        # reader with nothing to do; doctor and the wizard already answer it in
+        # one sentence, and this is the surface a turn actually reaches.
+        if name == SHIPPED_DEFAULT_BACKEND and not everos_plugin_installed():
+            message = f"{message} {everos_plugin_missing_note()}"
+        if notify is not None:
+            notify(message)
+        else:
+            print(message, file=sys.stderr)
+        return None
+    except Exception as e:
+        # Factory raised during construction: log and degrade rather
+        # than fail the host boot.
+        logger.warning(
+            "memory backend %r factory raised at construction (%s); continuing without backend.",
+            name,
+            e,
+        )
+        return None
+    return backend
+
+
+def _media_config_reader(config: "RavenConfig"):
+    """The grant behind ``ServiceLocator.media_config``: the live file first, the
+    boot config's resolved section when the file names no ``tools.media``.
+
+    The same two lanes the loop's own media tools read (``_live_media_config``
+    in the loop wiring), so a plugin that generates pictures sees the key, base
+    and model the host's ``image_generate`` would see at the same moment.
+    """
+    from raven.config.live import LiveConfig, media_tool_config, resolve_media_selection
+
+    live = LiveConfig()
+    host = _host_config(config)
+
+    def read(kind: str):
+        current = media_tool_config(live, kind)
+        if current is not None:
+            return current
+        effective = getattr(host, "effective_media_config", None)
+        fallback = getattr(effective(), kind, None) if callable(effective) else None
+        return resolve_media_selection(fallback, kind) if fallback is not None else None
+
+    return read
+
+
+def _host_config(config: Any) -> Any:
+    """The config that carries ``tools``: the base ``Config`` itself, or the one a
+    ``RavenConfig`` nests under ``base``.
+
+    Every entrance hands the plugin stack its ``RavenConfig``, and that type has
+    no ``tools`` of its own -- reading it off the extension object answered None
+    for every deployment, so the proxy and the web section never reached a plugin.
+    """
+    if hasattr(config, "tools"):
+        return config
+    return getattr(config, "base", None)
+
+
+def build_plugin_tools(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+) -> list:
+    """Construct every plugin-contributed tool admitted by ``config``.
+
+    Mirrors :func:`maybe_build_memory_backend` but for the ``tools``
+    contribution point: walks the activated registry's tool names,
+    resolves each owning plugin's config slice, and builds the tool via
+    :meth:`PluginRegistry.build_tool`. Lenient by design — a single
+    tool's construction failure is logged and skipped so one bad plugin
+    can't keep the agent from booting. A factory may also return ``None``
+    to deliberately decline contribution (e.g. an optional dependency is
+    absent); that's skipped quietly, not treated as a failure. The host
+    registers the returned tools into the agent's :class:`ToolRegistry`.
+
+    Returns an empty list when no plugin contributes a tool.
+    """
+    if registry is None:
+        registry = build_plugin_registry(config)
+    names = registry.tool_names()
+    if not names:
+        return []
+    tools_config = getattr(_host_config(config), "tools", None)
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+        media_config=_media_config_reader(config),
+        media_proxy=getattr(getattr(tools_config, "media", None), "proxy", None),
+        web_config=lambda: getattr(tools_config, "web", None),
+    )
+    slices = config.plugins.config
+    tools = []
+    for name in names:
+        plugin_id = registry.tool_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            tool = registry.build_tool(
+                name,
+                config=plugin_slice,
+                services=services,
+            )
+        except Exception as e:
+            logger.warning(
+                "plugin tool %r factory raised at construction (%s); skipping it.",
+                name,
+                e,
+            )
+            continue
+        # A factory may return None to decline contribution at runtime
+        # (e.g. an optional dependency isn't installed). That's a clean
+        # opt-out, not a failure — skip it without the warning.
+        if tool is None:
+            logger.debug(
+                "plugin tool %r factory opted out (returned None); skipping it.",
+                name,
+            )
+            continue
+        # The contributing plugin's identity rides the tool to bind time: the
+        # loop derives the wake grant's namespace from it, and a namespace a
+        # plugin could choose for itself would be a namespace it could steal.
+        # A factory may return anything tool-shaped; a product that cannot
+        # carry the stamp simply gets no namespaced grant at bind time.
+        try:
+            tool.contributed_by = plugin_id or name
+        except (AttributeError, TypeError):
+            pass
+        tools.append(tool)
+    return tools
+
+
+def build_onboard_steps(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+) -> list[tuple[str, "OnboardStep"]]:
+    """Every activated plugin's onboard screen as ``(name, step)``, in registry order."""
+    if registry is None:
+        registry = build_plugin_registry(config)
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+    )
+    slices = config.plugins.config
+    steps = []
+    for name in registry.onboard_names():
+        # Resolved from the onboard entry's own plugin id, not the
+        # memory_backends reverse-lookup: two different plugins can
+        # contribute onboard/backend pairs with the same name (they only
+        # collide, and fail activation, when the SAME name lands twice in
+        # the SAME slot), so answering through the backend side would let
+        # one plugin's onboard step receive another plugin's config slice.
+        plugin_id = registry.onboard_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            steps.append((name, registry.build_onboard_step(name, config=plugin_slice, services=services)))
+        except Exception as e:
+            logger.warning("onboard step %r factory raised (%s); skipping it.", name, e)
+    return steps
+
+
+def memory_enabled(workspace: Path, config: "RavenConfig") -> bool:
+    """Whether the memory backend recorded on disk says it is configured.
+
+    The wire-side twin of ``raven.cli.onboard_commands._memory_enabled``: same
+    two-step check (a raw-config read for the recorded name, then that
+    backend's own onboard screen for whether it says it works), kept as a
+    separate copy here because the CLI's version is reached by tests that
+    monkeypatch it and its neighbours directly.
+    """
+    from raven.config.loader import get_config_path, read_raw_or_raise
+
+    raw = read_raw_or_raise(get_config_path())
+    selected = (raw.get("memory") or {}).get("backend") or None
+    if not selected:
+        return False
+    steps = [step for name, step in build_onboard_steps(workspace, config) if name == selected]
+    if not steps:
+        return True
+    return any(step.configured() for step in steps)
+
+
+def build_plugin_hooks(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+) -> list:
+    """Construct every plugin-contributed hook admitted by ``config``.
+
+    Mirrors :func:`build_plugin_tools` for the ``hooks`` contribution point:
+    walks the activated registry's hook names, resolves each owning plugin's
+    config slice, and builds the hook via :meth:`PluginRegistry.build_hook`.
+    Lenient the same way -- a failing factory is logged and skipped, a
+    factory returning ``None`` has declined -- because a product's steering
+    hook must never be the thing that keeps the agent from booting. The
+    assembly root appends the returned hooks to the loop's chain.
+
+    Returns an empty list when no plugin contributes a hook.
+    """
+    # The assembly root hands in the registry it already built; a host that
+    # has none (a stubbed or degraded boot) contributes no hooks rather than
+    # rebuilding discovery or failing the boot over an extension point.
+    hook_names = getattr(registry, "hook_names", None)
+    names = hook_names() if callable(hook_names) else []
+    if not names:
+        return []
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+    )
+    slices = config.plugins.config
+    hooks = []
+    for name in names:
+        plugin_id = registry.hook_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            hook = registry.build_hook(name, config=plugin_slice, services=services)
+        except Exception as e:
+            logger.warning("plugin hook %r factory raised at construction (%s); skipping it.", name, e)
+            continue
+        if hook is None:
+            logger.debug("plugin hook %r factory opted out (returned None); skipping it.", name)
+            continue
+        hooks.append(hook)
+    return hooks
+
+
+def build_plugin_services(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+) -> list:
+    """Construct every plugin-contributed background service admitted by ``config``.
+
+    Mirrors :func:`build_plugin_hooks` for the ``services`` contribution
+    point, with the same leniency: a failing factory is logged and skipped, a
+    factory returning ``None`` has declined. The built objects are inert --
+    only a resident host starts them, and the host owns the lifecycle
+    (paper: contracts/services.py). Each is stamped with the contributing
+    plugin's identity the way tools are, so the bind-time grants can be
+    namespaced.
+
+    Returns an empty list when no plugin contributes a service.
+    """
+    service_names = getattr(registry, "service_names", None)
+    names = service_names() if callable(service_names) else []
+    if not names:
+        return []
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+    )
+    slices = config.plugins.config
+    built = []
+    for name in names:
+        plugin_id = registry.service_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            service = registry.build_service(name, config=plugin_slice, services=services)
+        except Exception as e:
+            logger.warning("plugin service %r factory raised at construction (%s); skipping it.", name, e)
+            continue
+        if service is None:
+            logger.debug("plugin service %r factory opted out (returned None); skipping it.", name)
+            continue
+        try:
+            service.contributed_by = plugin_id or name
+        except (AttributeError, TypeError):
+            pass
+        built.append(service)
+    return built
+
+
+def build_plugin_scheduler(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+):
+    """The scheduler for the active plugins' scheduled hooks, or ``None`` when there are none.
+
+    Inert until a resident host starts it with the other plugin services, so a
+    one-shot turn never fires a schedule. The hooks themselves are built on
+    first firing, each with its plugin's config slice.
+    """
+    from raven.plugins.schedule import PluginScheduler
+
+    keys_of = getattr(registry, "scheduled_keys", None)
+    keys = keys_of() if callable(keys_of) else []
+    if not keys:
+        return None
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+    )
+    slices = config.plugins.config
+    versions: dict[str, tuple[str, str]] = {}
+    for key in keys:
+        plugin_id = registry.scheduled_plugin_id(key) or key.split(":", 1)[0]
+        manifest = registry.manifest_for(plugin_id)
+        versions[key] = (plugin_id, manifest.version if manifest is not None else "")
+
+    def build(key: str):
+        return registry.build_scheduled(key, config=slices.get(versions[key][0]) or {}, services=services)
+
+    return PluginScheduler({key: registry.scheduled_spec(key) for key in keys}, build, versions=versions)
+
+
+def build_plugin_tool_gates(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+) -> list:
+    """Construct every plugin-contributed tool gate admitted by ``config``.
+
+    Mirrors :func:`build_plugin_services` for the ``tool_gates`` contribution
+    point, with the same leniency: a failing factory is logged and skipped, a
+    factory returning ``None`` has declined -- the sanctioned opt-out for a
+    policy with nothing configured to enforce. The built gates are inert
+    until the agent's tool registry receives them at construction, cast for
+    the generation (paper: contracts/tool_gate.py). Each is stamped with the
+    contributing plugin's identity the way tools and services are, so the
+    bind-time grants can be namespaced and adjudication order stays stable.
+
+    Returns an empty list when no plugin contributes a tool gate.
+    """
+    gate_names = getattr(registry, "tool_gate_names", None)
+    names = gate_names() if callable(gate_names) else []
+    if not names:
+        return []
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+    )
+    slices = config.plugins.config
+    built = []
+    for name in names:
+        plugin_id = registry.tool_gate_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            gate = registry.build_tool_gate(name, config=plugin_slice, services=services)
+        except Exception as e:
+            logger.warning("plugin tool_gate %r factory raised at construction (%s); skipping it.", name, e)
+            continue
+        if gate is None:
+            logger.debug("plugin tool_gate %r factory opted out (returned None); skipping it.", name)
+            continue
+        try:
+            gate.contributed_by = plugin_id or name
+        except (AttributeError, TypeError):
+            pass
+        built.append(gate)
+    return built
+
+
+def build_plugin_session_observers(
+    workspace: Path,
+    config: "RavenConfig",
+    *,
+    registry: PluginRegistry | None = None,
+    provider: "LLMProvider | None" = None,
+) -> list:
+    """Construct every plugin-contributed session observer admitted by ``config``.
+
+    Mirrors :func:`build_plugin_tool_gates` for the ``session_observers``
+    contribution point, with the same leniency: a failing factory is logged
+    and skipped, a factory returning ``None`` has declined -- the sanctioned
+    opt-out for a plugin with nothing to release. The built observers are
+    inert until a resident host attaches them to the session store for the
+    generation (paper: contracts/session_events.py). Each is stamped with the
+    contributing plugin's identity the way tools and services are.
+
+    Returns an empty list when no plugin contributes a session observer.
+    """
+    observer_names = getattr(registry, "session_observer_names", None)
+    names = observer_names() if callable(observer_names) else []
+    if not names:
+        return []
+    services = ServiceLocator(
+        workspace=workspace,
+        user_id=config.memory.user_id,
+        agent_id=config.memory.agent_id,
+        provider=provider,
+    )
+    slices = config.plugins.config
+    built = []
+    for name in names:
+        plugin_id = registry.session_observer_plugin_id(name)
+        plugin_slice = (plugin_id and slices.get(plugin_id)) or slices.get(name) or {}
+        try:
+            observer = registry.build_session_observer(name, config=plugin_slice, services=services)
+        except Exception as e:
+            logger.warning("plugin session_observer %r factory raised at construction (%s); skipping it.", name, e)
+            continue
+        if observer is None:
+            logger.debug("plugin session_observer %r factory opted out (returned None); skipping it.", name)
+            continue
+        try:
+            observer.contributed_by = plugin_id or name
+        except (AttributeError, TypeError):
+            pass
+        built.append(observer)
+    return built
+
+
+def _resolve_plugin_config_slice(
+    registry: PluginRegistry,
+    config: "RavenConfig",
+    backend_name: str,
+) -> dict:
+    """Pick the right ``config.plugins.config[...]`` entry for a backend.
+
+    Tries two keys, in order:
+
+    1. The **plugin id** that contributes ``backend_name`` (canonical,
+       e.g. ``"everos-memory"`` — comes from the manifest's
+       ``[plugin] id`` field).
+    2. The **backend contribution name** itself
+       (e.g. ``"everos"`` — friendlier for handwritten config files).
+
+    Returns an empty dict when neither key is present, so the plugin
+    factory receives a deterministic shape and applies its own
+    defaults.
+    """
+    slices = config.plugins.config
+    plugin_id = _plugin_id_for_backend(registry, backend_name)
+    if plugin_id is not None and plugin_id in slices:
+        return slices[plugin_id]
+    if backend_name in slices:
+        return slices[backend_name]
+    return {}
+
+
+def _plugin_id_for_backend(
+    registry: PluginRegistry,
+    backend_name: str,
+) -> str | None:
+    """Reverse-lookup the plugin id that contributes ``backend_name``.
+
+    Returns ``None`` when no activated plugin contributes the named
+    backend — the caller (config resolver) treats that as "fall
+    through to the contribution-name key".
+    """
+    for plugin_id in registry.activated_ids():
+        mf = registry.manifest_for(plugin_id)
+        if mf is None:
+            continue
+        for contribution in mf.contributes.memory_backends:
+            if contribution.name == backend_name:
+                return plugin_id
+    return None
+
+
+# Held so a detached start cannot be collected mid-flight, and so one place can
+# retire them. asyncio keeps only a weak reference to a running task. Paired
+# with the backend it belongs to: a generation retires its own start, not one
+# belonging to the generation replacing it.
+_PENDING_BACKEND_STARTS: list[tuple[Any, asyncio.Task]] = []
+
+
+def start_backend_detached(backend: Any, *, logger: Any) -> None:
+    """Bring the memory backend up without holding the boot on it.
+
+    The same shape as ``warm_up_in_background`` for litellm: a resident host
+    starts the slow thing once and goes on serving, and the on-demand path
+    reports a failure to whoever needs it. Here that path is the backend's own
+    state machine -- ``store`` answers False so the loop retries the record,
+    and ``recall`` returns no hits for that turn and schedules a probe, so a
+    turn arriving before the service is up costs that turn its recall and
+    nothing else.
+
+    Awaited, this cost every first session of a machine's uptime the readiness
+    budget: a cold start that overruns it leaves the session reporting no
+    long-term memory while the child is still booting behind it.
+
+    Only for hosts that serve many turns. A caller that acts on the service
+    immediately -- an import checking readiness, a sub-agent writing one
+    record, a one-shot turn that then exits -- must keep awaiting ``start()``,
+    because for those there is no later turn to recover into.
+    """
+    if backend is None:
+        return
+
+    async def _start() -> None:
+        try:
+            await backend.start()
+        except Exception:
+            logger.exception("memory backend start failed; continuing with legacy memory path")
+
+    task = asyncio.create_task(_start(), name="memory-backend-start")
+    entry = (backend, task)
+    _PENDING_BACKEND_STARTS.append(entry)
+
+    def _release(_done: asyncio.Task) -> None:
+        with suppress(ValueError):
+            _PENDING_BACKEND_STARTS.remove(entry)
+
+    task.add_done_callback(_release)
+
+
+async def cancel_pending_backend_starts(backend: Any) -> None:
+    """Retire ``backend``'s start, and wait for it to leave, before stopping it.
+
+    Awaited rather than fired: ``Task.cancel`` only requests cancellation, so
+    returning at that point lets ``stop()`` run while ``start()`` is still
+    inside the backend. The contract asks a backend to survive ``stop()``
+    *after* a failed start, not concurrently with one -- a plugin that finishes
+    wiring after teardown, or touches what ``stop`` has just closed, is the
+    failure that buys. Reproduced as ``start-enter -> stop -> start-exit`` and
+    pinned in tests/test_core_runtime_swap.py.
+
+    Scoped to one backend by identity: a generation retires the start it owns,
+    never one belonging to the generation taking its place. Idempotent -- a
+    finished task has already dropped itself.
+    """
+    mine = [task for held, task in _PENDING_BACKEND_STARTS if held is backend]
+    for task in mine:
+        task.cancel()
+    if mine:
+        await asyncio.gather(*mine, return_exceptions=True)
+
+
+__all__ = [
+    "PLUGIN_FAILURE_MARKER",
+    "build_onboard_steps",
+    "build_plugin_hooks",
+    "build_plugin_registry",
+    "build_plugin_tools",
+    "build_plugin_services",
+    "build_plugin_session_observers",
+    "build_plugin_tool_gates",
+    "cancel_pending_backend_starts",
+    "discover_plugins",
+    "maybe_build_memory_backend",
+    "plugin_discovery_sources",
+    "plugin_failure_note",
+    "start_backend_detached",
+]

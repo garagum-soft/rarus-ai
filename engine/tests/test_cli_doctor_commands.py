@@ -1,0 +1,1483 @@
+"""CLI tests for ``raven doctor``.
+
+Static checks are validated against on-disk config produced by the
+``tmp_config`` / ``healthy_config`` fixtures. The probe boundary
+(:func:`raven.cli.doctor_commands.send_probe`) is monkeypatched
+so tests never touch the network.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from raven.cli import doctor_commands
+from raven.cli.commands import app
+from raven.config.loader import save_config, set_config_path
+from raven.config.schema import Config
+from tests._everos_presence import everos_plugin_absent, everos_plugin_broken
+
+runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolated_raven_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """`doctor` now inspects the installation on every run, which reads -- and
+    can clear -- the upgrade marker in the agent home. Left unisolated, this
+    file would report on, and tidy up after, a real upgrade in flight."""
+    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "agent-home"))
+    return tmp_path / "agent-home"
+
+
+@pytest.fixture
+def tmp_config(tmp_path: Path) -> Path:
+    """Point the loader at a tmp config file; tests opt-in via save_config."""
+    cfg = tmp_path / "config.json"
+    set_config_path(cfg)
+    yield cfg
+    set_config_path(None)  # type: ignore[arg-type]
+
+
+@pytest.fixture(autouse=True)
+def no_memory_server(monkeypatch: pytest.MonkeyPatch):
+    """Keep the backend's own health check away from the developer's server.
+
+    `memory.backend` defaults to everos, so without this every test here builds
+    the real backend, whose `health()` reaches localhost:18791 and reports
+    whatever that server happens to answer -- a machine running one would fail
+    the healthy-exit-0 case. Tests about a particular verdict hand doctor a
+    backend of their own (`_health_backend`).
+    """
+    from raven_everos import health as _health
+
+    monkeypatch.setattr(
+        _health,
+        "probe_capabilities",
+        lambda *_a, **_kw: _health.CapabilityReport(reachable=False, error="probe disabled in tests"),
+    )
+    return monkeypatch
+
+
+@pytest.fixture
+def healthy_config(tmp_config: Path, tmp_path: Path) -> Path:
+    """Persist a config that routes cleanly to a real provider name."""
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.anthropic.api_key = "sk-fake"
+    save_config(cfg)
+    return tmp_config
+
+
+# --------------------------------------------------------------------------- help
+
+
+def test_doctor_help_lists_all_flags() -> None:
+    """``--help`` exposes the full flag surface."""
+    r = runner.invoke(app, ["doctor", "--help"])
+    assert r.exit_code == 0, r.stdout
+    for flag in ("--probe", "--json", "--timeout", "--install-summary"):
+        assert flag in r.stdout, f"missing flag in help: {flag}"
+
+
+# --------------------------------------------------------------------------- default mode
+
+
+def test_doctor_default_on_missing_config_exit1(tmp_config: Path) -> None:
+    """No config file → exit 1 with a hint to run ``onboard``."""
+    assert not tmp_config.exists()
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 1, r.stdout
+    assert "not configured" in r.stdout
+    assert "raven onboard" in r.stdout
+
+
+def test_doctor_default_healthy_exit0(healthy_config: Path) -> None:
+    """Resolved routing + no probe → exit 0, no network call made."""
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    # Routing section should mention the resolved provider name
+    assert "anthropic" in r.stdout.lower()
+    assert "Configuration looks healthy" in r.stdout or "All checks passed" in r.stdout
+
+
+def test_doctor_does_not_create_the_everos_home(healthy_config: Path, tmp_path: Path) -> None:
+    """``doctor`` (no ``--fix``) is read-only: constructing the default
+    everos backend to ask ``health()`` must not seed ``everos/`` under the
+    data dir -- that write belongs to ``EverosBackend.start()``, which
+    doctor never calls."""
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert not (tmp_path / "everos").exists()
+
+
+def test_doctor_unresolved_routing_exit1(tmp_config: Path) -> None:
+    """Model that no configured provider can serve → exit 1."""
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    # Leave every api_key empty so ``_match_provider`` returns ``(None, None)``.
+    save_config(cfg)
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 1, r.stdout
+    assert "unresolved" in r.stdout.lower() or "could not be routed" in r.stdout
+
+
+# --------------------------------------------------------------------------- gateway status
+
+
+def test_doctor_shows_gateway_running(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A held instance lock surfaces as ``running (pid …)`` in the Gateway section."""
+    from raven.gateway import lock as _gateway_lock
+
+    monkeypatch.setattr(
+        _gateway_lock,
+        "read_status",
+        lambda now: _gateway_lock.LockInfo(pid=999, started_at=1_700_000_000.0, config_path=""),
+    )
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert "Gateway" in r.stdout
+    assert "running" in r.stdout
+    assert "999" in r.stdout
+
+
+def test_doctor_shows_gateway_not_running(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from raven.gateway import lock as _gateway_lock
+
+    monkeypatch.setattr(_gateway_lock, "read_status", lambda now: None)
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert "not running" in r.stdout
+
+
+# --------------------------------------------------------------------------- --probe
+
+
+def test_doctor_probe_success(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--probe`` invokes send_probe → exit 0, response shown in output."""
+    monkeypatch.setattr(
+        doctor_commands,
+        "send_probe",
+        lambda **_: ("Hello!", 42, 1.5),
+    )
+    r = runner.invoke(app, ["doctor", "--probe"])
+    assert r.exit_code == 0, r.stdout
+    assert "Hello!" in r.stdout
+    assert "42 tokens" in r.stdout
+
+
+def test_doctor_probe_failure_exit2(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Static checks pass but probe raises → exit 2."""
+
+    def _boom(**_):
+        raise RuntimeError("auth failed")
+
+    monkeypatch.setattr(doctor_commands, "send_probe", _boom)
+    r = runner.invoke(app, ["doctor", "--probe"])
+    assert r.exit_code == 2, r.stdout
+    assert "auth failed" in r.stdout
+
+
+def test_doctor_timeout_flag_passed_through(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--timeout 3`` reaches ``send_probe`` as ``timeout_s=3``."""
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return ("ok", 1, 0.1)
+
+    monkeypatch.setattr(doctor_commands, "send_probe", _capture)
+    r = runner.invoke(app, ["doctor", "--probe", "--timeout", "3"])
+    assert r.exit_code == 0, r.stdout
+    assert captured.get("timeout_s") == 3
+
+
+# --------------------------------------------------------------------------- --json
+
+
+def test_doctor_json_default_structure(healthy_config: Path) -> None:
+    """``--json`` emits a parseable doc with the documented top-level keys."""
+    r = runner.invoke(app, ["doctor", "--json"])
+    assert r.exit_code == 0, r.stdout
+    data = json.loads(r.stdout)
+    assert data["version"] == 1
+    for key in ("paths", "routing", "features", "gateway"):
+        assert key in data, f"missing top-level key: {key}"
+    assert "running" in data["gateway"]
+    # No probe was requested → key present but null
+    assert data["probe"] is None
+
+
+def test_doctor_json_with_probe_structure(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--json --probe`` populates the probe key with the result fields."""
+    monkeypatch.setattr(
+        doctor_commands,
+        "send_probe",
+        lambda **_: ("hi", 10, 0.2),
+    )
+    r = runner.invoke(app, ["doctor", "--json", "--probe"])
+    assert r.exit_code == 0, r.stdout
+    data = json.loads(r.stdout)
+    assert isinstance(data["probe"], dict)
+    assert data["probe"]["ok"] is True
+    assert data["probe"]["text"] == "hi"
+    assert data["probe"]["tokens"] == 10
+
+
+def _save_safety(mode: str, backend: str) -> None:
+    from raven.config.loader import load_config
+
+    cfg = load_config()
+    cfg.permissions.mode = mode
+    cfg.tools.sandbox.backend = backend
+    save_config(cfg)
+
+
+def test_doctor_warns_for_the_default_sandbox_and_not_for_smart_mode(healthy_config: Path) -> None:
+    """A fresh config leaves the sandbox off. That is a warning, not a failure,
+    and the default permission mode is not the one that skips asking."""
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert "commands run on this machine with no isolation" in r.stdout
+    assert "tools.sandbox.backend" in r.stdout
+    assert "ask-tier calls run without asking" not in r.stdout
+    assert "Permissions: smart" in r.stdout
+
+
+def test_doctor_warns_for_full_permission_and_not_for_an_enabled_sandbox(healthy_config: Path) -> None:
+    """``full`` skips the ask tier. ``auto`` is a sandbox, so only the first warns."""
+    _save_safety("full", "auto")
+    r = runner.invoke(app, ["doctor"])
+    plain = re.sub(r"\s+", " ", re.sub(r"\x1b\[[0-9;]*m", "", r.stdout))
+    assert r.exit_code == 0, plain
+    assert "ask-tier calls run without asking" in plain
+    assert "built-in denials and deny rules still hold" in plain
+    assert "commands run on this machine with no isolation" not in plain
+    assert "Sandbox: auto" in plain
+
+
+def test_doctor_is_quiet_when_permission_mode_asks_and_sandbox_is_boxlite(healthy_config: Path) -> None:
+    _save_safety("ask", "boxlite")
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert "ask-tier calls run without asking" not in r.stdout
+    assert "commands run on this machine with no isolation" not in r.stdout
+    assert "Permissions: ask" in r.stdout
+    assert "Sandbox:     boxlite" in r.stdout
+
+
+def test_the_safety_settings_reach_the_json_output(healthy_config: Path) -> None:
+    _save_safety("full", "none")
+    r = runner.invoke(app, ["doctor", "--json"])
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout)
+    assert r.exit_code == 0, plain
+    data = json.loads(plain)
+    assert data["features"]["permission_mode"] == "full"
+    assert data["features"]["sandbox_backend"] == "none"
+
+
+# --------------------------------------------------------------------------- memory
+
+
+def _health_backend(monkeypatch, health):
+    """Stand in for the configured backend, whatever it is.
+
+    Every memory scenario doctor used to build out of everos internals now
+    arrives as one ``BackendHealth``, so these tests are about the rendering and
+    the exit code. What the everos backend puts in that object is its own
+    suite's business (``tests/test_everos_backend.py::TestHealth``).
+    """
+
+    class _B:
+        async def health(self):
+            return health
+
+    monkeypatch.setattr("raven.core.plugin_stack.maybe_build_memory_backend", lambda *_a, **_k: _B())
+
+
+def test_a_fault_reaches_the_exit_code(healthy_config, monkeypatch) -> None:
+    """2, not 1: a static check that failed and a subsystem that cannot work
+    are the two codes CI tells apart, and this is the second one."""
+    from raven.contracts.memory import BackendHealth, HealthCheck
+
+    _health_backend(monkeypatch, BackendHealth(ready=False, checks=[HealthCheck("llm", "missing", "could not build")]))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 2, result.stdout
+    assert "llm" in result.stdout and "missing" in result.stdout
+    assert "cannot work" in result.stdout
+
+
+def test_a_degraded_check_is_reported_without_failing(healthy_config, monkeypatch) -> None:
+    from raven.contracts.memory import BackendHealth, HealthCheck
+
+    _health_backend(
+        monkeypatch, BackendHealth(ready=True, checks=[HealthCheck("embedding", "degraded", "keywords only")])
+    )
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "degraded" in result.stdout and "keywords only" in result.stdout
+
+
+def test_a_status_doctor_does_not_know_is_still_printed(healthy_config, monkeypatch) -> None:
+    """The status vocabulary belongs to the paper, not to this renderer's mark
+    table. A backend a version ahead must cost the reader a plain word, not the
+    whole report."""
+    from raven.contracts.memory import BackendHealth, HealthCheck
+
+    _health_backend(monkeypatch, BackendHealth(ready=True, checks=[HealthCheck("llm", "weird", "no idea")]))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    assert result.exception is None
+    assert "weird" in result.stdout and "no idea" in result.stdout
+
+
+def test_a_backend_without_diagnostics_says_so(healthy_config, monkeypatch) -> None:
+    _health_backend(monkeypatch, None)
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "no diagnostics" in result.stdout
+
+
+def test_an_off_contract_answer_is_reported_as_a_fault(healthy_config, monkeypatch) -> None:
+    """A backend that answers something other than ``BackendHealth`` is as
+    broken as one that raises: everything downstream reads ``.ready``."""
+    _health_backend(monkeypatch, "nope")
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 2, result.stdout
+    assert "not BackendHealth" in result.stdout
+
+
+def test_memory_section_reaches_the_json_output(healthy_config, monkeypatch) -> None:
+    from raven.contracts.memory import BackendHealth, HealthCheck
+
+    _health_backend(monkeypatch, BackendHealth(ready=True, checks=[HealthCheck("server", "ok", "running")]))
+    result = runner.invoke(app, ["doctor", "--json"])
+    memory = json.loads(result.stdout)["memory"]
+    assert memory["health"]["ready"] is True
+    assert memory["health"]["checks"][0] == {"label": "server", "status": "ok", "hint": "running"}
+
+
+# --------------------------------------------------------------------------- config visibility
+
+
+def _run_doctor_subprocess(home: Path) -> tuple[str, int]:
+    """Run ``raven doctor`` in a subprocess with a sandbox HOME.
+
+    A subprocess (not CliRunner) is required here: the loader's duplicate
+    warning went out over two channels (print + loguru), and loguru's sink
+    holds the real stderr, invisible to in-process capture.
+    """
+    import os
+    import subprocess
+    import sys
+
+    # RAVEN_HOME is dropped rather than passed through: the point of this helper
+    # is a sandbox HOME, and an inherited RAVEN_HOME (the isolation fixture sets
+    # one) would out-rank it and send the subprocess to a different config.
+    env = {k: v for k, v in os.environ.items() if k != "RAVEN_HOME"}
+    env.update({"HOME": str(home), "COLUMNS": "250"})
+    r = subprocess.run(
+        [sys.executable, "-m", "raven", "doctor"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+    return r.stdout + r.stderr, r.returncode
+
+
+def _write_home_config(tmp_path: Path, name: str, body: str | None) -> Path:
+    home = tmp_path / name
+    (home / ".raven").mkdir(parents=True)
+    if body is not None:
+        (home / ".raven" / "config.json").write_text(body, encoding="utf-8")
+    return home
+
+
+def test_doctor_bad_config_warns_exactly_once(tmp_path: Path) -> None:
+    home = _write_home_config(tmp_path, "bad", '{"providers": {},}')
+    out, _ = _run_doctor_subprocess(home)
+    assert out.count("not valid JSON") == 1, out
+
+
+def test_doctor_config_line_three_states(tmp_path: Path) -> None:
+    import re
+
+    home_bad = _write_home_config(tmp_path, "bad", '{"providers": {},}')
+    out_bad, _ = _run_doctor_subprocess(home_bad)
+    config_line = next(line for line in out_bad.splitlines() if "Config:" in line)
+    assert "✓" not in config_line, out_bad
+    assert re.search(r"invalid JSON", out_bad), out_bad
+
+    home_missing = _write_home_config(tmp_path, "missing", None)
+    out_missing, _ = _run_doctor_subprocess(home_missing)
+    assert re.search(r"missing|not found", out_missing), out_missing
+
+    home_good = _write_home_config(tmp_path, "good", "{}")
+    out_good, _ = _run_doctor_subprocess(home_good)
+    config_line = next(line for line in out_good.splitlines() if "Config:" in line)
+    assert "✓" in config_line, out_good
+
+
+def test_doctor_empty_config_is_invalid(tmp_path: Path) -> None:
+    """An empty config.json runs on defaults (load_config sees a JSON syntax
+    error), so doctor must not paint the Config line green."""
+    home = _write_home_config(tmp_path, "empty", "")
+    out, code = _run_doctor_subprocess(home)
+    config_line = next(line for line in out.splitlines() if "Config:" in line)
+    assert "✓" not in config_line, out
+    assert "empty" in config_line, out
+    assert code == 1, out
+
+
+def test_doctor_non_object_config_is_invalid(tmp_path: Path) -> None:
+    """A valid-JSON non-object top level (e.g. null) carries no settings, so
+    doctor must classify it invalid instead of green."""
+    home = _write_home_config(tmp_path, "nonobject", "null")
+    out, code = _run_doctor_subprocess(home)
+    config_line = next(line for line in out.splitlines() if "Config:" in line)
+    assert "✓" not in config_line, out
+    assert "not a JSON object" in config_line, out
+    assert code == 1, out
+
+
+class TestTheInstallationSection:
+    """An upgrade killed part way through leaves an installation that answers
+    some questions and not others. Every later verdict in this report is then a
+    verdict about the wrong thing, so this one is checked first and, when it
+    fails, it is the only one printed."""
+
+    def _fault(self, monkeypatch: pytest.MonkeyPatch, reason: str, detail: str, missing: list[str]) -> None:
+        from raven.updates import install_guard as _install_guard
+
+        monkeypatch.setattr(_install_guard, "inspect_install", lambda: _install_guard.InstallFault(reason, detail))
+        monkeypatch.setattr(_install_guard, "missing_pieces", lambda: missing)
+
+    def test_a_sound_installation_is_not_mentioned(self, healthy_config: Path) -> None:
+        r = runner.invoke(app, ["doctor"])
+        assert r.exit_code == 0, r.stdout
+        assert "Installation" not in r.stdout
+
+    def test_a_half_written_installation_fails_the_check(
+        self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fault(
+            monkeypatch,
+            "incomplete",
+            "this installation is missing the packaged page (raven/ui/dist)",
+            ["the packaged page (raven/ui/dist)"],
+        )
+        r = runner.invoke(app, ["doctor"])
+
+        assert r.exit_code == 1, r.stdout
+        assert "incomplete" in r.stdout
+        assert "install.sh" in r.stdout
+
+    def test_it_outranks_a_config_that_also_looks_wrong(
+        self, tmp_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no config at all, the report would normally stop at "not
+        configured" -- which is the wrong thing to send a reader to fix."""
+        self._fault(monkeypatch, "incomplete", "this installation is missing its own package metadata", ["x"])
+        r = runner.invoke(app, ["doctor"])
+
+        assert r.exit_code == 1, r.stdout
+        assert "incomplete" in r.stdout
+        assert "raven onboard" not in r.stdout
+
+    def test_a_running_upgrade_is_a_note_not_a_failure(
+        self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing is broken yet; the rest of the report is still worth reading."""
+        self._fault(monkeypatch, "upgrading", "an upgrade to 9.9.9 is replacing this installation", [])
+        r = runner.invoke(app, ["doctor"])
+
+        assert r.exit_code == 0, r.stdout
+        assert "9.9.9" in r.stdout
+        assert "anthropic" in r.stdout.lower()
+
+    def test_the_verdict_reaches_the_json_output(self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fault(monkeypatch, "incomplete", "this installation is missing the packaged page", ["the page"])
+        r = runner.invoke(app, ["doctor", "--json"])
+
+        payload = json.loads(r.stdout[r.stdout.index("{") :])
+        assert payload["install"]["complete"] is False
+        assert payload["install"]["missing"] == ["the page"]
+
+
+# ── raven doctor --fix ──────────────────────────────────────────────────
+#
+# The migrations run at load, so nothing is ever "pending" by the time this
+# command looks. What is left to ask about is what they deliberately do not
+# decide: a window the user pinned below what the model holds, and a provider
+# nothing could resolve. Both are legitimate configurations, which is why they
+# are reported and only written with --fix.
+
+
+def _pinned_config(home: Path, **defaults: object) -> Path:
+    cfg = home / ".raven" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(
+        json.dumps(
+            {
+                "providers": {"anthropic": {"apiKey": "sk-a"}},
+                "agents": {
+                    "defaults": {
+                        "model": "anthropic/claude-opus-4-5",
+                        "provider": "anthropic",
+                        **defaults,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return cfg
+
+
+def test_doctor_reports_a_pin_that_caps_the_model(tmp_path, monkeypatch) -> None:
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+    from raven.providers import rates
+
+    # Not 65536: that is the retired default the loader clears on its own, so a
+    # fixture using it would be testing the migration instead of this check.
+    cfg = _pinned_config(tmp_path, contextWindowTokens=32768)
+    monkeypatch.setattr(rates, "resolve_context_window", lambda *a, **k: 1_000_000)
+
+    health = _inspect_config_health(load_config(cfg), fix=False)
+
+    assert any("32,768" in f and "1,000,000" in f for f in health.findings)
+    assert health.fixes and not health.applied
+    # Reported only: no consent, no write.
+    assert json.loads(cfg.read_text())["agents"]["defaults"]["contextWindowTokens"] == 32768
+
+
+def test_doctor_fix_removes_the_pin_and_keeps_the_file_mode(tmp_path, monkeypatch) -> None:
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config import loader
+    from raven.config.loader import load_config
+    from raven.providers import rates
+
+    # Not 65536: that is the retired default the loader clears on its own, so a
+    # fixture using it would be testing the migration instead of this check.
+    cfg = _pinned_config(tmp_path, contextWindowTokens=32768)
+    cfg.chmod(0o600)
+    monkeypatch.setattr(rates, "resolve_context_window", lambda *a, **k: 1_000_000)
+    monkeypatch.setattr(loader, "get_config_path", lambda: cfg)
+
+    health = _inspect_config_health(load_config(cfg), fix=True)
+
+    assert health.applied and not health.fixes
+    assert "contextWindowTokens" not in json.loads(cfg.read_text())["agents"]["defaults"]
+    # config.json holds providers.*.apiKey, so a replacing writer owns the mode.
+    assert cfg.stat().st_mode & 0o777 == 0o600
+
+
+def test_doctor_says_nothing_about_a_pin_that_matches_the_model(tmp_path, monkeypatch) -> None:
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+    from raven.providers import rates
+
+    cfg = _pinned_config(tmp_path, contextWindowTokens=1_000_000)
+    monkeypatch.setattr(rates, "resolve_context_window", lambda *a, **k: 1_000_000)
+
+    assert _inspect_config_health(load_config(cfg), fix=False).findings == []
+
+
+def test_doctor_fix_reports_a_write_it_could_not_make(tmp_path, monkeypatch) -> None:
+    """A read-only home is a reason to say so, not to crash the health check --
+    the rest of the report is still worth printing."""
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config import loader
+    from raven.config.loader import load_config
+    from raven.providers import rates
+
+    cfg = _pinned_config(tmp_path, contextWindowTokens=32768)
+    monkeypatch.setattr(rates, "resolve_context_window", lambda *a, **k: 1_000_000)
+    monkeypatch.setattr(loader, "get_config_path", lambda: cfg)
+    monkeypatch.setattr(
+        "raven.cli.doctor_commands._write_config_preserving_mode",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("read-only file system")),
+    )
+
+    health = _inspect_config_health(load_config(cfg), fix=True)
+
+    assert any("could not write the fix" in f for f in health.findings)
+    assert health.applied == []
+    assert json.loads(cfg.read_text())["agents"]["defaults"]["contextWindowTokens"] == 32768
+
+
+def test_the_fix_writer_survives_a_mode_it_cannot_read(tmp_path, monkeypatch) -> None:
+    """Preserving the mode is best-effort: a filesystem that will not answer
+    `stat` is not a reason to leave the fix unwritten."""
+    from raven.cli.doctor_commands import _write_config_preserving_mode
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("os.chmod", lambda *a, **k: (_ for _ in ()).throw(OSError("no")))
+
+    _write_config_preserving_mode(cfg, {"agents": {"defaults": {"model": "x/y"}}})
+
+    assert json.loads(cfg.read_text())["agents"]["defaults"]["model"] == "x/y"
+
+
+def test_doctor_reports_a_config_that_names_no_provider(tmp_path) -> None:
+    """The check that had to wait for the explicit-provider rule.
+
+    Before it, ``provider`` defaulted to ``auto`` and blank never happened. After
+    it, blank means the load-time migration could not resolve the vendor -- so
+    every call falls back to deriving it from the model id, which is the guess
+    the rule exists to end.
+
+    The fixture has to be genuinely unresolvable, which is the check's whole
+    scope: with a configured vendor that serves the model, the migration fills
+    the blank in during ``load_config`` and there is nothing left to report.
+    """
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+
+    cfg = tmp_path / ".raven" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(
+        json.dumps({"agents": {"defaults": {"model": "some/unclaimed-model", "provider": ""}}}),
+        encoding="utf-8",
+    )
+
+    health = _inspect_config_health(load_config(cfg), fix=False)
+
+    assert any("provider is not set" in f for f in health.findings)
+    assert any("raven provider use" in f for f in health.findings)
+    # Reported, never fixed: the migration already tried the derivation and had
+    # no answer, so only the user knows which vendor they meant to pay.
+    assert not health.fixes
+
+
+def test_doctor_reads_a_leftover_auto_as_unset_not_as_a_typo(tmp_path) -> None:
+    """`auto` is the state this check exists for, and it is reachable.
+
+    `_migrate_auto_provider` leaves the literal in place when it cannot resolve a
+    vendor, so a config can still say `auto` after `load_config` -- and
+    `Config._match_provider` already treats it as unset (`forced != "auto"`).
+    Read as a name instead, it is unroutable, and the user is told to fix a typo
+    they did not make while the advice that would help goes unsaid.
+
+    Neither of the checks around this one used a literal `auto`, which is how
+    the gap survived to review.
+    """
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+
+    cfg = tmp_path / ".raven" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(
+        json.dumps({"agents": {"defaults": {"model": "some/unclaimed-model", "provider": "auto"}}}),
+        encoding="utf-8",
+    )
+
+    health = _inspect_config_health(load_config(cfg), fix=False)
+
+    assert any("provider is not set" in f for f in health.findings)
+    assert any("raven provider use" in f for f in health.findings)
+    assert any("retired spelling of unset" in f for f in health.findings)
+    assert not any("nothing routes to" in f for f in health.findings)
+    assert not health.fixes
+
+
+def test_doctor_reports_a_provider_nothing_routes_to(tmp_path) -> None:
+    """A typo written before `provider use` started checking the name. Every
+    call then resolves against a vendor that does not exist.
+    """
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+
+    cfg = _pinned_config(tmp_path)
+    raw = json.loads(cfg.read_text())
+    raw["agents"]["defaults"]["provider"] = "antropic"
+    cfg.write_text(json.dumps(raw), encoding="utf-8")
+
+    health = _inspect_config_health(load_config(cfg), fix=False)
+
+    assert any("nothing routes to" in f for f in health.findings)
+    assert not health.fixes
+
+
+def test_doctor_accepts_a_vendor_only_litellm_knows(tmp_path) -> None:
+    """The counterweight. Raven carries no spec for mistral, so "no spec of
+    ours" cannot be the test -- reporting it as broken would be worse than
+    saying nothing.
+    """
+    from raven.cli.doctor_commands import _inspect_config_health
+    from raven.config.loader import load_config
+
+    cfg = _pinned_config(tmp_path)
+    raw = json.loads(cfg.read_text())
+    raw["agents"]["defaults"]["provider"] = "mistral"
+    raw["agents"]["defaults"]["model"] = "mistral/mistral-large-latest"
+    cfg.write_text(json.dumps(raw), encoding="utf-8")
+
+    health = _inspect_config_health(load_config(cfg), fix=False)
+
+    assert health.findings == []
+
+
+def test_doctor_prints_the_config_section_it_found(tmp_path, monkeypatch, capsys) -> None:
+    """The renderer, not just the check: a finding nothing prints is a finding
+    the user never gets."""
+    from raven.cli.doctor_commands import ConfigHealth, DoctorReport, PathsInfo, _render_human_output
+
+    report = DoctorReport(
+        config_loaded=True,
+        paths=PathsInfo(config_path=str(tmp_path / "config.json"), config_exists=True, config_valid=True),
+        config_health=ConfigHealth(
+            findings=["contextWindowTokens is pinned to 32,768"],
+            fixes=["remove agents.defaults.contextWindowTokens"],
+        ),
+    )
+
+    _render_human_output(report)
+
+    out = capsys.readouterr().out
+    assert "Config" in out
+    assert "pinned to 32,768" in out
+    assert "raven doctor --fix" in out
+    assert "remove agents.defaults.contextWindowTokens" in out
+
+
+def test_doctor_prints_what_the_fix_applied(tmp_path, capsys) -> None:
+    from raven.cli.doctor_commands import ConfigHealth, DoctorReport, PathsInfo, _render_human_output
+
+    report = DoctorReport(
+        config_loaded=True,
+        paths=PathsInfo(config_path=str(tmp_path / "config.json"), config_exists=True, config_valid=True),
+        config_health=ConfigHealth(applied=["remove agents.defaults.contextWindowTokens"]),
+    )
+
+    _render_human_output(report)
+
+    out = capsys.readouterr().out
+    assert "fixed" in out
+    assert "raven doctor --fix" not in out, "nothing left to apply, so nothing to advertise"
+
+
+# ------------------------------------------------------- tool capabilities
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These credentials resolve from the environment too, so a developer who
+    exported one would see these assert the wrong branch.
+
+    ``OPENROUTER_API_KEY`` counts as much as the search key: it is what the
+    media family falls back to, so exporting it turns the "nothing to borrow"
+    rows into "borrowing from the environment" rows.
+    """
+    for var in ("SERPER_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_doctor_lists_a_capability_that_is_not_configured(healthy_config: Path) -> None:
+    """The reason this section exists: an unconfigured tool is not registered,
+    so without it nothing in the running system says the capability is there."""
+    result = runner.invoke(app, ["doctor"])
+
+    assert "Tool capabilities" in result.stdout
+    assert "web_search" in result.stdout
+    assert "serper.dev" in result.stdout, "a deployer cannot act without being told where to go"
+    assert "tools.web.providers.serper.apiKey" in result.stdout
+
+
+def test_doctor_says_a_paid_capability_bills_before_it_is_switched_on(healthy_config: Path) -> None:
+    result = runner.invoke(app, ["doctor"])
+
+    assert "Billed per image." in result.stdout
+    assert "prepaid OpenRouter credit" in result.stdout, "video cannot run at all without it"
+
+
+def test_doctor_reports_a_configured_capability_and_where_its_key_came_from(tmp_config: Path, tmp_path: Path) -> None:
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.anthropic.api_key = "sk-fake"
+    cfg.providers.openrouter.api_key = "sk-or-fake"
+    cfg.tools.media.image.model = "some/model"
+    save_config(cfg)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "image_generate" in result.stdout
+    assert "borrowed" in result.stdout, "the deployer should see it reused a key, not that it needs one"
+
+
+def test_doctor_does_not_offer_a_borrow_it_cannot_make(healthy_config: Path) -> None:
+    """This config has no OpenRouter key, so "reuse the one you have" is false.
+
+    It is false in the expensive direction: acting on it means setting a model,
+    getting a registered tool -- a model alone counts -- and every call failing
+    on a credential the deployer was told they already had.
+    """
+    result = runner.invoke(app, ["doctor"])
+
+    assert "image_generate" in result.stdout
+    assert "borrow" not in result.stdout, "claimed a reuse with nothing to reuse"
+    assert "tools.media.image.apiKey" in result.stdout, "must name the key it actually needs"
+    assert "OPENROUTER_API_KEY" in result.stdout
+
+
+def test_doctor_flags_a_capability_registered_without_a_key(tmp_config: Path, tmp_path: Path) -> None:
+    """A media model with no key from any source is offered to the model and
+    fails on every call. A satisfied row is the one thing that must not say."""
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.anthropic.api_key = "sk-fake"
+    cfg.tools.media.image.model = "some/model"
+    save_config(cfg)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "no key resolves" in result.stdout
+    assert "tools.media.image.apiKey" in result.stdout
+    # Warned, not failed. Unlike a memory role the server could not build, this
+    # failure is loud where it happens -- the tool returns its missing-key error
+    # to the model -- so the section stays advisory, as the rest of it is.
+    assert result.exit_code == 0
+
+    # Two fields rather than one, because collapsing them is what hid this
+    # state: registered *and* unusable is not reachable through either alone.
+    payload = json.loads(runner.invoke(app, ["doctor", "--json"]).stdout)
+    image = next(c for c in payload["tools"]["capabilities"] if c["tool"] == "image_generate")
+    assert image["configured"] is True and image["has_credential"] is False
+
+
+def test_an_unconfigured_capability_is_not_a_failure(healthy_config: Path) -> None:
+    """An install without image generation is a choice, not a fault."""
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+
+
+def test_tool_capabilities_reach_the_json_output(healthy_config: Path) -> None:
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    payload = json.loads(result.stdout)
+    tools = payload["tools"]["capabilities"]
+    by_name = {c["tool"]: c for c in tools}
+    assert "web_search" in by_name and "web_fetch" in by_name
+    assert by_name["web_search"]["configured"] is False
+    assert by_name["web_search"]["obtain_from"] == "https://serper.dev"
+    assert by_name["web_fetch"]["configured"] is True
+    assert by_name["image_generate"]["key_path"] == "tools.media.image.apiKey", (
+        "the key path is not the model path this row switches on"
+    )
+
+
+def test_a_config_path_is_never_split_across_lines(healthy_config: Path) -> None:
+    """These rows exist to be copied. A key wrapped mid-path is unusable, which
+    is why each fact is printed on its own line rather than in a sentence."""
+    result = runner.invoke(app, ["doctor"])
+
+    for path in ("tools.web.providers.serper.apiKey", "tools.media.image.model", "SERPER_API_KEY"):
+        assert path in result.stdout, f"{path} was broken across a line wrap"
+
+
+def _search_config(tmp_path: Path, *, key: bool, off: bool) -> None:
+    """One cell of the web_search state matrix, persisted.
+
+    ``key`` and ``off`` are independent in production -- a deployment can set
+    neither, either, or both -- so they are independent here.
+    """
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.anthropic.api_key = "sk-fake"
+    if key:
+        cfg.tools.web.search.api_key = "sk-serper"
+    if off:
+        cfg.tools.disabled_tools = ["web_search"]
+    save_config(cfg)
+
+
+def _switched_off_search(tmp_path: Path) -> None:
+    """A credentialed web_search that the deployment has switched off by name."""
+    _search_config(tmp_path, key=True, off=True)
+
+
+def test_doctor_says_a_capability_is_switched_off_rather_than_ticking_it(tmp_config: Path, tmp_path: Path) -> None:
+    """A key plus `disabledTools` used to print a green tick for a tool the
+    agent does not hold -- the report claiming a capability is on offer when
+    Raven has removed it."""
+    _switched_off_search(tmp_path)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "tools.disabledTools" in result.stdout
+    # Not the unconfigured path: the key is set, and telling them to set it
+    # again is how a report sends someone in a circle.
+    assert "switch on:" not in result.stdout.split("web_search")[-1][:200]
+
+
+def test_the_switched_off_state_reaches_the_json_output(tmp_config: Path, tmp_path: Path) -> None:
+    _switched_off_search(tmp_path)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+    payload = json.loads(result.stdout)
+
+    row = next(c for c in payload["tools"]["capabilities"] if c["tool"] == "web_search")
+    assert row["configured"] is True, "the key is set; calling it unconfigured is the wrong repair"
+    assert row["disabled"] is True
+
+
+def _pictures_off_with_a_key(tmp_path: Path) -> None:
+    """A credentialed image_search with `tools.web.search.images` at its default.
+
+    Not `disabledTools`: this is the switch that decides whether the tool is
+    registered at all, and it is off unless a deployment asks for pictures.
+    """
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-sonnet-4-5"
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.anthropic.api_key = "sk-fake"
+    cfg.tools.web.search.api_key = "sk-serper"
+    save_config(cfg)
+
+
+def test_doctor_names_the_picture_switch_not_the_disabled_list(tmp_config: Path, tmp_path: Path) -> None:
+    """The repair has to be the one that works.
+
+    image_search off by `tools.web.search.images` printed "switched off in
+    tools.disabledTools", a list that need not contain the tool and whose
+    editing cannot turn it on -- the wrong repair, which is the one thing
+    these rows exist to avoid.
+    """
+    _pictures_off_with_a_key(tmp_path)
+
+    result = runner.invoke(app, ["doctor"])
+    row = result.stdout.split("image_search")[-1][:200]
+
+    assert "tools.web.search.images" in row
+    assert "tools.disabledTools" not in row
+
+
+def test_the_picture_switch_reaches_the_json_output(tmp_config: Path, tmp_path: Path) -> None:
+    _pictures_off_with_a_key(tmp_path)
+
+    payload = json.loads(runner.invoke(app, ["doctor", "--json"]).stdout)
+    row = next(c for c in payload["tools"]["capabilities"] if c["tool"] == "image_search")
+
+    assert row["configured"] is True, "the key is set; calling it unconfigured is the wrong repair"
+    assert row["disabled"] is True
+    assert row["disabled_by"] == "tools.web.search.images"
+
+
+def test_the_named_list_still_names_itself(tmp_config: Path, tmp_path: Path) -> None:
+    """The other branch of the same field: a tool off by name reports the list."""
+    _switched_off_search(tmp_path)
+
+    payload = json.loads(runner.invoke(app, ["doctor", "--json"]).stdout)
+    row = next(c for c in payload["tools"]["capabilities"] if c["tool"] == "web_search")
+
+    assert row["disabled_by"] == "tools.disabledTools"
+
+
+@pytest.mark.parametrize("key", [True, False], ids=["keyed", "keyless"])
+def test_the_off_switch_is_named_whether_or_not_a_key_is_set(key: bool, tmp_config: Path, tmp_path: Path) -> None:
+    """The cell the first version of this rendering got wrong.
+
+    With no key, the row used to print only the credential advice -- so a
+    deployer could set `tools.web.search.apiKey`, restart, and still not have
+    search, because `_apply_disabled_tools` removes it either way.
+    """
+    _search_config(tmp_path, key=key, off=True)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "tools.disabledTools" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("key", "off", "configured", "disabled"),
+    [(True, True, True, True), (True, False, True, False), (False, True, False, True), (False, False, False, False)],
+    ids=["keyed-off", "keyed-on", "keyless-off", "keyless-on"],
+)
+def test_the_json_row_reports_the_two_states_independently(
+    key: bool, off: bool, configured: bool, disabled: bool, tmp_config: Path, tmp_path: Path
+) -> None:
+    """Both flags, all four combinations. Collapsing either into the other is
+    what made the report tell a deployer to set a key that was already set."""
+    _search_config(tmp_path, key=key, off=off)
+
+    payload = json.loads(runner.invoke(app, ["doctor", "--json"]).stdout)
+    row = next(c for c in payload["tools"]["capabilities"] if c["tool"] == "web_search")
+
+    assert row["configured"] is configured
+    assert row["disabled"] is disabled
+
+
+class TestDoctorWithoutTheMemoryPlugin:
+    """The backend ships as its own distribution, and this install lacks it.
+
+    ``memory.backend`` still defaults to ``everos``, so the report has to say
+    what is missing instead of dying on the import: doctor is the command a
+    person runs precisely when something is wrong.
+    """
+
+    def test_the_report_names_the_distribution_and_fails(self, healthy_config: Path) -> None:
+        with everos_plugin_absent():
+            r = runner.invoke(app, ["doctor"])
+
+        assert r.exit_code == 2, r.stdout
+        assert "everos-memory" in r.stdout
+        assert "memory.backend" in r.stdout
+
+    def test_the_json_report_carries_it_as_a_field(self, healthy_config: Path) -> None:
+        with everos_plugin_absent():
+            r = runner.invoke(app, ["doctor", "--json"])
+
+        payload = json.loads(r.stdout)
+        assert payload["memory"]["plugin_missing"] is True
+        assert payload["memory"]["health"] is None
+
+    def test_an_installed_but_broken_plugin_is_not_called_absent(self, healthy_config: Path) -> None:
+        """A plugin whose own import fails is a bug to fix, not an absence to
+        report -- an install hint sends the user to fix what is already there.
+
+        Doctor no longer imports the plugin, so the fault arrives as a backend
+        that would not build. That still has to be said out loud: passing over
+        it silently is how a broken plugin reads as a backend with nothing to
+        report.
+        """
+        with everos_plugin_broken():
+            r = runner.invoke(app, ["doctor"])
+
+        assert r.exit_code == 2, r.stdout
+        assert "did not build" in r.stdout
+        assert "not installed" not in r.stdout
+
+
+def _libreoffice_row(stdout: str) -> str:
+    """The LibreOffice row of the External tools section, wrapped lines included.
+
+    It is the section's first row and Chromium's comes next, so the text before
+    that heading is this row and no other: the section as a whole also carries
+    the Cairo row, whose own "not found" is not LibreOffice's.
+    """
+    return stdout.split("External tools")[1].split("Chromium:")[0]
+
+
+def test_doctor_names_the_libreoffice_it_found(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The row exists to answer "will my decks render", so it prints the path
+    that would be run rather than a tick."""
+    monkeypatch.setattr("raven.utils.office.find_soffice", lambda: "/usr/bin/soffice")
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "LibreOffice" in result.stdout
+    assert "/usr/bin/soffice" in result.stdout
+    assert "not found" not in _libreoffice_row(result.stdout)
+
+
+def test_doctor_reports_libreoffice_missing_with_the_command_that_installs_it(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing LibreOffice is reported and does not move the exit code: decks
+    still build, the render-truth gates simply do not run. The remedy is printed
+    because this is not a package `uv` will fetch."""
+    monkeypatch.setattr("raven.utils.office.find_soffice", lambda: None)
+    monkeypatch.setattr("raven.utils.office.install_hint", lambda: "apt install libreoffice")
+
+    result = runner.invoke(app, ["doctor"])
+
+    row = _libreoffice_row(result.stdout)
+    assert "not found" in row
+    assert "apt install libreoffice" in row
+
+
+def test_doctor_finds_the_windows_install_the_remedy_it_prints_creates(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Windows remedy is `winget install TheDocumentFoundation.LibreOffice`,
+    which puts nothing on PATH. `raven doctor` has to find what it told the user
+    to install, or the row calls LibreOffice missing on a host that has it and
+    the ppt engine's render gate says the same.
+    """
+    from raven.utils import office
+
+    launcher = tmp_path / "Program Files" / "LibreOffice" / "program" / "soffice.exe"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("")
+    monkeypatch.setattr(office.sys, "platform", "win32")
+    monkeypatch.setattr(office.shutil, "which", lambda name: None)
+    for variable in office._WINDOWS_PROGRAM_ROOT_VARS:
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+
+    assert doctor_commands._gather_external_tools().soffice == str(launcher)
+
+
+def test_doctor_names_the_libcairo_it_found(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("raven.utils.cairo.libcairo_path", lambda: "/opt/homebrew/lib/libcairo.2.dylib")
+
+    result = runner.invoke(app, ["doctor"])
+
+    external = " ".join(result.stdout.split("External tools")[1].split())
+    assert "Cairo: /opt/homebrew/lib/libcairo.2.dylib" in external
+
+
+def test_doctor_reports_libcairo_missing_with_what_it_costs_and_the_fix(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing libcairo is reported and does not move the exit code: only a fetched
+    SVG is refused, and the remedy is a system package `uv` will not fetch."""
+    monkeypatch.setattr("raven.utils.cairo.libcairo_path", lambda: None)
+    monkeypatch.setattr("raven.utils.cairo.install_hint", lambda: "brew install cairo")
+
+    result = runner.invoke(app, ["doctor"])
+    report = runner.invoke(app, ["doctor", "--json"])
+
+    external = " ".join(result.stdout.split("External tools")[1].split("Gateway")[0].split())
+    assert "Cairo: not found" in external
+    assert "SVG" in external and "brew install cairo" in external
+    assert json.loads(report.stdout)["external_tools"]["cairo"] is None
+
+
+# --------------------------------------------------------------------------- chromium
+
+
+def _browsers_registry(directory: Path, *, chromium: str = "1234", shell: str = "1234") -> Path:
+    registry = directory / "browsers.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "browsers": [
+                    {"name": "chromium", "revision": chromium},
+                    {"name": "chromium-headless-shell", "revision": shell},
+                    {"name": "firefox", "revision": "9999"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return registry
+
+
+def _downloaded(root: Path, directory: str) -> None:
+    (root / directory).mkdir(parents=True, exist_ok=True)
+    (root / directory / "INSTALLATION_COMPLETE").write_text("")
+
+
+def test_both_chromium_markers_read_as_downloaded(tmp_path: Path) -> None:
+    registry = _browsers_registry(tmp_path)
+    root = tmp_path / "cache"
+    _downloaded(root, "chromium-1234")
+    _downloaded(root, "chromium_headless_shell-1234")
+
+    assert doctor_commands._chromium_markers(registry, root) == (True, True)
+
+
+def test_chromium_alone_is_not_a_working_browser(tmp_path: Path) -> None:
+    """raven's driver launches headless by default, which runs the separate
+    headless-shell install -- a cache holding only chromium-<rev> still cannot
+    serve the browser tool, so the shell's absence must be reported."""
+    registry = _browsers_registry(tmp_path)
+    root = tmp_path / "cache"
+    _downloaded(root, "chromium-1234")
+
+    assert doctor_commands._chromium_markers(registry, root) == (True, False)
+
+
+def test_a_marker_for_another_revision_does_not_count(tmp_path: Path) -> None:
+    """The revision comes from the installed package's own registry: a cache
+    left by an older playwright is not the browser this one would launch."""
+    registry = _browsers_registry(tmp_path, chromium="1300", shell="1300")
+    root = tmp_path / "cache"
+    _downloaded(root, "chromium-1234")
+    _downloaded(root, "chromium_headless_shell-1234")
+
+    assert doctor_commands._chromium_markers(registry, root) == (False, False)
+
+
+def test_the_browsers_path_env_is_honored(tmp_path: Path) -> None:
+    root = doctor_commands._resolve_browsers_root(tmp_path / "pkg", str(tmp_path / "elsewhere"))
+    assert root == tmp_path / "elsewhere"
+
+
+def test_browsers_path_zero_means_package_local(tmp_path: Path) -> None:
+    root = doctor_commands._resolve_browsers_root(tmp_path / "pkg", "0")
+    assert root == tmp_path / "pkg" / ".local-browsers"
+
+
+def test_no_env_falls_back_to_the_user_cache(tmp_path: Path) -> None:
+    root = doctor_commands._resolve_browsers_root(tmp_path / "pkg", None)
+    assert root.name == "ms-playwright"
+    assert Path.home() in root.parents
+
+
+@pytest.mark.parametrize(("platform", "env_kwarg"), [("linux", "xdg_cache_home"), ("win32", "local_app_data")])
+def test_the_platform_cache_env_overrides_the_home_derivation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, env_kwarg: str
+) -> None:
+    """playwright itself resolves XDG_CACHE_HOME on Linux and LOCALAPPDATA on
+    Windows before deriving anything from the profile; doctor must look where
+    playwright downloads, or it reports a green install as missing."""
+    monkeypatch.setattr(doctor_commands.sys, "platform", platform)
+    root = doctor_commands._resolve_browsers_root(tmp_path / "pkg", None, **{env_kwarg: str(tmp_path / "cache-base")})
+    assert root == tmp_path / "cache-base" / "ms-playwright"
+
+
+def test_a_registry_that_is_not_an_object_reports_nothing_downloaded(tmp_path: Path) -> None:
+    """Valid JSON that is not an object (null, a list, a string) used to raise
+    out of the reports-only path instead of reading as no browsers."""
+    registry = tmp_path / "browsers.json"
+    for text in ("null", "[]", '"chromium"'):
+        registry.write_text(text, encoding="utf-8")
+        assert doctor_commands._chromium_markers(registry, tmp_path / "cache") == (False, False)
+
+
+def _wide_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Assertions on literal path fragments must not depend on where Rich
+    wraps: xdist's longer tmp paths cross the 80-column default and split a
+    token like pw-cache mid-word."""
+    from rich.console import Console
+
+    monkeypatch.setattr(doctor_commands, "console", Console(width=300))
+
+
+def _fake_playwright(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, markers: tuple[str, ...]) -> Path:
+    """Install a fake playwright package dir plus a cache holding ``markers``."""
+    package_dir = tmp_path / "playwright"
+    _browsers_registry(package_dir / "driver" / "package")
+    cache = tmp_path / "pw-cache"
+    for name in markers:
+        _downloaded(cache, name)
+    monkeypatch.setattr(doctor_commands, "_playwright_package_dir", lambda: package_dir)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(cache))
+    return cache
+
+
+def test_doctor_reports_a_missing_browser_package(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No playwright means no `playwright install` to run: the remedy is the
+    installer, whose engines carry the library. Non-fatal, like LibreOffice."""
+    monkeypatch.setattr(doctor_commands, "_playwright_package_dir", lambda: None)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.stdout
+    external = " ".join(result.stdout.split("External tools")[1].split())
+    assert "Chromium:" in external
+    assert "install.sh" in external
+
+
+def test_doctor_reports_an_undownloaded_chromium_with_the_command_that_installs_it(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _fake_playwright(tmp_path, monkeypatch, markers=("chromium-1234",))
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.stdout
+    flat = " ".join(result.stdout.split())
+    assert "playwright install chromium" in flat
+    assert "install.sh" not in flat.split("Chromium:")[1].split("Design render:")[0]
+
+
+def test_doctor_names_the_browser_cache_it_found(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _wide_console(monkeypatch)
+    _fake_playwright(tmp_path, monkeypatch, markers=("chromium-1234", "chromium_headless_shell-1234"))
+
+    result = runner.invoke(app, ["doctor"])
+
+    flat = " ".join(result.stdout.split())
+    chromium_row = flat.split("Chromium:")[1].split("Design render:")[0]
+    assert "pw-cache" in chromium_row
+    assert "playwright install" not in chromium_row
+    assert "install.sh" not in chromium_row
+
+
+def test_the_design_lane_is_its_own_row(healthy_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The browser tool and the design engine find chromium by different
+    policies, so one verdict labeled for both would be wrong for one of them."""
+    monkeypatch.setattr(doctor_commands, "_playwright_package_dir", lambda: None)
+    monkeypatch.setattr(doctor_commands.shutil, "which", lambda name: None)
+
+    result = runner.invoke(app, ["doctor"])
+
+    external = " ".join(result.stdout.split("External tools")[1].split())
+    assert "Design render:" in external
+    assert "no chromium found" in external
+
+
+def test_the_browser_state_reaches_the_json_output(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache = _fake_playwright(tmp_path, monkeypatch, markers=("chromium-1234", "chromium_headless_shell-1234"))
+
+    r = runner.invoke(app, ["doctor", "--json"])
+
+    data = json.loads(r.stdout)
+    external = data["external_tools"]
+    assert external["browser_package"] is True
+    assert external["chromium"] is True
+    assert external["headless_shell"] is True
+    assert external["browsers_root"] == str(cache)
+
+
+# --------------------------------------------------------------------------- --install-summary
+
+_SUMMARY_LABELS = ("Long-term memory", "Design engine", "PPT engine", "Deck preview", "Browser")
+
+
+def test_install_summary_answers_without_a_config(tmp_config: Path) -> None:
+    """The whole point of the flag: five verdicts and exit 0 on a machine whose
+    missing config would fail every other doctor check."""
+    assert not tmp_config.exists()
+
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    assert r.exit_code == 0, r.stdout
+    for label in _SUMMARY_LABELS:
+        assert label in r.stdout, f"missing row: {label}"
+    assert "Paths" not in r.stdout
+    assert "raven onboard" not in r.stdout
+
+
+def test_install_summary_answers_on_an_invalid_config(tmp_config: Path) -> None:
+    tmp_config.write_text("{not json", encoding="utf-8")
+
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    assert r.exit_code == 0, r.stdout
+
+
+def test_install_summary_prints_exactly_five_rows(tmp_config: Path) -> None:
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    labeled = [line for line in r.stdout.splitlines() if any(label in line for label in _SUMMARY_LABELS)]
+    assert len(labeled) == 5, r.stdout
+
+
+def test_install_summary_browser_row_names_the_installer_when_the_package_is_missing(
+    tmp_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(doctor_commands, "_playwright_package_dir", lambda: None)
+
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    browser_row = " ".join(r.stdout.split()).split("Browser:")[1]
+    assert "engines carry the browser library" in browser_row
+
+
+def test_install_summary_browser_row_names_the_download_when_only_the_binary_is_missing(
+    tmp_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _fake_playwright(tmp_path, monkeypatch, markers=())
+
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    browser_row = " ".join(r.stdout.split()).split("Browser:")[1]
+    assert "playwright install chromium" in browser_row
+
+
+def test_install_summary_browser_row_ticks_a_complete_download(
+    tmp_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _wide_console(monkeypatch)
+    _fake_playwright(tmp_path, monkeypatch, markers=("chromium-1234", "chromium_headless_shell-1234"))
+
+    r = runner.invoke(app, ["doctor", "--install-summary"])
+
+    browser_row = " ".join(r.stdout.split()).split("Browser:")[1]
+    assert "pw-cache" in browser_row
+    assert "playwright install" not in browser_row
+    assert "install.sh" not in browser_row
+
+
+# --------------------------------------------------------------------------- embedding relocation
+
+
+def _legacy_embedding(monkeypatch, tmp_path: Path, present: bool, base_url: str = "https://legacy.test/v1") -> None:
+    """Point the legacy reader at a file this test owns."""
+    from raven.knowledge import _embedding as emb
+
+    toml = tmp_path / "everos.toml"
+    if present:
+        toml.write_text(
+            f'[embedding]\nmodel = "legacy-model"\nbase_url = "{base_url}"\napi_key = "sk-legacy"\n',
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(emb, "_legacy_everos_config_path", lambda: toml if present else None)
+
+
+def _provider_at(name: str, base_url: str) -> None:
+    """A configured provider answering at ``base_url``, for the pin to name."""
+    from raven.config.update_providers import set_provider_fields
+
+    set_provider_fields(name, {"api_key": "sk-legacy", "api_base": base_url})
+
+
+def test_doctor_offers_to_move_an_embedding_endpoint_it_finds(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A knowledge base indexes documents; it stops working the moment the
+    memory plugin is not the configured backend, which has nothing to do with
+    indexing. The wizard writes raven's block now, so this is for installs
+    configured before it moved."""
+    _legacy_embedding(monkeypatch, tmp_path, present=True)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "embedding endpoint is recorded in EverOS's config" in " ".join(result.stdout.split())
+
+
+def test_doctor_fix_copies_the_endpoint_into_ravens_own_block(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The retired block held an address and a key; the pin names the provider
+    that has them, so the move only lands when one answers at that address."""
+    _provider_at("siliconflow", "https://legacy.test/v1")
+    _legacy_embedding(monkeypatch, tmp_path, present=True)
+
+    runner.invoke(app, ["doctor", "--fix"])
+
+    block = json.loads(healthy_config.read_text(encoding="utf-8"))["embedding"]
+    assert block == {"model": "legacy-model", "provider": "siliconflow"}
+
+
+def test_doctor_fix_leaves_an_endpoint_no_provider_answers_for(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nowhere for the key to live, and inventing a provider row from a bare URL
+    would be a worse guess than saying nothing.
+
+    And it says so rather than reporting the move applied: told the endpoint had
+    been carried across, an operator has no reason to look at where it still is,
+    and the next run offers the same fix again.
+    """
+    _legacy_embedding(monkeypatch, tmp_path, present=True, base_url="https://nobody.test/v1")
+
+    result = runner.invoke(app, ["doctor", "--fix"])
+
+    assert "embedding" not in json.loads(healthy_config.read_text(encoding="utf-8"))
+    out = " ".join(result.stdout.split())
+    assert "fixed copy the embedding endpoint" not in out, "a move that did not happen is not a fix"
+    assert "nowhere for its key to live" in out
+
+
+def test_doctor_says_nothing_when_there_is_nothing_to_move(
+    healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The finding exists to move a value that is somewhere else, not to nag an
+    install that never configured one."""
+    _legacy_embedding(monkeypatch, tmp_path, present=False)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "embedding endpoint is recorded" not in " ".join(result.stdout.split())

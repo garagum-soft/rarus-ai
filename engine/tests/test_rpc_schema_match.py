@@ -1,0 +1,597 @@
+"""Schema-match test: Pydantic models (raven.rpc.models) ↔ OpenRPC schema.
+
+This test is the CI guardrail that catches drift between the single source of
+truth (``rpc-schema/openrpc.json``) and the Python-side Pydantic models.
+
+Strategy
+--------
+For each method declared in the schema:
+
+1.  Walk the schema's ``params`` list and the matching Pydantic
+    ``<Method>Params`` model.  Compare field-by-field on:
+    name, required, core JSON type, enum values, item type for arrays.
+2.  Walk the schema's ``result.schema`` (after $ref resolution) and the
+    matching Pydantic ``<Method>Result`` model schema.  Compare on the same
+    field-level invariants.
+
+We deliberately do NOT compare every nested key (titles, descriptions, Pydantic
+"anyOf [T, null]" wrapper vs schema's bare "T" + required-list).  Nullability is
+therefore NOT checked here: both sides are stripped of their null branch before
+the diff, so a nullable Pydantic field over a non-nullable schema one passes.
+Pin that per method against real handler output instead -- see
+``test_every_set_mode_answer_satisfies_the_published_result_schema``.  Instead we
+*normalize* both sides to a canonical ``{name → field_descriptor}`` shape and
+diff those.  This gives a readable assertion message on drift while staying
+robust to Pydantic's stylistic choices.
+
+A separate test (``test_method_set_matches``) ensures the *set* of methods in
+schema and the ``METHOD_MODELS`` registry are identical (catches accidental
+addition/removal on either side).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import BaseModel
+
+from raven.rpc.models import METHOD_MODELS
+
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "rpc-schema" / "openrpc.json"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def schema() -> dict[str, Any]:
+    return json.loads(SCHEMA_PATH.read_text())
+
+
+@pytest.fixture(scope="module")
+def methods_by_name(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {m["name"]: m for m in schema["methods"]}
+
+
+# ---------------------------------------------------------------------------
+# Normalization helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_ref(ref: str, schema: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a local ``#/components/schemas/Foo`` style $ref."""
+    assert ref.startswith("#/"), f"only local refs supported, got {ref}"
+    parts = ref[2:].split("/")
+    node: Any = schema
+    for p in parts:
+        node = node[p]
+    return node
+
+
+def _resolve_pyd_ref(ref: str, root: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a Pydantic-style ``#/$defs/Foo`` ref against a Pydantic schema."""
+    assert ref.startswith("#/"), f"only local refs supported, got {ref}"
+    parts = ref[2:].split("/")
+    node: Any = root
+    for p in parts:
+        node = node[p]
+    return node
+
+
+#: Refs that mean "any JSON value" on both sides — the OpenRPC side uses a
+#: ``$ref`` to the ``JsonValue`` component, the Pydantic side emits an empty
+#: schema for ``typing.Any``.  We canonicalize both to ``{"any": True}``.
+_ANY_REFS = {"JsonValue"}
+
+
+def _normalize_oas_type(
+    node: dict[str, Any], schema: dict[str, Any], _seen: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Normalize an OpenRPC schema fragment to a comparison-friendly form.
+
+    Refs are *expanded* (cycle-safe via ``_seen``) so that inline objects and
+    ref'd objects with the same shape compare equal.  Named component refs are
+    preserved as ``{"object_name": Name, ...expanded...}`` so the test can
+    detect when the wrong type is referenced.
+    """
+    if "$ref" in node:
+        ref_name = node["$ref"].split("/")[-1]
+        if ref_name in _ANY_REFS:
+            return {"any": True}
+        if ref_name in _seen:
+            return {"ref_cycle": ref_name}
+        target = _resolve_ref(node["$ref"], schema)
+        expanded = _normalize_oas_type(target, schema, _seen | {ref_name})
+        return expanded
+    out: dict[str, Any] = {}
+    if "type" in node:
+        if isinstance(node["type"], list):
+            # Two shapes share this spelling. ``[T, "null"]`` is a nullable T --
+            # the schema's way of writing what Pydantic emits as
+            # ``anyOf: [T, null]`` and ``_strip_null_anyof`` reduces to T, so
+            # reduce it the same way or the two sides can never agree. Anything
+            # wider is JsonValue's multi-typed primitive node; collapse that.
+            non_null = [t for t in node["type"] if t != "null"]
+            if len(non_null) == 1:
+                out["type"] = non_null[0]
+            else:
+                out["any"] = True
+        else:
+            out["type"] = node["type"]
+    if "enum" in node:
+        # Nullability is not compared (see the module docstring), so a null
+        # listed among an enum's values is left out the way a null branch is.
+        out["enum"] = sorted(v for v in node["enum"] if v is not None)
+    if "const" in node:
+        out["const"] = node["const"]
+    # Read the reduced type, not the raw one: a nullable ``["object", "null"]``
+    # still has properties to descend into.
+    if out.get("type") == "array" and "items" in node:
+        out["items"] = _normalize_oas_type(node["items"], schema, _seen)
+    if out.get("type") == "object":
+        if "properties" in node:
+            out["properties"] = {
+                pname: _normalize_oas_type(psub, schema, _seen) for pname, psub in node["properties"].items()
+            }
+            out["required"] = sorted(node.get("required", []))
+        if "additionalProperties" in node:
+            ap = node["additionalProperties"]
+            if isinstance(ap, dict):
+                out["values"] = _normalize_oas_type(ap, schema, _seen)
+    if "oneOf" in node:
+        branches = node["oneOf"]
+        # ``oneOf: [JsonValue, null]`` is the schema's way of declaring an
+        # optional-but-required-nullable field; collapse to "any".
+        non_null = [b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")]
+        if len(branches) == 2 and len(non_null) == 1:
+            inner = _normalize_oas_type(non_null[0], schema)
+            if inner == {"any": True}:
+                return {"any": True}
+        out["oneOf_refs"] = sorted(
+            (sub["$ref"].split("/")[-1] for sub in node["oneOf"] if "$ref" in sub),
+        )
+    return out
+
+
+def _strip_null_anyof(field_schema: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Pydantic emits ``anyOf: [{type:X}, {type:null}]`` for ``X | None``.
+
+    Strip the null branch and return ``(non_null_schema, was_nullable)``.
+    """
+    if "anyOf" in field_schema:
+        branches = field_schema["anyOf"]
+        non_null = [b for b in branches if b.get("type") != "null"]
+        if len(non_null) == 1 and len(branches) == 2:
+            return non_null[0], True
+    return field_schema, False
+
+
+def _normalize_pyd_type(
+    node: dict[str, Any], root: dict[str, Any], _seen: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Normalize a Pydantic-generated schema fragment for comparison.
+
+    Resolves Pydantic ``$defs`` refs (cycle-safe) and expands them inline so
+    that ref'd objects compare equal to schema-side inline objects.
+    """
+    node, _was_nullable = _strip_null_anyof(node)
+    # Drop purely-decorative keys before deciding emptiness.
+    stripped = {k: v for k, v in node.items() if k not in ("title", "description", "default")}
+    if stripped == {}:
+        return {"any": True}
+    if "$ref" in stripped:
+        ref_name = stripped["$ref"].split("/")[-1]
+        if ref_name in _seen:
+            return {"ref_cycle": ref_name}
+        target = _resolve_pyd_ref(stripped["$ref"], root)
+        return _normalize_pyd_type(target, root, _seen | {ref_name})
+    out: dict[str, Any] = {}
+    if "type" in stripped:
+        out["type"] = stripped["type"]
+    if "enum" in stripped:
+        out["enum"] = sorted(stripped["enum"])
+    if "const" in stripped:
+        out["const"] = stripped["const"]
+    if stripped.get("type") == "array" and "items" in stripped:
+        out["items"] = _normalize_pyd_type(stripped["items"], root, _seen)
+    if stripped.get("type") == "object":
+        if "properties" in stripped:
+            # Strip null-anyOf at the property level (mirrors strip-null in
+            # the field-level normalization at _pyd_object_properties).
+            props_out: dict[str, dict[str, Any]] = {}
+            local_required = set(stripped.get("required", []))
+            for pname, psub in stripped["properties"].items():
+                non_null, was_nullable = _strip_null_anyof(psub)
+                props_out[pname] = _normalize_pyd_type(non_null, root, _seen)
+                if was_nullable:
+                    local_required.discard(pname)
+            out["properties"] = props_out
+            out["required"] = sorted(local_required)
+        ap = stripped.get("additionalProperties")
+        if ap is True:
+            out["values"] = {"any": True}
+        elif isinstance(ap, dict):
+            out["values"] = _normalize_pyd_type(ap, root, _seen)
+        # ap is False (extra='forbid' default) or absent → no "values"
+    if "oneOf" in stripped:
+        out["oneOf_refs"] = sorted(
+            (sub["$ref"].split("/")[-1] for sub in stripped["oneOf"] if "$ref" in sub),
+        )
+    return out
+
+
+def _oas_params_to_canonical(method: dict[str, Any], schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return ``{param_name → {required: bool, schema: normalized}}``."""
+    out: dict[str, dict[str, Any]] = {}
+    for p in method.get("params", []):
+        out[p["name"]] = {
+            "required": bool(p.get("required", False)),
+            "schema": _normalize_oas_type(p["schema"], schema),
+        }
+    return out
+
+
+def _pyd_params_to_canonical(
+    model: type[BaseModel],
+) -> dict[str, dict[str, Any]]:
+    """Return ``{field_name → {required: bool, schema: normalized}}``.
+
+    "required" means the field has no default (Pydantic-required AND non-null).
+    """
+    pyd_schema = model.model_json_schema()
+    required_set = set(pyd_schema.get("required", []))
+    properties = pyd_schema.get("properties", {})
+    out: dict[str, dict[str, Any]] = {}
+    for fname, fschema in properties.items():
+        is_required = fname in required_set
+        non_null, was_nullable = _strip_null_anyof(fschema)
+        out[fname] = {
+            "required": is_required and not was_nullable,
+            "schema": _normalize_pyd_type(non_null, pyd_schema),
+        }
+    return out
+
+
+def _oas_object_properties(
+    obj_schema: dict[str, Any], schema: dict[str, Any]
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """For an OpenRPC object schema (after $ref resolution), return
+    ``({prop_name → normalized}, required_set)``."""
+    # Follow a single layer of $ref if present.
+    if "$ref" in obj_schema:
+        obj_schema = _resolve_ref(obj_schema["$ref"], schema)
+    properties = obj_schema.get("properties", {})
+    required_set = set(obj_schema.get("required", []))
+    out: dict[str, dict[str, Any]] = {}
+    for name, sub in properties.items():
+        out[name] = _normalize_oas_type(sub, schema)
+    return out, required_set
+
+
+def _pyd_object_properties(
+    model: type[BaseModel],
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    pyd_schema = model.model_json_schema()
+    required_set = set(pyd_schema.get("required", []))
+    properties = pyd_schema.get("properties", {})
+    out: dict[str, dict[str, Any]] = {}
+    for fname, fschema in properties.items():
+        non_null, was_nullable = _strip_null_anyof(fschema)
+        out[fname] = _normalize_pyd_type(non_null, pyd_schema)
+        if was_nullable:
+            required_set.discard(fname)
+    return out, required_set
+
+
+# ---------------------------------------------------------------------------
+# Method-set parity
+# ---------------------------------------------------------------------------
+
+
+def test_method_set_matches(methods_by_name: dict[str, dict[str, Any]]) -> None:
+    """The set of method names declared in schema must equal METHOD_MODELS keys."""
+    schema_names = set(methods_by_name.keys())
+    pyd_names = set(METHOD_MODELS.keys())
+    only_in_schema = schema_names - pyd_names
+    only_in_pyd = pyd_names - schema_names
+    assert not only_in_schema, f"methods in schema but not in METHOD_MODELS: {only_in_schema}"
+    assert not only_in_pyd, f"methods in METHOD_MODELS but not in schema: {only_in_pyd}"
+
+
+# ---------------------------------------------------------------------------
+# Parametrized per-method drift checks
+# ---------------------------------------------------------------------------
+
+
+def _check_params_drift(method_name: str, method: dict[str, Any], schema: dict[str, Any]) -> None:
+    params_model, _ = METHOD_MODELS[method_name]
+    oas = _oas_params_to_canonical(method, schema)
+    pyd = _pyd_params_to_canonical(params_model)
+    assert set(oas.keys()) == set(pyd.keys()), (
+        f"drift in {method_name}.params: schema params {sorted(oas)} vs pydantic fields {sorted(pyd)}"
+    )
+    for name in oas:
+        assert oas[name]["required"] == pyd[name]["required"], (
+            f"drift in {method_name}.params.{name}.required: "
+            f"schema={oas[name]['required']} vs pydantic={pyd[name]['required']}"
+        )
+        assert oas[name]["schema"] == pyd[name]["schema"], (
+            f"drift in {method_name}.params.{name}.schema: "
+            f"schema={oas[name]['schema']} vs pydantic={pyd[name]['schema']}"
+        )
+
+
+def _check_result_drift(method_name: str, method: dict[str, Any], schema: dict[str, Any]) -> None:
+    _, result_model = METHOD_MODELS[method_name]
+    result_schema_node = method["result"]["schema"]
+    oas_props, oas_required = _oas_object_properties(result_schema_node, schema)
+    pyd_props, pyd_required = _pyd_object_properties(result_model)
+    assert set(oas_props.keys()) == set(pyd_props.keys()), (
+        f"drift in {method_name}.result: schema properties {sorted(oas_props)} vs pydantic fields {sorted(pyd_props)}"
+    )
+    assert oas_required == pyd_required, (
+        f"drift in {method_name}.result.required: schema={sorted(oas_required)} vs pydantic={sorted(pyd_required)}"
+    )
+    for name in oas_props:
+        assert oas_props[name] == pyd_props[name], (
+            f"drift in {method_name}.result.{name}: schema={oas_props[name]} vs pydantic={pyd_props[name]}"
+        )
+
+
+# Three explicit smoke tests called out in the implementation brief.  These
+# also act as red-stage starting points if the parametrized suite below
+# regresses.
+
+
+def test_schema_match_cli_dispatch(methods_by_name: dict[str, dict[str, Any]], schema: dict[str, Any]) -> None:
+    method = methods_by_name["cli.dispatch"]
+    _check_params_drift("cli.dispatch", method, schema)
+    _check_result_drift("cli.dispatch", method, schema)
+
+
+def test_schema_match_session_create(methods_by_name: dict[str, dict[str, Any]], schema: dict[str, Any]) -> None:
+    method = methods_by_name["session.create"]
+    _check_params_drift("session.create", method, schema)
+    _check_result_drift("session.create", method, schema)
+
+
+def test_schema_match_turn_event_discriminated_union(schema: dict[str, Any]) -> None:
+    """TurnEvent must be a discriminated union with ``type`` as the property.
+
+    Compares the OpenRPC component schema's ``oneOf`` refs to the Pydantic-
+    emitted ``oneOf`` refs for the ``TurnEvent`` Annotated alias.
+    """
+    from pydantic import TypeAdapter
+
+    from raven.rpc.models import TurnEvent
+
+    oas = schema["components"]["schemas"]["TurnEvent"]
+    assert oas.get("discriminator", {}).get("propertyName") == "type"
+    oas_refs = sorted(sub["$ref"].split("/")[-1] for sub in oas["oneOf"])
+
+    pyd = TypeAdapter(TurnEvent).json_schema()
+    assert pyd.get("discriminator", {}).get("propertyName") == "type"
+    pyd_refs = sorted(sub["$ref"].split("/")[-1] for sub in pyd["oneOf"])
+
+    assert oas_refs == pyd_refs, f"TurnEvent variant set drift: schema={oas_refs} vs pydantic={pyd_refs}"
+    # Mapping (type-literal → variant name) must align as well.
+    oas_mapping = oas["discriminator"]["mapping"]
+    pyd_mapping = pyd["discriminator"]["mapping"]
+    oas_normal = {k: v.split("/")[-1] for k, v in oas_mapping.items()}
+    pyd_normal = {k: v.split("/")[-1] for k, v in pyd_mapping.items()}
+    assert oas_normal == pyd_normal, f"TurnEvent discriminator mapping drift: schema={oas_normal} vs pyd={pyd_normal}"
+
+
+def test_schema_match_the_boundary_a_suspended_dag_node_emits(schema: dict[str, Any]) -> None:
+    """The exact `turn.started` payload `announce_dag_exception` puts on the wire
+    must validate against the published contract AND the Pydantic model.
+
+    `turn.started` was declared on both sides and wired into neither union, so
+    the sweep above never reached it. It drifted the moment the judge landed:
+    `raven/agent/subagent/manager.py` began marking a suspended node
+    `status="exception"` with a `node_id`, the schema still said
+    `enum: [ok, error]` with `additionalProperties: false`, and the Pydantic
+    payload had no `delegated` field at all under `extra="forbid"`. Nothing
+    validates an outbound event, so it reached clients anyway -- but any
+    consumer that DOES validate rejects the whole event, not the unknown field,
+    and loses the boundary that advances the turn counter.
+
+    Built from the marker the manager actually writes, so the day a fourth
+    status or a fifth field is added there, this fails here rather than in a
+    client nobody is watching.
+    """
+    import jsonschema
+    from pydantic import TypeAdapter
+
+    from raven.rpc.models import TurnEvent
+
+    # The shape `announce_dag_exception` builds, verbatim.
+    mark = {"kind": "dag", "label": "run-7", "status": "exception", "run_id": "run-7", "node_id": "n2"}
+    event = {"type": "turn.started", "payload": {"turn_id": "t1", "delegated": {**mark, "content": "..."}}}
+
+    inline = {**schema["components"]["schemas"]["TurnStartedEvent"], "components": schema["components"]}
+    jsonschema.validate(event, inline)
+    TypeAdapter(TurnEvent).validate_python(event)
+
+    # And a direct chat's turn, which tags the payload with its addressee. The
+    # shape is the one `raven/rpc/methods/turn.py` puts in `direct_targets`:
+    # `agent` and `handle`. This event declared its own `target` inline instead
+    # of pointing at `DirectTarget` like every other event does, and the copy
+    # said `instance` -- a key the runtime has never sent -- under
+    # `additionalProperties: false`. So every tagged boundary was invalid to a
+    # validating consumer, for a field it does not even control.
+    tagged = {
+        "type": "turn.started",
+        "payload": {"turn_id": "t1", "target": {"agent": "raven-code", "handle": "h1"}},
+    }
+    jsonschema.validate(tagged, inline)
+    TypeAdapter(TurnEvent).validate_python(tagged)
+
+    # The plain boundary, which most turns are: no delegation, no addressee.
+    plain = {"type": "turn.started", "payload": {"turn_id": "t1"}}
+    jsonschema.validate(plain, inline)
+    TypeAdapter(TurnEvent).validate_python(plain)
+
+    # And the fourth status: a stall notice about a node that is still running
+    # (`announce_dag_exception(informational=True)`). Emitted as `notice` so a
+    # client never draws a live node as failed; declared on both sides for the
+    # same reason the third one is.
+    notice = {**mark, "status": "notice"}
+    for shape in (
+        {"type": "turn.started", "payload": {"turn_id": "t1", "delegated": {**notice, "content": "..."}}},
+        {"type": "subagent.delivered", "payload": {**notice, "content": "..."}},
+    ):
+        jsonschema.validate(shape, {**schema["components"]["schemas"]["TurnEvent"], "components": schema["components"]})
+        TypeAdapter(TurnEvent).validate_python(shape)
+
+    # And the fifth: a spawn stopped before it finished (the manager's
+    # CancelledError branch announces it). Declared on both sides so a client
+    # draws a stop as a stop, not as the result the run never returned.
+    cancelled = {"kind": "spawn", "label": "poster", "status": "cancelled", "content": "..."}
+    for shape in (
+        {"type": "turn.started", "payload": {"turn_id": "t1", "delegated": cancelled}},
+        {"type": "subagent.delivered", "payload": cancelled},
+    ):
+        jsonschema.validate(shape, {**schema["components"]["schemas"]["TurnEvent"], "components": schema["components"]})
+        TypeAdapter(TurnEvent).validate_python(shape)
+
+
+def test_schema_match_the_stall_notice_progress_event(schema: dict[str, Any]) -> None:
+    """`dag.node_stalled` is what the stall watcher's progress event becomes on
+    the wire (`raven.rpc.spine._DAG_WIRE_EVENT`); it is the only frame a bound
+    foreground run's panel hears, so it has to be declared on both sides."""
+    import jsonschema
+    from pydantic import TypeAdapter
+
+    from raven.rpc.models import TurnEvent
+    from raven.rpc.spine import _DAG_WIRE_EVENT, _dag_payload
+
+    payload = _dag_payload("dag_node_stalled", {"run_id": "r1", "node": "n", "quiet_ms": 600000})
+    event = {"type": _DAG_WIRE_EVENT["dag_node_stalled"], "payload": payload}
+    jsonschema.validate(event, {**schema["components"]["schemas"]["TurnEvent"], "components": schema["components"]})
+    TypeAdapter(TurnEvent).validate_python(event)
+
+
+def test_schema_match_turn_event_payload_fields(schema: dict[str, Any]) -> None:
+    """Every variant's payload must declare the same fields on both sides.
+
+    The union test above compares only the *set of variants*, which is why a
+    field added to one side alone survived it: ``tool.complete`` gained
+    ``file_change`` at the emit site and in the Pydantic model with no schema
+    entry, and nothing failed. That is not a cosmetic drift -- both sides declare
+    ``additionalProperties: false`` / ``extra="forbid"``, so a consumer
+    validating against the schema rejects the *whole event*, not just the
+    unknown field, and a client loses the tool result entirely.
+
+    Compares names only. Types are left to the per-method sweep: an event payload
+    reuses the same component schemas, and a name mismatch is the failure this
+    contract actually suffers.
+    """
+    from pydantic import TypeAdapter
+
+    from raven.rpc.models import TurnEvent
+
+    components = schema["components"]["schemas"]
+    oas_mapping = components["TurnEvent"]["discriminator"]["mapping"]
+    pyd = TypeAdapter(TurnEvent).json_schema()
+    pyd_defs = pyd["$defs"]
+
+    def properties(node: dict[str, Any], defs: dict[str, Any]) -> set[str]:
+        payload = node["properties"].get("payload", {})
+        if "$ref" in payload:
+            payload = defs[payload["$ref"].split("/")[-1]]
+        return set(payload.get("properties", {}))
+
+    drift: dict[str, tuple[list[str], list[str]]] = {}
+    for literal, ref in pyd["discriminator"]["mapping"].items():
+        pyd_fields = properties(pyd_defs[ref.split("/")[-1]], pyd_defs)
+        oas_fields = properties(components[oas_mapping[literal].split("/")[-1]], components)
+        if pyd_fields != oas_fields:
+            drift[literal] = (sorted(pyd_fields - oas_fields), sorted(oas_fields - pyd_fields))
+
+    assert not drift, "payload field drift (pydantic-only, schema-only): " + repr(drift)
+
+
+# Parametrized full-suite sweep — one test instance per method.  This is the
+# primary CI guard; the three explicit tests above are sentinels with extra
+# context-rich failure modes.
+
+
+def _all_method_names() -> list[str]:
+    schema = json.loads(SCHEMA_PATH.read_text())
+    return sorted(m["name"] for m in schema["methods"])
+
+
+@pytest.mark.parametrize("method_name", _all_method_names())
+def test_method_params_match_schema(
+    method_name: str,
+    methods_by_name: dict[str, dict[str, Any]],
+    schema: dict[str, Any],
+) -> None:
+    method = methods_by_name[method_name]
+    _check_params_drift(method_name, method, schema)
+
+
+@pytest.mark.parametrize("method_name", _all_method_names())
+def test_method_result_matches_schema(
+    method_name: str,
+    methods_by_name: dict[str, dict[str, Any]],
+    schema: dict[str, Any],
+) -> None:
+    method = methods_by_name[method_name]
+    _check_result_drift(method_name, method, schema)
+
+
+# ---------------------------------------------------------------------------
+# Error code parity (specs §4)
+# ---------------------------------------------------------------------------
+
+
+EXPECTED_ERROR_CODES = {
+    -32001: "session_not_found",
+    -32002: "session_locked",
+    -32003: "turn_in_progress",
+    -32004: "mcp_server_not_connected",
+    -32005: "mcp_tool_call_failed",
+    -32006: "skill_not_found",
+    -32007: "skill_pin_conflict",
+    -32008: "model_not_available",
+    -32010: "config_field_readonly",
+    -32011: "config_validation_error",
+    -32012: "not_supported_in_v01",
+    -32013: "cli_command_failed",
+    -32014: "cli_command_timeout",
+    -32015: "not_dispatch_compatible",
+    -32017: "subagent_not_found",
+    -32018: "session_title_too_long",
+    -32019: "subagent_not_ready",
+    -32020: "trajectory_disabled",
+    -32021: "entry_not_found",
+    -32022: "cursor_expired",
+    -32023: "revision_changed",
+}
+
+
+def test_every_spec_error_code_maps_back_to_its_class() -> None:
+    from raven.rpc import errors
+
+    for code, message in EXPECTED_ERROR_CODES.items():
+        cls = errors.JSONRPC_ERROR_REGISTRY.get(code)
+        assert cls is not None, f"{code} has no class in JSONRPC_ERROR_REGISTRY"
+        assert cls.MESSAGE == message
+        assert cls.__name__ in errors.__all__
+
+
+def test_error_codes_match_spec(schema: dict[str, Any]) -> None:
+    errors_component = schema["components"]["errors"]
+    declared: dict[int, str] = {body["code"]: body["message"] for body in errors_component.values()}
+    assert declared == EXPECTED_ERROR_CODES, (
+        f"error code table drift:\n"
+        f"  in-schema: {sorted(declared.items())}\n"
+        f"  expected:  {sorted(EXPECTED_ERROR_CODES.items())}"
+    )

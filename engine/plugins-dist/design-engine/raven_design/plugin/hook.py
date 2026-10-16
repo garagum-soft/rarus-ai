@@ -1,0 +1,462 @@
+"""The design turn frame: domain selection in, task-state projection through.
+
+The fork ran the Visual Domain Selector inside context assembly -- a fork-only
+parameter on its SkillsSegmentBuilder, gathered in parallel with general skill
+routing -- and projected the resident Task State onto a transient copy of the
+transcript before every model call (fork ``agent/loop/main.py:1184-1230``).
+Here both ride the loop's own hook phases, per the amended verdict:
+
+* ``before_user_inbound`` -- repoint the turn to its session's directory under
+  ``<workdir>/designs/``, then run one selection over the fixed domain catalog
+  and append the card block below a separator to the model's view of the
+  inbound text. The session record keeps the user's own words on every turn
+  outcome: the loop persists ``inbound_original`` on the healthy save and --
+  sealed at the engine wave's kernel repair -- on the cancelled/failed save too
+  (``_save_broken_turn`` used to drop it, which let a hook's rewrite land in
+  history on exactly the outcomes users hit mid-task). So the block reaches
+  neither the transcript on disk nor the memory extractor -- the D1
+  structural guarantee, pinned by the plugin family's parameterized history
+  tests, one per exit door. The four D1 rebuild clauses
+  are landed here as code: (1) the rewritten inbound reaches every downstream
+  consumer (personalizer, model router, general skill routing, the assembly /
+  scent / memory-recall query, ``turn_question``), so the block stays cards-
+  only, never bodies, below a ``---`` separator; (2) a command-shaped or
+  blank inbound is never rewritten -- hooks fire before slash dispatch;
+  (3) the seat assumes pull discovery: the shipped product config never sets
+  ``skillForge.discovery``, and switching the host to push would inject the
+  general lane's full bodies beside these cards (the double-injection trap
+  the verdict forbids); (4) the selection call rides ``active_binding()``
+  first -- the fork's own binding order -- so a session ``/model`` switch
+  reaches it.
+
+  One selection is one LLM call embedding all fifteen full SKILL.md bodies:
+  2,721 lines / 246,422 bytes measured, roughly 60-90k input tokens at CJK
+  tokenizer rates (C7). The catalog is constant -- a caching provider pays
+  it once per prefix -- and ``visualDomainSelector.enabled`` is the off
+  switch. Selection failure degrades to the full description catalog for the
+  turn (the fork's shape), never to a broken turn.
+
+* ``before_iteration`` -- repoint turns that skipped the inbound phase, then
+  project the current Task State as an ``append_note`` before every model call.
+  State is keyed by the bound working directory, shared with the tool seat.
+  Each session uses its own directory by default, isolating both its resident
+  list and its relative file paths. The fork
+  stripped stale projections from a transient copy; a note appended here
+  stays where it landed in the transcript, so an older projection can also
+  be eaten by a mid-turn compaction -- both are the ledgered D5 loss, and
+  both self-heal because every iteration appends the fresh snapshot.
+
+* ``after_send`` -- three reply tails: the fork's own two first, in its own
+  order -- the completion notice while unfinished items remain (fork
+  ``main.py:2928-2931``), then the caller-workspace git summary the fork
+  launcher appended after every answer (fork ``run.py:357-378``, the amended
+  D3 rebuild), names and counts rather than a patch, and only when the bound
+  working directory is a git tree, a workspace that is not a checkout passing
+  untouched -- and last the session directory this turn worked in, absolute
+  and machine-written. That third one is the caller's handoff: the directory
+  above is the one the caller dispatched into, and this turn's files are not
+  in it, so the engine names the directory they are in on the same reply that
+  names them. The rewritten reply is what ``context_engine.after_turn``
+  receives, so Curator bookkeeping sees the appended tails (bounded, replaced
+  each turn; the ppt after_send rides the same channel) -- the session record
+  and the memory store do not.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import shutil
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from raven.agent import workdir
+from raven.contracts.loop_hooks import AgentHook, AgentHookContext, HookDecision
+from raven.contracts.participant import Accept, AgentParticipant, Answer, Intake, Resample, StepView
+from raven.memory_engine.skill_local.registry import SkillRegistry
+from raven.utils.paths import mint_slug
+from raven_design.selector import VisualDomainSkillSelector
+
+if TYPE_CHECKING:
+    from raven_design.plugin.config import EngineConfig
+    from raven_design.task_state.manager import TaskStateManager
+
+logger = logging.getLogger(__name__)
+
+#: The always-read foundation skill the card block names ahead of the
+#: preferred cards (the fork's ``builtin/visual-artifact-design``, respelled
+#: to the localDirs namespace).
+FOUNDATION_SKILL_ID = "local/visual-artifact-design"
+
+#: Never a real registry workspace: the packaged corpus is mounted as an
+#: extra dir, and the registry's workspace mkdir attempt fails silently on
+#: this path by design (its own OSError guard).
+_PROTOTYPE_WORKSPACE = Path("/nonexistent/design-engine-prototype")
+
+_MALFORMED_SLICE_ERROR = 'the design-engine config slice is malformed; fix plugins.config["design-engine"]'
+
+DESIGNS_DIRNAME = "designs"
+
+# A turn ends on the first reply without a tool call, and `completion_notice`
+# rides that reply out. In a direct chat the notice is a nudge with a next turn
+# to act on it; dispatched as a DAG node there is no next turn, so the same text
+# reaches the caller's judge as a verdict on work the agent may well have done.
+# One live run wrote the page, reported the path, and was failed on two items it
+# had finished 37 minutes earlier but never ticked. Sending the turn back once
+# lets the agent settle its own record while the reply is still a draft; the
+# second answer then stands, because an item still open after that is a fact the
+# judge should see.
+RECONCILE_NUDGE = (
+    "This reply ends the turn, and the task-state notice above travels out with it -- whoever reads "
+    "the reply is told the task is incomplete. Settle the record before ending: mark every item you "
+    "actually finished as completed, and for anything genuinely not done, name the item in the reply "
+    "and say why. Do not redo or restate the work; reconcile the record and end."
+)
+
+
+def packaged_skills_dir() -> Path:
+    """The corpus shipped inside this wheel."""
+    return Path(__file__).resolve().parent.parent / "skills"
+
+
+def build_selector(cfg: "EngineConfig") -> VisualDomainSkillSelector:
+    """Construct the selector over the packaged corpus, fail-closed.
+
+    The registry mounts the wheel's own skills directory the same way the
+    launcher mounts it for the host (``skillForge.localDirs``, rendered
+    per-entry and keyed by path), so the ids the cards carry
+    (``local/<name>``) are the ids the host's ``read_skill`` resolves. A
+    corpus with a missing or empty domain skill raises here, at activation --
+    the factory catches it and casts the sentinel rather than serving a
+    selector that lies about its catalog.
+    """
+    registry = SkillRegistry(
+        _PROTOTYPE_WORKSPACE,
+        builtin_skills_dir=_PROTOTYPE_WORKSPACE / "builtin",
+        extra_dirs=[(packaged_skills_dir(), "design-engine", True)],
+    )
+    return VisualDomainSkillSelector.from_registry(
+        provider=None,
+        registry=registry,
+        preferred_max=cfg.selector.preferred_max,
+        alternatives_max=cfg.selector.alternatives_max,
+        temperature=cfg.selector.temperature,
+        max_tokens=cfg.selector.max_tokens,
+    )
+
+
+def render_selection_block(selection: Any) -> str:
+    """The fork's Skills-segment block (context_engine/segments/render.py),
+    re-said for the message seat: cards only, bodies read on demand."""
+    preferred = list(getattr(selection, "preferred", ()) or ())
+    alternatives = list(getattr(selection, "alternatives", ()) or ())
+    if not preferred and not alternatives:
+        return ""
+    lines = [
+        "The Visual Domain Selector compared the complete packaged SKILL.md bodies for all domain candidates.",
+        "The required Skill bodies are not inlined. For a visual task, before planning or taking action, call "
+        f"`read_skill` for `{FOUNDATION_SKILL_ID}` and every Skill under Preferred Skills below unless "
+        "its complete body is already present in the current context. Preferred Skills are the strongest matches; "
+        "Alternative Skills are optional and should be read only when their procedures would help.",
+    ]
+    if getattr(selection, "degraded", False):
+        lines.append(
+            "The selector call failed, so the full description catalog is shown as alternatives for this turn."
+        )
+    for title, cards in (("Preferred Skills", preferred), ("Alternative Skills", alternatives)):
+        if not cards:
+            continue
+        lines.extend(["", f"## {title}"])
+        for card in cards:
+            lines.append(f"- `{card.qualified_id}`: {card.description}")
+    return "\n".join(lines)
+
+
+def completion_notice(manager: "TaskStateManager", session_key: str) -> str | None:
+    """The fork's turn-end nudge (main.py:1208-1230), verbatim semantics.
+
+    Read from two seats now: `after_send` appends it to the reply, and
+    `after_iteration` shows it to the agent one turn earlier so the reply need
+    not carry it. The text is the same in both, which is why it lives here.
+    """
+    state = manager.get(session_key)
+    if state is None:
+        return None
+    unfinished = [
+        (number, item["status"]) for number, item in enumerate(state["items"], start=1) if item["status"] != "completed"
+    ]
+    if not unfinished:
+        return None
+    pending = [str(number) for number, status in unfinished if status in {"pending", "in_progress"}]
+    waiting = [str(number) for number, status in unfinished if status in {"waiting", "blocked"}]
+    parts = []
+    if pending:
+        parts.append(f"unfinished item_number values: {', '.join(pending)}")
+    if waiting:
+        parts.append(f"waiting or blocked item_number values: {', '.join(waiting)}")
+    return "[Task State] This task is not complete; " + "; ".join(parts) + "."
+
+
+def describe_changes(repo: Path) -> str:
+    """Summarise the working-tree footprint of a run, when the workspace is a
+    checkout -- the fork launcher's reply tail, verbatim semantics.
+
+    A name-and-count summary rather than a patch: the agent edits the
+    caller's real files, so what the caller needs from the reply is where to
+    look. Clean trees still answer ("no files were changed"), the fork's own
+    behaviour; a missing git or a failing status answers with silence.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return ""
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([git, *args], cwd=str(repo), capture_output=True, text=True)
+
+    status = run("status", "--porcelain")
+    if status.returncode != 0:
+        return ""
+    lines = [line for line in status.stdout.splitlines() if line.strip()]
+    if not lines:
+        return "no files were changed in the working tree"
+    stat = run("diff", "--stat")
+    body = "\n".join(lines[:40])
+    if len(lines) > 40:
+        body += f"\n... and {len(lines) - 40} more"
+    tail = stat.stdout.strip().splitlines()[-1:] if stat.returncode == 0 else []
+    summary = f"working tree of {repo} after this run:\n{body}"
+    if tail:
+        summary += f"\n{tail[0].strip()}"
+    return summary
+
+
+class MisconfiguredEngineHook(AgentHook):
+    """Fail-closed sentinel cast when the config slice cannot be parsed.
+
+    A raising factory is logged and SKIPPED by the lenient stack builder, so
+    letting the parse error escape would boot a design product with no
+    selector, no render tools and no task state under a config that says the
+    engine is on -- the silent degradation the MisconfiguredGate doctrine
+    (w101) exists to prevent. This sentinel takes the hook's seat instead:
+    every turn is answered with the config fix named, and the deploy stays
+    loud until someone repairs the slice. Deliberately cast even when
+    ``enabled`` was meant to be false: an unparseable slice proves nothing
+    about intent, and closed-and-loud beats open-and-quiet.
+    """
+
+    def __init__(self, error: str) -> None:
+        self._error = error
+
+    @property
+    def name(self) -> str:
+        return "design_engine"
+
+    async def before_user_inbound(self, ctx: AgentHookContext) -> HookDecision:
+        return HookDecision(short_circuit_result=(f"{_MALFORMED_SLICE_ERROR}: {self._error}", []))
+
+
+def session_dirname(session_key: str) -> str:
+    """The directory name this engine mints for ``session_key``.
+
+    Read from two seats: the one that makes the directory, and the one that
+    recognises it again from a binding it was handed.
+    """
+    name = mint_slug(session_key.rpartition(":")[2], max_chars=48) or "session"
+    digest = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+    return f"{name}-{digest}"
+
+
+class DesignParticipant(AgentParticipant):
+    """Domain selection on the way in; task-state projection and nudge through.
+
+    One instance per turn (the host builds it from ``make_hook``'s factory), so
+    "this turn was already nudged once" and "this turn's session directory could
+    not be made" are attributes rather than keys in the hook context's metadata.
+    """
+
+    def __init__(
+        self,
+        cfg: "EngineConfig",
+        selector: VisualDomainSkillSelector | None,
+        manager: "TaskStateManager | None",
+    ) -> None:
+        self._cfg = cfg
+        self._selector = selector
+        self._manager = manager
+        self._reconcile_nudged = False
+        self._blocked: str | None = None
+
+    @staticmethod
+    def _state_key() -> str | None:
+        bound = workdir.current()
+        return str(bound) if bound is not None else None
+
+    def _own_folder(self, bound: Path, session_key: str) -> Path:
+        """Keep state and artifacts together across resumed and concurrent turns."""
+        if not self._cfg.workdir_per_session:
+            return bound
+        dirname = session_dirname(session_key)
+        root = bound.parent.parent if bound.name == dirname and bound.parent.name == DESIGNS_DIRNAME else bound
+        root = root.resolve()
+        own = root / DESIGNS_DIRNAME / dirname
+        try:
+            # The live workdir becomes a tool access root; child links must not redirect it.
+            if own.resolve() != own:
+                raise ValueError(f"Symlinked design session directory is not allowed: {own}")
+            own.mkdir(parents=True, exist_ok=True)
+            if own.resolve(strict=True) != own:
+                raise ValueError(f"Symlinked design session directory is not allowed: {own}")
+        except (OSError, RuntimeError, ValueError):
+            workdir.repoint(root)
+            raise
+        workdir.repoint(own)
+        return own
+
+    def _own_session_dir(self, bound: Path | None, session_key: str) -> Path | None:
+        """``bound`` when it is the directory this engine minted for ``session_key``.
+
+        The send seat reads the turn's live binding and keeps no record of the
+        repoint, so ownership is answered from the binding itself, by the rule
+        ``_own_folder`` uses to recognise the directory it already owns.
+        """
+        if not self._cfg.workdir_per_session or bound is None:
+            return None
+        if bound.parent.name == DESIGNS_DIRNAME and bound.name == session_dirname(session_key):
+            return bound
+        return None
+
+    async def intake(self, text: str, step: StepView) -> Answer | None:
+        # D1 clause 2: hooks fire before slash dispatch, so a command-shaped
+        # inbound must pass through untouched or "/new" stops working; a blank
+        # one has nothing to classify.
+        if not text or not text.strip() or text.lstrip().startswith("/"):
+            return None
+        bound = workdir.current()
+        if bound is not None:
+            try:
+                self._own_folder(bound, step.session_key)
+            except (OSError, RuntimeError, ValueError) as exc:
+                # A directory refusal has to stop the turn explicitly, as the reply.
+                return Intake(text=text, reply=(f"Design session directory unavailable: {exc}", []))
+        if self._selector is None:
+            return None
+        try:
+            selection = await self._selector.select(text)
+        except Exception as exc:  # the selector already degrades; this is belt
+            logger.warning("design-engine: selection failed outside the selector's own guard: %s", exc)
+            return None
+        block = render_selection_block(selection)
+        if not block:
+            return None
+        # D1 clauses 1 and 3: cards only, below a separator, on the pull lane.
+        return Intake(text=f"{text}\n\n---\n{block}")
+
+    async def advise(self, step: StepView) -> str | None:
+        """Repoint a turn that skipped the inbound phase, then project the task state.
+
+        Asked before the call (``step.response`` None) and after it; the
+        projection belongs before. A directory refusal is remembered here and
+        ends the turn through ``system_addendum``, which the host asks next.
+        """
+        if step.response is not None:
+            return None
+        blocks: list[str] = []
+        bound = workdir.current()
+        if bound is not None and step.iteration in (0, 1):
+            try:
+                own = self._own_folder(bound, step.session_key)
+            except (OSError, RuntimeError, ValueError) as exc:
+                self._blocked = f"Design session directory unavailable: {exc}"
+                return None
+            if own != bound:
+                blocks.append(f"Working directory for this design session: {own}. Resolve relative paths here.")
+        key = self._state_key()
+        if self._manager is not None and key is not None:
+            try:
+                block = self._manager.render(key)
+                if block:
+                    blocks.append(block)
+            except Exception as exc:
+                logger.warning("design-engine: task-state projection failed: %s", exc)
+        return "\n\n".join(blocks) or None
+
+    async def system_addendum(self, step: StepView) -> Answer | None:
+        """Nothing to add to the prefix; the seat where a turn that has no
+        session directory is ended before its first call."""
+        if self._blocked is None:
+            return None
+        blocked, self._blocked = self._blocked, None
+        return Intake(text="", reply=blocked)
+
+    async def review(self, step: StepView) -> Answer:
+        """Send the turn back once when its reply would carry a stale ledger.
+
+        Decided from the ledger rather than from the prose: whether the reply
+        reads as finished is a language judgement, while "settle the record"
+        is an action the agent can always take, and the two honest outcomes --
+        ticking what is done, or naming what is not -- are both reachable from
+        one nudge.
+        """
+        if self._manager is None:
+            return Accept()
+        response = step.response
+        if response is None or getattr(response, "tool_calls", None):
+            return Accept()
+        if not str(getattr(response, "content", None) or "").strip():
+            return Accept()
+        key = self._state_key()
+        if key is None:
+            return Accept()
+        try:
+            notice = completion_notice(self._manager, key)
+        except Exception as exc:
+            logger.warning("design-engine: task-state read failed: %s", exc)
+            return Accept()
+        if notice is None:
+            return Accept()
+        if self._reconcile_nudged:
+            return Accept(note="design_engine: ledger still unfinished after one nudge; letting the turn end")
+        self._reconcile_nudged = True
+        return Resample(
+            "reply ends the turn on an unfinished task-state ledger",
+            inject=[{"role": "user", "content": f"{notice}\n\n{RECONCILE_NUDGE}"}],
+            note="design_engine: reply ending a turn on an unfinished task-state ledger rolled back (1/1)",
+        )
+
+    async def outbound(self, reply: str, step: StepView) -> str | None:
+        bound = workdir.current()
+        if bound is None or not reply.strip():
+            return None
+        suffixes: list[str] = []
+        if self._manager is not None:
+            notice = completion_notice(self._manager, str(bound))
+            if notice is not None:
+                suffixes.append(notice)
+        # The fork launcher's order kept: the loop appended the notice to the
+        # final answer, the wrapper appended the git summary after that.
+        if (Path(bound) / ".git").exists():
+            changes = describe_changes(Path(bound))
+            if changes:
+                suffixes.append(f"--- {changes}")
+        # Last, because it is the one line a caller acts on: this turn's files
+        # are not in the directory the caller dispatched it into, and a caller
+        # that assumed they were delivered nothing and had to search the disk
+        # for paths its run had used as relative all along.
+        own = self._own_session_dir(bound, step.session_key)
+        if own is not None:
+            suffixes.append(f"Design session directory: {own}\nPaths in this reply resolve against it.")
+        appended = "".join(f"\n\n{part}" for part in suffixes)
+        return reply + appended if appended else None
+
+
+__all__ = [
+    "FOUNDATION_SKILL_ID",
+    "DesignParticipant",
+    "MisconfiguredEngineHook",
+    "RECONCILE_NUDGE",
+    "build_selector",
+    "completion_notice",
+    "packaged_skills_dir",
+    "render_selection_block",
+]

@@ -1,0 +1,200 @@
+"""Wiring tests for tool-search registration inside AgentLoop.__init__.
+
+Covers the ``_register_default_tools`` block: the meta-tools land in the
+registry and the strategy is inserted *first* (so it filters before
+CacheOptimizer marks the final tool), and the whole thing is a no-op when the
+feature is disabled.
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from raven.agent.loop import AgentLoop
+from raven.agent.loop.bundles import EngineWiring, ToolWiring, TurnPolicy
+from raven.config.schema import ToolSearchConfig
+from raven.contracts.token_strategy import TokenStrategy
+from raven.providers.base import LLMProvider, LLMResponse
+from raven.token_wise.registry import StrategyRegistry
+
+
+class _StubProvider(LLMProvider):
+    def __init__(self) -> None:
+        super().__init__(api_key="test")
+
+    async def chat(
+        self,
+        messages,
+        tools=None,
+        model=None,
+        max_tokens=4096,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    ):
+        return LLMResponse(content="stub", finish_reason="stop")
+
+    def get_default_model(self) -> str:
+        return "stub"
+
+
+class _MarkerStrategy(TokenStrategy):
+    @property
+    def name(self) -> str:
+        return "marker"
+
+
+@pytest.fixture
+def workspace():
+    with tempfile.TemporaryDirectory() as td:
+        yield Path(td)
+
+
+def _make_loop(workspace: Path, cfg, strategies=None, disabled_tools=None) -> AgentLoop:
+    return AgentLoop(
+        provider=_StubProvider(),
+        workspace=workspace,
+        model="stub",
+        # web_search is the cataloged domain tool these tests fold away, and the
+        # loop only registers it when a search key resolves. Supplying one keeps
+        # the subject of the test present for the right reason.
+        policy=TurnPolicy(max_iterations=2),
+        tools=ToolWiring(
+            restrict_to_workspace=True,
+            tool_search_config=cfg,
+            search_api_key="test-serper-key",
+            disabled_tools=disabled_tools or [],
+        ),
+        engine=EngineWiring(strategies=strategies),
+    )
+
+
+def test_enabled_registers_meta_tools(workspace) -> None:
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=True))
+    for name in ("tool_search", "tool_call"):
+        assert loop.tools.has(name), f"{name} should be registered"
+    assert loop.strategies.get("tool_search") is not None
+
+
+def test_strategy_registered_first(workspace) -> None:
+    # A pre-existing strategy must end up *after* tool_search (which is inserted
+    # first so it filters tools before any cache-marking strategy runs).
+    registry = StrategyRegistry([_MarkerStrategy()])
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=True), strategies=registry)
+    names = [s.name for s in loop.strategies.strategies]
+    assert names[0] == "tool_search", f"tool_search must run first, got {names}"
+    assert "marker" in names
+
+
+def test_disabled_registers_no_search_but_keeps_tool_call(workspace) -> None:
+    # tool_call is not part of the feature switch: it is the only route by which
+    # a model can name a schema-hidden tool (the DAG controls), and those exist
+    # whether or not this deploy folds its catalog.
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=False))
+    assert not loop.tools.has("tool_search")
+    assert loop.strategies.get("tool_search") is None
+    assert loop.tools.has("tool_call")
+
+
+def test_none_config_takes_the_factory_default(workspace) -> None:
+    # A host that wires no tool-search config gets the schema's, and the schema
+    # ships the fold on -- so "no config" is the on case, not a third state. It
+    # costs a small catalog nothing: the strategy drops tool_search from every
+    # request until the catalog passes the threshold.
+    loop = _make_loop(workspace, None)
+    assert loop.tools.has("tool_search")
+    assert loop.strategies.get("tool_search") is not None
+    assert loop.tools.has("tool_call")
+
+
+def test_dag_controls_are_reachable_without_progressive_disclosure(workspace) -> None:
+    # The bug this pair of assertions pins: cancel_dag / dag_status /
+    # resolve_dag_node are hidden from the schema and advertised in
+    # run_subagent_dag's own result text, so an unreachable tool_call left the
+    # advertisement pointing at nothing and a suspended node timing out.
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=False))
+    hidden = loop.tools.schema_hidden_names()
+    assert {"cancel_dag", "dag_status", "resolve_dag_node"} <= hidden
+    assert loop.dag_control_reachable()
+
+
+@pytest.mark.asyncio
+async def test_enabled_loop_keeps_interaction_primitives_visible(workspace) -> None:
+    # Above the threshold the strategy compacts the real loop's tool list: the
+    # file/interaction/orchestration primitives (read_file / message / ask_user /
+    # spawn) and the meta-tools keep their schema, while a cataloged domain tool
+    # (web_search) is withheld and reachable only via tool_search.
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=True, compaction_threshold=5))
+    assert loop.tools.has("ask_user") and loop.tools.has("spawn") and loop.tools.has("web_search")
+    tools = loop.tools.get_definitions()
+    _, out, _ = await loop.strategies.before_llm_call([], tools, "stub")
+    names = {t["function"]["name"] for t in out}
+    assert {"read_file", "message", "ask_user", "spawn"} <= names, "primitives must stay visible"
+    assert {"tool_search", "tool_call"} <= names, "meta-tools must stay visible"
+    assert "web_search" not in names, "cataloged domain tools are withheld above threshold"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_does_not_name_tool_search_when_it_is_absent(workspace) -> None:
+    # The refusal text used to point at tool_search unconditionally, which is the
+    # same broken promise -- a route named in a result that this deploy does not
+    # ship -- that leaving tool_call behind the feature switch created.
+    loop = _make_loop(workspace, ToolSearchConfig(enabled=False))
+    out = await loop.tools.execute("tool_call", {"name": "no_such_tool"})
+    assert "tool_search" not in out
+
+    # Enabled is not enough: below the threshold the strategy drops tool_search
+    # from the request too, so the pointer is only honest above the fold.
+    unfolded = _make_loop(workspace, ToolSearchConfig(enabled=True, compaction_threshold=500))
+    out = await unfolded.tools.execute("tool_call", {"name": "no_such_tool"})
+    assert "tool_search" not in out
+
+    folded = _make_loop(workspace, ToolSearchConfig(enabled=True, compaction_threshold=5))
+    out = await folded.tools.execute("tool_call", {"name": "no_such_tool"})
+    assert "tool_search lists what is currently loaded" in out
+
+
+def test_the_reserved_warning_names_the_remedy_each_tool_actually_has(workspace) -> None:
+    # The two are not owned the same way: turning the fold off does stop
+    # tool_search registering, and leaves tool_call exactly where it was. A
+    # shared remedy sent an operator who wrote tool_call to a setting that
+    # changes nothing for it.
+    from loguru import logger
+
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(message.record["message"]), level="WARNING")
+    try:
+        _make_loop(workspace, ToolSearchConfig(enabled=True), disabled_tools=["tool_search", "tool_call"])
+    finally:
+        logger.remove(sink_id)
+    lines = {  # one line per entry, keyed by the name it names
+        name: next((text for text in records if f"names '{name}'" in text), "") for name in ("tool_search", "tool_call")
+    }
+    assert "tools.tool_search.enabled" in lines["tool_search"], lines["tool_search"]
+    assert "tools.tool_search.enabled" not in lines["tool_call"], lines["tool_call"]
+    assert "no switch" in lines["tool_call"], lines["tool_call"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_tools_cannot_withhold_the_meta_tools(workspace) -> None:
+    # The off switch reaches every other name, but not these two. The strategy
+    # reads their absence as "this request has no search route" and ships every
+    # schema instead, so an entry here would unfold the array rather than slim
+    # it -- and mid-turn at that, since the switch is read once per assembly.
+    loop = _make_loop(
+        workspace,
+        ToolSearchConfig(enabled=True, compaction_threshold=5),
+        disabled_tools=["tool_search", "tool_call", "web_search"],
+    )
+    assert loop.tools.offers_by_name("tool_search")
+    assert loop.tools.offers_by_name("tool_call")
+    assert not loop.tools.offers_by_name("web_search"), "every other name still switches off"
+
+    tools = loop.tools.get_definitions()
+    _, out, _ = await loop.strategies.before_llm_call([], tools, "stub")
+    names = {t["function"]["name"] for t in out}
+    assert {"tool_search", "tool_call"} <= names
+    assert len(names) < len(tools), "the fold must still fold, not fall through to passthrough"

@@ -1,0 +1,1688 @@
+import {
+  AiSearch02Icon, AlertCircleIcon, ArrowUpRight01Icon, BookOpen02Icon, DocumentCodeIcon, Download04Icon,
+  File01Icon, InternetIcon, PencilEdit01Icon, Wrench01Icon,
+} from '@hugeicons/core-free-icons'
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
+
+import { FileBadge, FileMark, Icon } from '../../components/Icon'
+import { t } from '../../i18n/t'
+import * as attachmentCache from '../../lib/attachmentCache'
+import { copy } from '../../lib/clipboard'
+import { useTick } from '../../lib/tick'
+import * as lightbox from '../../state/lightbox'
+import { open as openChip } from '../../state/proseChips'
+import * as reveal from '../../state/reveal'
+import { ds } from '../../state/sources'
+import * as dag from '../dag/graph'
+import { getVersion as deliveriesVersion, humanSize, subscribe as deliveriesSubscribe } from '../workspace/deliveries'
+import {
+  fileKind, fileURL, openDelivery as wsOpenDelivery, openPath as wsOpenPath, thumbURL, versioned,
+} from '../workspace/store'
+import * as citations from './citations'
+import * as store from './store'
+import * as tail from './tail'
+
+import type { DeliveryRow } from '../workspace/types'
+import type {
+  AnswerData, ArtsData, AskData, CallData, DeliveredData, FoldData, Lane,
+  NoteData, QaData, Seg, StatusData, StepData,
+} from './types'
+import type { IconSvgElement } from '@hugeicons/react'
+import type { KeyboardEvent, ReactElement, ReactNode } from 'react'
+
+/* The transcript renderer: three voices, three folding depths. Machine work
+ * renders as quiet activity rows, never cards; a stretch of consecutive
+ * calls is one work segment. Class names and DOM shape are frozen:
+ * src/styles/page.css selects on them.
+ */
+
+/* ── shared pieces ─────────────────────────────────────────────────────── */
+
+const ACT_ICO: Record<string, string> = {
+  doc: 'M7 3.5h7L18.5 8v10.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2ZM13.5 3.5V8h4.5',
+  folder: 'M4 7.5c0-1.1.9-2 2-2h3.5l2 2.5H18c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-9.5Z',
+  term: 'M3.5 5h17v14h-17zM7.5 10l2.5 2-2.5 2M12.5 14.5H16',
+  globe: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c-4 4.3-4 12.7 0 17'
+    + 'M12 3.5c4 4.3 4 12.7 0 17',
+  find: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.4 15.4 20 20',
+  pen: 'M4.5 19.5h4L19 9a2.12 2.12 0 0 0-3-3L5.5 16.5v3ZM15.5 6.5l2 2',
+  star: 'M12 4l1.9 5.3L19 11l-5.1 1.7L12 18l-1.9-5.3L5 11l5.1-1.7Z',
+  chat: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v6.5a2 2 0 0 1-2 2H10l-4 3.5V15H6.5a2 2 0 0 1-2-2Z',
+  clock: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 7.5V12l3.4 2',
+  image: 'M4.5 5.5h15v13h-15zM8.6 11.2a1.55 1.55 0 1 0 0-3.1 1.55 1.55 0 0 0 0 3.1ZM6 17.5l4.5-4.5 3.5 3.5 2.5-2.5 2.5 2.5',
+  sound: 'M5 10h3l4-3.5v11L8 14H5ZM15.5 9.5a4 4 0 0 1 0 5',
+  video: 'M4.5 6.5h10v11h-10zM14.5 11l5-3v8l-5-3',
+  ask: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9.8 9.6a2.2 2.2 0 1 1 3.4 1.9c-.8.5-1.2 1-1.2 2M12 16.6h.01',
+  dot: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM8.5 12h7',
+  chev: 'M9.5 6.5 15 12l-5.5 5.5',
+  check: 'M5 12.5l4.5 4.5L19 7',
+  dag: 'M7.4 12a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM21 6a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0Z'
+    + 'M21 18a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM7.3 11l9.4-4M7.3 13l9.4 4',
+}
+
+function actIco(name: string): string {
+  switch (name) {
+    case 'read_file': case 'read_skill': return ACT_ICO.doc as string
+    case 'write_file': case 'edit_file': return ACT_ICO.pen as string
+    case 'list_dir': return ACT_ICO.folder as string
+    case 'grep': case 'find': case 'tool_search': return ACT_ICO.find as string
+    case 'exec': return ACT_ICO.term as string
+    case 'web_search': case 'web_fetch': return ACT_ICO.globe as string
+    case 'understand_media': return ACT_ICO.doc as string
+    case 'image_generate': return ACT_ICO.image as string
+    case 'video_generate': return ACT_ICO.video as string
+    case 'text_to_speech': return ACT_ICO.sound as string
+    case 'message': return ACT_ICO.chat as string
+    case 'cron': return ACT_ICO.clock as string
+    case 'spawn': case 'use_skill': return ACT_ICO.star as string
+    case 'run_subagent_dag': return ACT_ICO.dag as string
+    case 'ask_user': return ACT_ICO.ask as string
+    default: return ACT_ICO.dot as string
+  }
+}
+
+/* The kinds of work the design draws a glyph for (Figma: Raven / Thinking), in
+   its own icon set. The rest keep the transcript's drawn glyphs above. */
+const ACT_HUGE: Record<string, IconSvgElement> = {
+  web_search: AiSearch02Icon, grep: AiSearch02Icon, find: AiSearch02Icon, tool_search: AiSearch02Icon,
+  read_file: BookOpen02Icon, read_skill: BookOpen02Icon,
+  use_skill: Wrench01Icon,
+  exec: DocumentCodeIcon,
+  write_file: PencilEdit01Icon, edit_file: PencilEdit01Icon,
+  web_fetch: InternetIcon,
+}
+
+function ActIco({ name, bad }: { name: string; bad?: boolean }): ReactElement {
+  const huge = bad ? AlertCircleIcon : ACT_HUGE[name]
+  if (huge) return <Icon icon={huge} size={12} className="transcript-ic" />
+  return <Ico d={actIco(name)} cls="ic" />
+}
+
+const COPY_ICO = '<rect x="9" y="9" width="11" height="11" rx="2.5"/>'
+  + '<path d="M5.5 15H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 4h8A1.5 1.5 0 0 1 14.5 5.5V6"/>'
+const BRANCH_ICO = '<circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/>'
+  + '<circle cx="17" cy="8" r="2.2"/><path d="M7 8.2v7.6"/>'
+  + '<path d="M17 10.2v1.3a3.5 3.5 0 0 1-3.5 3.5H10"/>'
+const DTL_COPY_ICO = '<rect x="9" y="9" width="11" height="11" rx="2.4"/>'
+  + '<path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H6a2 2 0 0 0-2 2v7.5A1.5 1.5 0 0 0 5.5 15"/>'
+const SDLV_ICO = 'M5 5v5a4 4 0 0 0 4 4h9M14 10l4 4-4 4'
+
+function Ico({ d, cls }: { d: string; cls?: string }): ReactElement {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      aria-hidden="true" {...(cls ? { className: cls } : {})}>
+      <path d={d} />
+    </svg>
+  )
+}
+
+const Chev = (): ReactElement => <Ico d={ACT_ICO.chev as string} cls="cv" />
+
+function useSeg(lane: Lane, seg: { v: number }): number {
+  return useSyncExternalStore((cb) => store.subscribe(lane, cb), () => seg.v)
+}
+
+/* Every fold changes the height of what is above the reader; pin the clicked
+   row: measure it, mutate synchronously, correct the scroll -- with smooth
+   scrolling off, or the correction itself animates. */
+function pinRow(el: HTMLElement | null, mutate: () => void): void {
+  const sc = document.querySelector<HTMLElement>('#scroll')
+  if (!el || !sc) { flushSync(mutate); return }
+  const was = el.getBoundingClientRect().top
+  flushSync(mutate)
+  const keep = sc.style.scrollBehavior
+  sc.style.scrollBehavior = 'auto'
+  sc.scrollTop += el.getBoundingClientRect().top - was
+  sc.style.scrollBehavior = keep
+}
+
+const onKeyToggle = (fn: () => void) => (e: KeyboardEvent): void => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn() }
+}
+
+/* An icon-only action whose verb lives in the hover pill; the flash reports
+   back through the same pill, so no toast for a tiny action. */
+function TipButton({ label, icon, onClick, cls, flashWord }: {
+  label: string; icon: string; onClick: () => void; cls?: string; flashWord?: string
+}): ReactElement {
+  const [tip, setTip] = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  const flash = (word: string): void => {
+    setTip(word)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setTip(null), 1400)
+  }
+  return (
+    <button {...(cls ? { className: cls } : {})} data-tip={tip ?? label} data-label={label}
+      aria-label={label}
+      onClick={(e) => { e.stopPropagation(); onClick(); if (flashWord) flash(flashWord) }}
+      dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>` }} />
+  )
+}
+
+function ctxRef(items: () => Array<{ label: string; fn: () => void }>) {
+  return (el: HTMLElement | null): void => {
+    if (el) (el as HTMLElement & { _ctx?: unknown })._ctx = items
+  }
+}
+
+/* ── tool output: URLs and file paths are doors, not characters ─────────── */
+
+const PRE_URL = /https?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]/g
+const PRE_PATH = /(?:^|[\s('"[])((?:~|\/)[\w.\-/@]+\.[A-Za-z0-9]{1,8})(?=$|[\s)'"\],;:])/g
+
+function PreLinked({ text }: { text: string }): ReactElement {
+  const s = String(text)
+  const marks: Array<{ at: number; len: number; url?: string; path?: string }> = []
+  let m: RegExpExecArray | null
+  PRE_URL.lastIndex = 0
+  while ((m = PRE_URL.exec(s)) !== null) marks.push({ at: m.index, len: m[0].length, url: m[0] })
+  PRE_PATH.lastIndex = 0
+  while ((m = PRE_PATH.exec(s)) !== null) {
+    const at = m.index + m[0].length - (m[1] as string).length
+    marks.push({ at, len: (m[1] as string).length, path: m[1] as string })
+  }
+  if (!marks.length) return <pre>{s}</pre>
+  marks.sort((x, y) => x.at - y.at)
+  const out: ReactNode[] = []
+  let done = 0
+  marks.forEach((k, i) => {
+    if (k.at < done) return
+    out.push(s.slice(done, k.at))
+    const piece = s.substr(k.at, k.len)
+    if (k.url) {
+      out.push(
+        <a key={i} href={k.url} target="_blank" rel="noopener"
+          onClick={(e) => e.stopPropagation()}>{piece}</a>,
+      )
+    } else {
+      /* The chip opens itself, and has to: stopPropagation is needed because
+         the chip sits inside a step row that would toggle under it, and
+         React's stopPropagation stops the NATIVE event too -- so the
+         document-level click listener in state/proseChips.ts never sees this
+         one. Dropping the openChip call here breaks click-to-open outright.
+         The keyboard path does go through proseChips.ts, as it went through
+         the handler proseChips.ts replaced: nothing stops keydown, and the
+         preventDefault there is also what keeps the button's own
+         Enter-activates-a-click from opening the file a second time. */
+      out.push(
+        <button key={i} className="pth" data-p={k.path}
+          onClick={(e) => { e.stopPropagation(); openChip({ p: k.path as string, dir: false }) }}>{piece}</button>,
+      )
+    }
+    done = k.at + k.len
+  })
+  out.push(s.slice(done))
+  return <pre>{out}</pre>
+}
+
+/* ── the detail block ──────────────────────────────────────────────────── */
+
+function DtlHead({ name, hunk, copyText, openPath }: {
+  name: string; hunk?: { add: number; del: number } | null; copyText?: string; openPath?: string
+}): ReactElement {
+  return (
+    <div className="dhd">
+      {/* Opens itself for the same reason as the path chips above: the
+          document handler never sees a click React stopped, and the stop is
+          needed for the detail block underneath. */}
+      {openPath ? (
+        <button className="nm pth" data-p={openPath} title={openPath}
+          onClick={(e) => { e.stopPropagation(); openChip({ p: openPath, dir: false }) }}>{name}</button>
+      ) : <span className="nm">{name}</span>}
+      {hunk && (hunk.add || hunk.del) ? (
+        <span className="ct"><span className="a">+{hunk.add}</span> <span className="d">-{hunk.del}</span></span>
+      ) : null}
+      {copyText ? (
+        <TipButton cls="icb cp" label={t('gui.dtl.copy')} icon={DTL_COPY_ICO}
+          flashWord={t('gui.answer.copied')} onClick={() => store.copyText(copyText)} />
+      ) : null}
+    </div>
+  )
+}
+
+function dtlPre(text: string, key: string): ReactNode {
+  let lines = String(text || '').split('\n')
+  while (lines.length && !(lines[lines.length - 1] as string).trim()) lines.pop()
+  if (!lines.length) return null
+  const over = lines.length - store.DTL_MAX_LINES
+  if (over > 0) lines = lines.slice(0, store.DTL_MAX_LINES)
+  return (
+    <Fragment key={key}>
+      <PreLinked text={lines.join('\n')} />
+      {over > 0 ? <div className="more">{`… +${over}`}</div> : null}
+    </Fragment>
+  )
+}
+
+/* Whether the settled call opens into a detail block at all: edits with no
+   hunk and no failure and no label are the one shape that stays a bare row. */
+function hasDtl(c: CallData): boolean {
+  if (c.name === 'edit_file' || c.name === 'write_file') {
+    return !!(c.hunk && c.hunk.rows.length) || !c.ok || !!c.label
+  }
+  return true
+}
+
+/* The media tools whose result is a file rather than a sentence. Named rather
+   than sniffed: any tool may answer with JSON that happens to carry `paths`,
+   and turning that into a gallery on a guess is how a card starts lying about
+   what a call did. */
+const MEDIA_TOOLS = new Set(['image_generate', 'ppt_generate_image'])
+
+/* What a media call produced, read once.
+
+   The card printed the tool's JSON object: a reader who asked for a picture got
+   a sentence about one, with an absolute path in it they could not open.
+
+   Two contracts, because the two tools have two. `image_generate` says
+   `{"success": true, "paths": [...]}`. The ppt engine's `_return.done` says
+   `{"ok": true, …}` and spreads a single picture's fields into the body, so one
+   image is `{"ok": true, "path": …}` and a batch is
+   `{"ok": true, "results": [{"path": …}]}`. Naming a tool without reading its
+   shape is how the second one went on printing raw JSON while looking
+   supported.
+
+   Verdict first, and each tool's own: `success` for one, `ok` for the other. A
+   result carrying files without claiming they are good is one to read, not one
+   to hang on a wall.
+
+   `saysMore` is whether the pictures are the whole of it. A ppt batch is
+   `ok: true` as a whole while individual entries carry their own `error`, and
+   the engine puts the tally and what to do next in `next_step` -- so a mixed
+   batch has a picture to show AND something to read, and a gallery that
+   replaced the text threw the second half away. The suppressing case is the
+   narrow one, deliberately: anything not provably just pictures keeps its text,
+   so an unanticipated field shows up as the JSON the reader used to get rather
+   than as information silently gone. Wrong in this direction is noisy; wrong in
+   the other is lossy.
+
+   One parse, so the two answers cannot disagree about what the result said, and
+   so neither has a branch the other has already ruled out. Anything that is not
+   a shape returns null and falls through to the plain rendering that has always
+   been there -- including an `error` object, where what went wrong is the whole
+   of what a reader needs and is already words. */
+interface MediaResult {
+  paths: string[]
+  saysMore: boolean
+}
+
+function mediaResult(res: string): MediaResult | null {
+  let seen: unknown
+  try {
+    seen = JSON.parse(String(res || ''))
+  } catch {
+    return null
+  }
+  if (!seen || typeof seen !== 'object') return null
+  const bag = seen as {
+    error?: unknown
+    next_step?: unknown
+    ok?: unknown
+    path?: unknown
+    paths?: unknown
+    results?: unknown
+    success?: unknown
+  }
+  const found: unknown[] = []
+  if (bag.success === true && Array.isArray(bag.paths)) found.push(...bag.paths)
+  if (bag.ok === true) {
+    found.push(bag.path)
+    if (Array.isArray(bag.results)) {
+      for (const item of bag.results) {
+        if (item && typeof item === 'object') found.push((item as { path?: unknown }).path)
+      }
+    }
+  }
+  const paths = found.filter((p): p is string => typeof p === 'string' && !!p)
+  if (!paths.length) return null
+  const failedItem =
+    Array.isArray(bag.results) &&
+    bag.results.some((i) => !!(i && typeof i === 'object' && (i as { error?: unknown }).error))
+  return { paths, saysMore: !!bag.error || !!bag.next_step || failedItem }
+}
+
+/* One generated image, with the skeleton the delivery shelf's shots use: the
+   file arrives over `/file`, so the box holds its place while it does or the
+   card jumps when it lands. A file that cannot be fetched falls back to its
+   name rather than to a broken-image glyph. */
+function GeneratedShot({ path }: { path: string }): ReactElement {
+  const [ready, setReady] = useState(false)
+  const [gone, setGone] = useState(false)
+  const src = fileURL(path)
+  const name = path.split('/').pop() || path
+  if (gone) {
+    return (
+      <span className="pic doc">
+        <span className="amini">
+          <span className="raw">{name}</span>
+        </span>
+      </span>
+    )
+  }
+  return (
+    <span className={'pic shot' + (ready ? '' : ' skel')}>
+      <img
+        alt={name}
+        decoding="async"
+        loading="lazy"
+        onClick={() => lightbox.open(src, name)}
+        onError={() => setGone(true)}
+        onLoad={() => setReady(true)}
+        src={src}
+        title={t('gui.img.open', { name })}
+      />
+      {ready ? null : <span className="sk" />}
+    </span>
+  )
+}
+
+function Dtl({ c, open }: { c: CallData; open: boolean }): ReactElement | null {
+  const body: ReactNode[] = []
+  let head: ReactNode = null
+  if (c.name === 'edit_file' || c.name === 'write_file') {
+    if (c.hunk && c.hunk.rows.length) {
+      const rows = c.hunk.rows.slice(0, 120)
+      const fp = store.argPath(c.args)
+      head = <DtlHead name={shortOr(fp) || t('gui.dtl.plain')} hunk={c.hunk}
+        copyText={rows.map((r) => (r[0] === 'gap' ? '' : String(r[1]))).join('\n')} {...(fp ? { openPath: fp } : {})} />
+      rows.forEach((r, i) => {
+        if (r[0] === 'gap') body.push(<div key={i} className="dline gap">{`⋯ ${(r[1] as string[]).length}`}</div>)
+        else if (r[0] === 'hunk') body.push(<div key={i} className="dline gap">⋯</div>)
+        else body.push(<div key={i} className={'dline' + (r[0] === 'add' ? ' a' : r[0] === 'del' ? ' d' : '')}>{(r[1] as string) || ' '}</div>)
+      })
+    }
+    if (!c.ok) body.push(dtlPre(c.res, 'err'))
+  } else if (c.name === 'exec') {
+    const cmd = String(c.args.command || '')
+    head = <DtlHead name={cmd || t('gui.dtl.output')} copyText={cmd || c.res} />
+    if (cmd) body.push(<div key="cmd" className="cmd">{cmd}</div>)
+    const lines = String(c.res || '').trimEnd().split('\n')
+    const m = /^Exit code:\s*(-?\d+)$/.exec(lines[lines.length - 1] || '')
+    let exit: number | null = null
+    if (m) { exit = Number(m[1]); lines.pop() }
+    body.push(dtlPre(lines.join('\n'), 'out'))
+    if (exit != null) {
+      body.push(
+        <div key="exit" style={{ marginTop: '6px' }}>
+          <span className={'exit ' + (exit === 0 ? 'ok' : 'bad')}>{t('gui.dtl.exit', { n: exit })}</span>
+        </div>,
+      )
+    }
+  } else if (MEDIA_TOOLS.has(c.name) && mediaResult(c.res)) {
+    /* The prompt stays the head -- it is what the reader asked for, and the one
+       thing the picture cannot say. What the object said instead of the picture
+       is gone: the picture is the result. */
+    const made = mediaResult(c.res) as MediaResult
+    head = <DtlHead name={store.shortArg(c.label, 120) || t('gui.dtl.plain')} copyText={made.paths.join('\n')} />
+    body.push(
+      <div key="shots" className={'gshots' + (made.paths.length > 1 ? ' set' : '')}>
+        {made.paths.map((path) => <GeneratedShot key={path} path={path} />)}
+      </div>,
+    )
+    /* Below the pictures, not instead of them: a batch where one entry failed
+       has both, and the reader needs both. */
+    if (made.saysMore) body.push(dtlPre(c.res, 'out'))
+  } else if (c.name === 'knowledge_search') {
+    /* The query as the head, and the passages under it -- each one pressable,
+       because a citation a reader cannot follow is a claim they have to take
+       on trust. The prose the model got is still below: what the tool said is
+       what the answer was written from, and a card that showed only the
+       document names would hide the words that were actually read. */
+    const query = String(c.args.query || '')
+    head = <DtlHead name={query || t('gui.dtl.plain')} copyText={query || c.res} />
+    const found = citations.of(c.callId)
+    if (found.length && reveal.canOpenDocument()) {
+      body.push(
+        <div key="cites" className="transcript-cites">
+          {found.map((cite, at) => (
+            <button
+              key={`${cite.documentId}-${cite.chunkIndex}-${at}`}
+              className="transcript-cite"
+              onClick={() => reveal.document({
+                baseId: cite.baseId,
+                documentId: cite.documentId,
+                chunkIndex: cite.chunkIndex,
+              })}
+            >
+              <span className="transcript-citen">{at + 1}</span>
+              <span className="transcript-cited">{cite.source}</span>
+              {cite.page !== null && <span className="transcript-citep">{t('gui.dtl.cite_page', { n: cite.page })}</span>}
+            </button>
+          ))}
+        </div>,
+      )
+    }
+    body.push(dtlPre(c.res, 'out'))
+  } else if (c.name === 'web_fetch') {
+    const url = String(c.args.url || '')
+    head = <DtlHead name={url || t('gui.dtl.plain')} copyText={url || c.res} />
+    if (url) body.push(<a key="url" href={url} target="_blank" rel="noopener">{url}</a>)
+    body.push(dtlPre(c.res, 'out'))
+  } else {
+    let title = store.shortArg(c.label, 120)
+    if (!title && (c.via || c.srv)) title = store.shortArg(JSON.stringify(c.args), 120)
+    if (c.via) title = t('gui.dtl.via') + (title ? ' · ' + title : '')
+    const fp = typeof c.args.path === 'string' && !NOT_A_FILE.has(c.name) ? c.args.path : ''
+    head = <DtlHead name={title || t('gui.dtl.plain')} copyText={String(c.res || '')} {...(fp ? { openPath: fp } : {})} />
+    body.push(dtlPre(c.res, 'out'))
+  }
+  if (c.truncated) body.push(<div key="trunc" className="trunc">…</div>)
+  const parts = body.filter(Boolean)
+  if (!head && c.label) {
+    const fp = typeof c.args.path === 'string' && !NOT_A_FILE.has(c.name) ? c.args.path : ''
+    head = <DtlHead name={store.shortArg(c.label, 160)} copyText={c.label} {...(fp ? { openPath: fp } : {})} />
+  }
+  if (!head && !parts.length) return null
+  return (
+    <div className="dtl" hidden={!open}>
+      {head}
+      {parts.length ? <div className="bd">{parts}</div> : null}
+    </div>
+  )
+}
+
+/* Tools whose `path` argument is not a file to open: a directory listing, and
+   `raven_config`, whose path is a setting (`tools.media.image.model`). */
+const NOT_A_FILE = new Set(['list_dir', 'raven_config'])
+
+const shortOr = (p: string): string => {
+  try {
+    return ds('workspace').shortPath(p)
+  } catch { return p }
+}
+
+/* ── call rows ─────────────────────────────────────────────────────────── */
+
+const CallRow = memo(function CallRow({ lane, c }: { lane: Lane; c: CallData }): ReactElement {
+  useSeg(lane, c)
+  if (c.kind === 'dag') return <DagCard lane={lane} c={c} />
+  if (c.kind !== 'plain') return <DelegRow lane={lane} c={c} />
+  return <PlainCallRow lane={lane} c={c} />
+})
+
+/* The clock and the fold ref sit here rather than in CallRow, whose other two
+   kinds do not have them: a hook after an early return is a hook the next kind
+   added to that branch reorders. Memoising this one would take its redraws
+   away instead -- a call is mutated in place, so these props never differ, and
+   the version CallRow subscribes to above is the only thing that brings the
+   row back. The two other kinds are memoised because each subscribes itself. */
+function PlainCallRow({ lane, c }: { lane: Lane; c: CallData }): ReactElement {
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const withDtl = c.done && hasDtl(c)
+  const flip = (): void => pinRow(rowRef.current, () => store.toggleCall(lane, c))
+  const cls = 'wrow'
+    + (c.done ? '' : ' run')
+    + (!c.done && c.name === 'ask_user' ? ' wait' : '')
+    + (c.done && !c.ok ? ' bad' : '')
+    + (withDtl ? ' tog' : '')
+    + (withDtl && c.open ? ' open' : '')
+  const err = c.done && !c.ok ? store.firstErrLine(c.res) : ''
+  /* Nothing else on a running row changes, so without this it cannot be told
+     from a stopped one. Same hook and wording as the spawn card and the dag
+     row, down to the ellipsis under a second. */
+  const elapsed = useTick(!c.done, c.t0)
+  return (
+    <>
+      <div ref={rowRef} className={cls}
+        {...(withDtl ? { tabIndex: 0, onClick: flip, onKeyDown: onKeyToggle(flip) } : {})}>
+        <ActIco name={c.name} bad={c.done && !c.ok} />
+        <span className="vb">
+          {c.srv ? <span className="srv">{`[${c.srv}] `}</span> : null}
+          {c.done ? store.verbOf(store.actName(c.name, c.args)) : store.verbIngOf(store.actName(c.name, c.args))}
+        </span>
+        {c.done && c.hunk && (c.hunk.add || c.hunk.del) ? (
+          <span className="diffn"><span className="a">+{c.hunk.add}</span> <span className="d">-{c.hunk.del}</span></span>
+        ) : null}
+        {err ? <span className="err">{err}</span> : null}
+        {/* Where the chevron sits once the row is finished, so the eye finds
+            both in one place. */}
+        {!c.done
+          ? <span className="runms">{elapsed >= 1000 ? store.durText(elapsed) : '\u2026'}</span>
+          : withDtl ? <Chev /> : null}
+      </div>
+      {/* Built on opening, not merely hidden when shut. `hidden` spares the
+          layout and the paint but not the nodes, and a shut detail is up to
+          120 diff rows or a whole command's output -- for a resumed session,
+          the same again for every call it ever made. Nothing outside this
+          island reads a shut body, and `display: none` was never findable by
+          the browser's own search nor part of a selection, so there is no
+          reader this takes anything from. The same rule holds for the work
+          list and the fold body below, which are the two that carry this one.
+          Bounded bodies (a delegation's four labelled cells, a dag card) stay
+          eager: they do not grow with the conversation. */}
+      {withDtl && c.open ? <Dtl c={c} open={c.open} /> : null}
+    </>
+  )
+}
+
+/* One elapsed clock per running card, self-stopping.
+ *
+ * The word and nothing else. The node tally used to ride here, one separator
+ * away from it, and in Chinese the two read as one phrase said twice: the
+ * state word for a finished run and the tally's word for a completed node are
+ * the same word, so a two-node graph with one node done said that word twice
+ * in one cell and invited the count to be read as a second opinion about the
+ * run. The breakdown is its own labelled row on the dag card now, where the
+ * label says which of the two facts it is. */
+function DelegState({ state, err }: { state: string; err?: string }): ReactElement {
+  const word = t(state === 'run' ? 'gui.deleg.st_run' : state === 'ok' ? 'gui.deleg.st_ok' : 'gui.deleg.st_bad')
+  return (
+    <>
+      <span className={'dot ' + state} />
+      {state === 'bad' && err ? `${word} · ${err}` : word}
+    </>
+  )
+}
+
+const DelegRow = memo(function DelegRow({ lane, c }: { lane: Lane; c: CallData }): ReactElement {
+  useSeg(lane, c)
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const elapsed = useTick(!c.done, c.t0)
+  const flip = (): void => pinRow(rowRef.current, () => store.toggleCall(lane, c))
+  const head = c.kind === 'spawn' ? store.spawnHead(c) : null
+  /* Everything below asks the RUN, not the tool call, and `live` is the one
+     predicate the row and its clock both read. A spawn returns when the work is DISPATCHED: `done`
+     goes true within a second of a run that may take minutes, so a card built on
+     it settled early, stopped its clock early, and kept saying `ok` if the run
+     later failed. */
+  const live = store.spawnLive(c)
+  const state = head ? store.spawnState(c) : c.done ? (c.ok ? 'ok' : 'bad') : 'run'
+  /* The clock ticks while the RUN is going, not while the dispatch is. Without
+     this the duration froze the moment dispatch returned and only moved again
+     when the card happened to repaint -- and through a long tool call, or a cli
+     run with no per-step visibility at all, it does not change. */
+  const elapsedRun = useTick(live, c.spawnT0 || c.t0)
+  const cost = head
+    ? store.spawnCost(c, Date.now()) || (elapsedRun >= 1000 ? store.durText(elapsedRun) : '')
+    : c.done ? (c.ms ? store.durText(c.ms) : '') : (elapsed >= 1000 ? store.durText(elapsed) : '…')
+  const a = c.args as { agent?: string; instance?: string; task?: string; prompt_template?: string; node_id?: string }
+  const who = store.spawnAgentOf(a) ? store.spawnAgentOf(a) + (a.instance ? ' @' + a.instance : '') : t('gui.deleg.self')
+  const openTask = (): void => {
+    if (c.kind === 'spawn') store.openSpawn(c.spawnId || a.node_id || '')
+  }
+  const grid: ReactNode[] = []
+  const kv = (key: string, label: string, v: ReactNode, gov?: boolean): void => {
+    grid.push(<div key={key + 'k'} className="k">{label}</div>)
+    grid.push(gov ? (
+      <div key={key + 'v'} className="v gov" role="button" tabIndex={0} title={t('gui.deleg.open_hint')}
+        onClick={(e) => { e.stopPropagation(); openTask() }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openTask() }
+        }}>{v}</div>
+    ) : (
+      <div key={key + 'v'} className={key === 'state' && state === 'bad' ? 'v err' : 'v'}>{v}</div>
+    ))
+  }
+  kv('task', t('gui.deleg.d_task'), c.label || String(a.prompt_template || a.task || '').slice(0, 160), true)
+  kv('agent', t('gui.deleg.d_agent'), <span className="who">{who}</span>)
+  /* `c.res` is the DISPATCH's result, so it is never the run's error. On a spawn
+     whose run failed it reads `Subagent [...] started`, and beside the failure
+     word that is a contradiction. The run's own account is its conversation,
+     which the task row opens, so the word stands alone rather than borrowing a
+     sentence that means the opposite.
+
+     A spawn refused BEFORE it ran is the exception: it has no run to open,
+     and there `c.res` genuinely is the failure. An empty `spawnStatus` is what
+     marks that -- the run never reported, because there was none. */
+  const stateErr = head && c.spawnStatus ? '' : store.firstErrLine(c.res)
+  kv('state', t('gui.deleg.d_state'),
+    <DelegState state={state} {...(state === 'bad' && stateErr ? { err: stateErr } : {})} />)
+  /* Only when there is something to say. Both clocks here can come up empty --
+     a call that finished carrying no duration, and a graph that stopped
+     without leaving an end stamp -- and a labelled row with an empty value
+     cell reads as a broken render rather than as an absent number. */
+  if (cost) kv('cost', t('gui.deleg.d_cost'), cost)
+  /* A restored card has a task id and no record id. Resolved on open and not at
+     restore, the same rule `hydrateDag` follows: a transcript can hold a dozen
+     delegated calls, and asking for all of them would be a dozen requests for
+     detail nobody has looked at. */
+  useEffect(() => {
+    if (c.kind === 'spawn' && c.open) store.resolveSpawn(lane, c)
+  }, [c.open, c.kind, lane, c])
+  return (
+    <>
+      <div ref={rowRef} className={'wrow' + (c.done && !live ? '' : ' run') + ' tog' + (c.done && !c.ok ? ' bad' : '') + (c.open ? ' open' : '')}
+        tabIndex={0} onClick={flip} onKeyDown={onKeyToggle(flip)}>
+        <ActIco name={c.name} bad={c.done && !c.ok} />
+        <span className="vb">
+          {c.srv ? <span className="srv">{`[${c.srv}] `}</span> : null}
+          {head ? t('gui.deleg.spawn_verb') : c.done ? store.verbOf(store.actName(c.name, c.args)) : store.verbIngOf(store.actName(c.name, c.args))}
+        </span>
+        <span className="ar">{head
+          ? `${head.instance ? head.instance + '@' : ''}${head.agent}: ${head.task}`
+          : c.rowLabel || ''}</span>
+        <Chev />
+      </div>
+      <div className="dtl dlg" hidden={!c.open}>
+        <div className="bd">
+          <div className="dgr">{grid}</div>
+        </div>
+      </div>
+    </>
+  )
+})
+
+/* ── the dag card ───────────────────────────────────────────────────────────
+   A `run_subagent_dag` call is a row like every other one; what is behind its
+   caret is the request it made. That request has a shape -- which steps, in what
+   order, each on which agent, each handed what -- and the card used to show four
+   fields of it in a flat strip of chips, which is the structure thrown away and
+   the arguments' remaining half never read at all.
+
+   One grid, and a door: the grid says what the orchestration *is*, and the
+   `task` row is the field that leads somewhere else -- the run's own detail,
+   node by node and step by step, is the desk's task pane (`store.openDagRun`),
+   which already renders every run reached from the tasks tab. Drawing that a
+   second time inside the card, the way the graph and its node panel used to,
+   would be a second renderer for the same thing.
+
+   Identical for a `load_playbook` call in dag mode. The graph is assembled by the
+   engine there rather than written by the model, so it arrives from the event and
+   `dag.get` instead of from the arguments -- which is a difference in where the
+   nodes come from (features/dag/nodes.ts) and in nothing that is drawn. */
+
+const DagCard = memo(function DagCard({ lane, c }: { lane: Lane; c: CallData }): ReactElement {
+  useSeg(lane, c)
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const flip = (): void => pinRow(rowRef.current, () => store.toggleCall(lane, c))
+  const nodes = c.nodes
+  /* How many nodes have stopped, and how many have not. `pending` and `running`
+     are the two that have not, and the second number is what the card could not
+     say before: a tally of the finished ones alone leaves "1" on a graph of two
+     without saying whether the other is coming. */
+  /* Nothing is outstanding once the run has closed: a node this side never heard
+     report is unknown rather than pending, and counting it as work still to come
+     is the one reading the event rules out. */
+  const left = c.graphClosed ? 0 : nodes.filter((n) => !store.nodeSettled(n.status)).length
+  /* The GRAPH's state, not the call's. `run_subagent_dag` is backgrounded by
+     default, so the call returns the moment the run is submitted: reading `ok`
+     off it called the run finished on a card whose nodes were still going, and
+     next to a clock that was still ticking, since that clock already reads the
+     nodes. The call still decides two things it alone knows --
+     that it has returned at all, and that it failed outright -- and the nodes
+     decide the rest. Nodes this side has not heard about yet cannot argue with
+     a finished call, which is what keeps a replayed run from reading as live:
+     an unhydrated card has no nodes, so `left` is 0 -- and neither can a node
+     that never reported before `dag.run_completed` closed the run, which is
+     what `graphClosed` settles above. */
+  const state = !c.done ? 'run' : !c.ok ? 'bad' : left ? 'run' : 'ok'
+  /* The graph's clock, not the call's. A backgrounded graph -- which is the
+     default -- returns as soon as it is submitted, so `c.ms` is that submit: a
+     number near zero, frozen there while the nodes run for minutes. The span
+     comes off the nodes, and ticks for as long as one of them has not stopped. */
+  const span = store.dagSpan(nodes)
+  const live = !!span && span.open
+  const running = useTick(live, span ? span.from : c.t0)
+  const cost = span
+    ? (live
+      ? (running >= 1000 ? store.durText(running) : '…')
+      /* A closed span with no end stamp is a cancel seen over the wire: every
+         node stopped and none of them said when. Blank rather than a made-up
+         number -- one reload reads the manifest, which does carry the stamps. */
+      : (span.to ? store.durText(span.to - span.from) : ''))
+    /* Before any node has started there is no graph clock yet, so this falls
+       back to the call's -- which is the right answer for exactly that window. */
+    : (c.done ? (c.ms ? store.durText(c.ms) : '') : '…')
+  const tally = { ok: 0, bad: 0, stop: 0, skip: 0, run: 0 }
+  nodes.forEach((n) => {
+    const d = store.DOT_OF[n.status]
+    if (d === 'ok') tally.ok += 1
+    else if (d === 'bad') tally.bad += 1
+    else if (d === 'stop') tally.stop += 1
+    else if (d === 'skip') tally.skip += 1
+    else if (d === 'run') tally.run += 1
+  })
+  const bits: string[] = []
+  /* Reported from the first node the card hears about rather than from the
+     call's return: the count is about the graph, and the graph is what the
+     reader is watching. `n` is the denominator -- a bare "1" says nothing about
+     whether the run is a third of the way through or done. */
+  if (nodes.length) {
+    bits.push(t('gui.deleg.dag_done', { ok: String(tally.ok), n: String(nodes.length) }))
+    if (tally.bad) bits.push(t('gui.deleg.dag_bad', { n: String(tally.bad) }))
+    /* Its own word: `dag_bad` reads "failed" in both locales, and a node that was
+       stopped did not fail. Between the failures and the skips, which is where it
+       sits on the runner's own scale too. */
+    if (tally.stop) bits.push(t('gui.deleg.dag_stopped', { n: String(tally.stop) }))
+    if (tally.skip) bits.push(t('gui.deleg.dag_skip', { n: String(tally.skip) }))
+    /* Last, because it is the one bit about what has NOT happened. Said even
+       though the denominator implies it on a clean run: once a node has failed
+       or been skipped the subtraction stops being obvious, and "still to go" is
+       the fact a reader watching a live graph actually wants. */
+    if (left) bits.push(t('gui.deleg.dag_left', { n: String(left) }))
+  }
+  const nodeLine = bits.join(' · ')
+  const agents = [...new Set(nodes.map((n) => n.subagent).filter(Boolean))]
+  const openTask = (): void => store.openDagRun(c.runId as string)
+  const grid: ReactNode[] = []
+  const kv = (key: string, label: string, v: ReactNode, gov?: boolean): void => {
+    grid.push(<div key={key + 'k'} className="k">{label}</div>)
+    grid.push(gov ? (
+      /* The text in a box of its own, so the cell's standing mark stays in view:
+         a flex item made of bare text cannot shrink below its own width, and a
+         long summary pushed everything after it out past the cell's clip. */
+      <div key={key + 'v'} className="v gov" role="button" tabIndex={0} title={t('gui.deleg.open_hint')}
+        onClick={(e) => { e.stopPropagation(); openTask() }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openTask() }
+        }}><span>{v}</span></div>
+    ) : (
+      <div key={key + 'v'} className={key === 'state' && state === 'bad' ? 'v err' : 'v'}>{v}</div>
+    ))
+  }
+  const shape = nodes.length ? dag.shape(nodes) : ''
+  /* The line the graph was dispatched with, and nothing else. The shape used to
+     ride along here and now only sits one row down, under `scale`, where it
+     already was: a model writes a summary that names its own steps, so the row
+     read "...four-node DAG - 4 nodes - 3 layers - at most 2 at once" and said
+     the same thing twice before running out of room.
+
+     `c.runTitle` over `c.label` where they differ: a playbook load's label is
+     the playbook's directory name, and the graph's own line is what running it
+     dispatched. They are the same string for a model-composed graph. */
+  const rowLabel = c.runTitle || c.label || shape || t('gui.deleg.dag_title')
+  /* In full, because the row above -- `.wrow .ar`, a one-line ellipsis with no
+     `title` attribute -- truncates it; and open as a door the moment there is a
+     run to send it to, rather than only once there is a title for it. A
+     playbook load names its run before `dag.get` returns a title, and a run
+     from before `task_summary` was required never gets one at all, so gating
+     on `c.runTitle` would leave both without a way onto the desk. The generic
+     word stands in until then, not `c.label`: for a playbook load that is the
+     playbook's name, which has its own row two lines down. */
+  if (c.runTitle || c.runId) kv('task', t('gui.deleg.d_task'), c.runTitle || t('gui.deleg.dag_title'), !!c.runId)
+  kv('scale', t('gui.deleg.d_scale'),
+    [shape, ...(agents.length ? [agents.join(' · ')] : [])].filter(Boolean).join(' · ')
+    || c.runTitle || c.label || t('gui.deleg.dag_title'))
+  /* Which playbook ran, once the row above it stopped being the place for it.
+     A playbook's name is its directory -- how it is addressed, edited and
+     re-run -- so it is worth being able to read; what it is not is a
+     description of what running it dispatched, which is what the row says. */
+  if (c.name === 'load_playbook' && c.label && c.label !== c.runTitle) {
+    kv('book', t('gui.dag.playbook'), c.label)
+  }
+  /* The receipt whenever the call failed, and the tally beside it. They are not
+     two renderings of one fact: `okOf` calls a dag result bad only when its first
+     word is error-shaped, which is the graph-level failure
+     (`Error running DAG <id>: ...`) and never a node failure -- a run whose nodes
+     failed returns a summary and reads as ok. So a bad state is exactly the case
+     the nodes cannot explain, and withholding the receipt there left the card
+     showing a node count and no cause. */
+  kv('state', t('gui.deleg.d_state'),
+    <DelegState state={state} {...(state === 'bad' ? { err: store.firstErrLine(c.res) } : {})} />)
+  /* The breakdown, under the state and labelled as its own fact. Two rows
+     rather than one cell, because every wording that put them side by side
+     repeated a word: in Chinese the state word for a finished run is the
+     tally's word for a completed node, and the two for failure are one word as
+     well, so whichever way the run went the cell said one of those words
+     twice. A label each is what tells the run's outcome from its nodes'. */
+  if (nodeLine) kv('nodes', t('gui.deleg.d_nodes'), nodeLine)
+  /* Only when there is something to say. Both clocks here can come up empty --
+     a call that finished carrying no duration, and a graph that stopped
+     without leaving an end stamp -- and a labelled row with an empty value
+     cell reads as a broken render rather than as an absent number. */
+  if (cost) kv('cost', t('gui.deleg.d_cost'), cost)
+  /* The run's own id, which is what `dag.get` is keyed by, what a node's record
+     lives under and what a later graph names to depend on this one. Near the
+     end, because it is the one field here nobody reads unless they went looking. */
+  if (c.runId) kv('run', t('gui.dag.run_id'), c.runId)
+  /* Set only once `dag.run_replanned` names a successor -- a decision swapped
+     this run's remaining nodes into a fresh run rather than abandoning it, so
+     the row can appear even while `state` above still reads unfinished: this
+     run's own outcome and where its remaining work went are different facts. */
+  if (c.replannedInto) {
+    kv('replanned', t('gui.dag.replanned_into'), c.replannedInto)
+  }
+  return (
+    <>
+      <div ref={rowRef} className={'wrow' + (c.done ? '' : ' run') + ' tog' + (c.done && !c.ok ? ' bad' : '') + (c.open ? ' open' : '')}
+        tabIndex={0} onClick={flip} onKeyDown={onKeyToggle(flip)}>
+        <ActIco name={c.name} bad={c.done && !c.ok} />
+        <span className="vb">
+          {c.srv ? <span className="srv">{`[${c.srv}] `}</span> : null}
+          {c.done ? store.verbOf(store.actName(c.name, c.args)) : store.verbIngOf(store.actName(c.name, c.args))}
+        </span>
+        <span className="ar">{rowLabel}</span>
+        <Chev />
+      </div>
+      <div className="dtl dlg dagc" hidden={!c.open}>
+        <div className="bd">
+          <div className="dgr">{grid}</div>
+        </div>
+      </div>
+    </>
+  )
+})
+
+/* ── the step: thought, narration, work ────────────────────────────────── */
+
+/* A step whose every part is hidden. A turn opens its first step the moment it
+   is dispatched, and until a thought, a sentence or a call arrives that step
+   draws three hidden boxes and nothing else -- which is an empty card sitting
+   on the stage for as long as the model takes to answer.
+   Not `stepSolid` (store.ts): that one asks whether a step is worth keeping
+   when folding, and a step being THOUGHT about -- revealed, no text yet -- is
+   not solid but does draw its "thinking" row. */
+const stepBlank = (seg: StepData): boolean =>
+  !seg.thinkShown && !seg.say && seg.calls.length === 0
+
+const StepView = memo(function StepView({ lane, seg }: { lane: Lane; seg: StepData }): ReactElement | null {
+  useSeg(lane, seg)
+  const thinkRef = useRef<HTMLDivElement | null>(null)
+  const cotRef = useRef<HTMLDivElement | null>(null)
+  const sumRef = useRef<HTMLDivElement | null>(null)
+  /* Whether the reader wants the newest line, kept by the reader's own
+     scrolling rather than measured after the fact.
+
+     Measuring it after an append was the bug. The effect runs with the new
+     text already in the DOM, so the distance to the bottom is not how far the
+     reader scrolled up -- it is how tall this one chunk was. `.cot` is 220px,
+     so a chunk over 40px, about two lines, cleared the threshold by itself: it
+     followed while the model emitted a few words at a time and stopped the
+     first time it emitted a paragraph, permanently, because `scrollTop` never
+     moved again while `scrollHeight` kept growing. Measured on the page, one
+     append of sixty words took the gap from 0 to 113px and then +114px per
+     append, never returning.
+
+     A `scroll` listener is the honest source: appending text does not fire
+     one, so the flag holds whatever the reader last did. Scrolling up clears
+     it and the box stops following; scrolling back to the bottom sets it again
+     and following resumes. Our own follow scrolls to the bottom and so re-arms
+     it, which is what it should mean. */
+  const wantsTail = useRef(true)
+  useEffect(() => {
+    const cot = cotRef.current
+    if (!cot) return
+    const note = (): void => {
+      wantsTail.current = cot.scrollHeight - cot.scrollTop - cot.clientHeight < 40
+    }
+    cot.addEventListener('scroll', note, { passive: true })
+    return () => cot.removeEventListener('scroll', note)
+  }, [])
+  /* In the layout phase, so the box is never painted at the stale offset. */
+  useLayoutEffect(() => {
+    const cot = cotRef.current
+    if (!cot || !seg.thinkLive || !seg.thinkOpen || !wantsTail.current) return
+    cot.scrollTop = cot.scrollHeight
+  })
+  const flipThink = (): void => pinRow(thinkRef.current, () => store.toggleThink(lane, seg))
+  const flipWork = (): void => pinRow(sumRef.current, () => store.toggleWork(lane, seg))
+  const one = seg.calls.length > 0 && seg.calls.every((c) => c.name === (seg.calls[0] as CallData).name)
+  const live = seg.calls.some((c) => !c.done)
+  const failedN = seg.calls.filter((c) => c.done && !c.ok).length
+  const showSum = seg.calls.length > 1
+  /* The rows behind a closed summary are not mounted, so the summary carries
+     the clock for them. Timed from the call in flight rather than the step's
+     first: it is the number the row behind it would show, and a total that kept
+     counting finished work would answer a different question. */
+  const inFlight = seg.calls.find((c) => !c.done)
+  const sumElapsed = useTick(!!inFlight, inFlight ? inFlight.t0 : 0)
+  const wkinHidden = seg.calls.length === 0 ? true : seg.calls.length === 1 ? false : !seg.wkOpen
+  if (stepBlank(seg)) return null
+  return (
+    <div className="step in">
+      <div ref={thinkRef}
+        className={'think tog' + (seg.thinkLive ? ' live' : '') + (seg.thinkOpen ? ' open' : '')}
+        hidden={!seg.thinkShown} tabIndex={0} onClick={flipThink} onKeyDown={onKeyToggle(flipThink)}>
+        <span className="lb">{t(seg.thinkLive ? 'gui.think.live' : 'gui.think.label')}</span>
+        <Chev />
+      </div>
+      <div ref={cotRef} className="cot" hidden={!seg.thinkOpen}>{seg.think}</div>
+      <div className="say prose"
+        dangerouslySetInnerHTML={{ __html: seg.say ? store.mdHtml(seg.say) : '' }} />
+      <div className="wk">
+        <div ref={sumRef}
+          className={'wrow tog' + (showSum ? ' sum' : '') + (showSum && live ? ' run' : '') + (showSum && seg.wkOpen ? ' open' : '')}
+          hidden={!showSum}
+          {...(showSum ? { tabIndex: 0, onClick: flipWork, onKeyDown: onKeyToggle(flipWork) } : {})}>
+          {showSum ? (
+            <>
+              {one ? <ActIco name={(seg.calls[0] as CallData).name} /> : <Ico d={ACT_ICO.dot as string} cls="ic" />}
+              <span className="ar">{store.phraseOf(seg.calls)}</span>
+              {failedN ? <span className="chip bad">{t('gui.n_failed', { n: failedN })}</span> : null}
+              {inFlight
+                ? <span className="runms">{sumElapsed >= 1000 ? store.durText(sumElapsed) : '\u2026'}</span>
+                : null}
+              <Chev />
+            </>
+          ) : null}
+        </div>
+        <div className="wkin" hidden={wkinHidden}>
+          {wkinHidden ? null : seg.calls.map((c) => <CallRow key={c.id} lane={lane} c={c} />)}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+/* ── the other segments ────────────────────────────────────────────────── */
+
+/* One picture the reader attached, shown as itself.
+ *
+ * The bytes are in `attachmentCache` for as long as the page that uploaded
+ * them is open, and after that the file is where it was put: the composer
+ * uploads into the workspace and the message keeps the path. So the cache is
+ * the fast path and `/file` is the standing one -- without it, every picture
+ * in the scrollback turned into a file name the moment the page was reloaded,
+ * which is not what the reader sent.
+ *
+ * A file that cannot be fetched falls back to its name rather than to a broken
+ * image, the same way a generated shot does: an attachment can outlive the
+ * file, and the name is still true when the bytes are gone.
+ */
+function AskShot({ path, live }: { path: string; live: boolean }): ReactElement {
+  const [gone, setGone] = useState(false)
+  const name = String(path).split('/').pop() || String(path)
+  const src = attachmentCache.get(String(path)) || fileURL(String(path))
+  if (gone) {
+    return (
+      <button className="achip" title={String(path)} onClick={() => wsOpenPath(String(path))}>
+        <span className="nm">{name}</span>
+      </button>
+    )
+  }
+  return (
+    <img
+      className="shot" src={src} alt={name}
+      onError={() => setGone(true)}
+      {...(live ? { title: t('gui.img.open', { name }), onClick: () => lightbox.open(src, name) } : {})}
+    />
+  )
+}
+
+/* The badge a sent file wears, the composer's own: the two kinds the design
+   draws one for, and a plain file glyph for the rest. */
+function attMark(name: string): ReactElement {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  if (ext === 'pdf') return <FileBadge kind="pdf" />
+  if (ext === 'doc' || ext === 'docx') return <FileBadge kind="doc" />
+  return <Icon icon={File01Icon} size={14} />
+}
+
+const AskView = memo(function AskView({ lane, seg }: { lane: Lane; seg: AskData }): ReactElement {
+  useSeg(lane, seg)
+  const bRef = useRef<HTMLDivElement | null>(null)
+  /* What the file IS, not whether this page happens to hold its bytes. Asking
+     the cache was asking "did I upload this myself, in this tab": true while
+     the message was being written and false for the same message after a
+     reload, so the pictures became file names on their own. */
+  const isPic = (p: unknown): boolean => {
+    const kind = fileKind(String(p))
+    return kind === 'img' || kind === 'svg'
+  }
+  const imgs = seg.atts.filter(isPic)
+  const docs = seg.atts.filter((p) => !isPic(p))
+  const openAll = (): void => store.expandAskAtts(lane, seg)
+  const thumb = (p: string, liveImg: boolean): ReactElement => <AskShot key={p} path={p} live={liveImg} />
+  const showClip = seg.clipped && !seg.clipOpen
+  return (
+    <div className="turn me in">
+      {/* Pictures above the bubble, files inside it (Figma: Raven / UserMessage).
+          A picture is a thing to look at and stands on its own; a file is a tag
+          on what was said about it, so it heads the sentence the way it headed
+          the draft in the composer. */}
+      {imgs.length ? (
+        <div className={'abox' + (imgs.length > 1 ? ' set' : '')}>
+          <div className="transcript-arow">
+            {seg.expanded || imgs.length <= 3
+              ? imgs.map((p) => thumb(p, true))
+              : (
+                <button className="pile" title={t('gui.att.show_all')} onClick={openAll}>
+                  {thumb(imgs[0] as string, false)}
+                  <span className="cnt">{`${imgs.length}`}</span>
+                </button>
+              )}
+          </div>
+        </div>
+      ) : null}
+      {/* A turn nothing typed is the reader's own side of the conversation --
+          that is whose turn it opened -- outlined rather than filled because
+          nobody typed it, and headed by what set it off. What is under the chip
+          is the reader's own sentence and nothing else: the rest of the entry
+          is wording for the model (features/transcript/store.ts's
+          `cronReminder`, raven/agent/loop/_shared.py from the other end), and
+          an origin whose shape nothing reads leaves the chip standing alone. */}
+      {seg.auto || seg.body.trim() || docs.length ? (
+        <div
+          ref={bRef}
+          className={'msg me' + (showClip ? ' clip' : '')}
+          {...(seg.auto ? { 'data-auto': 'true' } : {})}
+        >
+          {seg.auto ? (
+            <span className="transcript-auto">
+              <Ico d={ACT_ICO.clock as string} />
+              {t('gui.deleg.by_' + seg.auto.origin, undefined, seg.auto.origin)}
+              {seg.auto.note ? ` · ${seg.auto.note}` : ''}
+            </span>
+          ) : null}
+          {docs.length ? (
+            <span className="transcript-files">
+              {seg.expanded || docs.length <= 2
+                ? docs.map((p) => {
+                  const name = String(p).split('/').pop() || String(p)
+                  return (
+                    <button key={p} className="achip" title={p} onClick={() => wsOpenPath(p)}>
+                      {attMark(name)}
+                      <span className="nm">{name}</span>
+                    </button>
+                  )
+                })
+                : (
+                  <button className="achip more" title={t('gui.att.show_all')} onClick={openAll}>
+                    <Icon icon={File01Icon} size={14} />
+                    <span className="nm">{t('gui.att.n_files', { n: docs.length })}</span>
+                  </button>
+                )}
+            </span>
+          ) : null}
+          {seg.body}
+        </div>
+      ) : null}
+      {seg.body.trim() && seg.clipped ? (
+        <button className="qfold" aria-expanded={String(seg.clipOpen) as 'true' | 'false'}
+          onClick={() => {
+            const opening = !seg.clipOpen
+            store.toggleAskClip(lane, seg)
+            if (!opening && bRef.current) bRef.current.scrollIntoView({ block: 'nearest' })
+          }}>{t(seg.clipOpen ? 'gui.ask.collapse' : 'gui.ask.expand')}</button>
+      ) : null}
+      <div className="ansfoot">
+        <div className="acts">
+          {seg.body.trim() ? (
+            <TipButton label={t('gui.answer.copy')} icon={COPY_ICO}
+              flashWord={t('gui.answer.copied')} onClick={() => store.copyText(seg.body)} />
+          ) : null}
+        </div>
+        <span className="turnmeta">{seg.when}</span>
+      </div>
+    </div>
+  )
+})
+
+const AnswerFoot = memo(function AnswerFoot({ lane, seg }: { lane: Lane; seg: AnswerData }): ReactElement {
+  const branch = store.branchOf(lane)
+  return (
+    <div className="ansfoot">
+      <div className="acts">
+        <TipButton label={t('gui.answer.copy')} icon={COPY_ICO}
+          flashWord={t('gui.answer.copied')} onClick={() => store.copyText(seg.text)} />
+        {branch ? (
+          <TipButton label={t('gui.answer.branch')} icon={BRANCH_ICO}
+            onClick={() => branch(seg.text)} />
+        ) : null}
+      </div>
+      {seg.when ? <span className="turnmeta">{seg.when}</span> : null}
+    </div>
+  )
+})
+
+const AnswerView = memo(function AnswerView({ lane, seg, showFoot = true }: {
+  lane: Lane; seg: AnswerData; showFoot?: boolean
+}): ReactElement {
+  useSeg(lane, seg)
+  const branch = store.branchOf(lane)
+  const typing = seg.shown != null && seg.shown < seg.text.length
+  const html = seg.shown != null
+    ? store.mdHtml(seg.text.slice(0, seg.shown)) + (typing ? '<span class="caret"></span>' : '')
+    : store.mdHtml(seg.text)
+  const items = (): Array<{ label: string; fn: () => void }> => {
+    const list = [{
+      label: t('gui.answer.copy'),
+      fn: () => copy(seg.text, t('gui.answer.copied')),
+    }]
+    if (branch) list.push({ label: t('gui.answer.branch'), fn: () => branch(seg.text) })
+    return list
+  }
+  return (
+    <div className="answer in" ref={ctxRef(items)}>
+      <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />
+      {showFoot ? <AnswerFoot lane={lane} seg={seg} /> : null}
+    </div>
+  )
+})
+
+const NoteView = memo(function NoteView({ lane, seg }: { lane: Lane; seg: NoteData }): ReactElement {
+  useSeg(lane, seg)
+  const brief = store.firstErrLine(seg.detail, 140) || seg.detail
+  const full = seg.detail ? `${seg.label} · ${seg.detail}` : seg.label
+  const items = (): Array<{ label: string; fn: () => void }> => [
+    { label: t('gui.answer.copy'), fn: () => copy(full, t('gui.answer.copied')) },
+  ]
+  return (
+    <div className={'tnote in' + (seg.quiet ? '' : ' bad')} title={full} ref={ctxRef(items)}>
+      <span className="tx">{brief ? `${seg.label} · ${brief}` : seg.label}</span>
+      {seg.retry ? (
+        <button className="rt" onClick={() => {
+          const retry = seg.retry
+          const i = lane.segs.indexOf(seg)
+          if (i >= 0) { lane.segs.splice(i, 1); store.nudge(lane) }
+          retry?.()
+        }}>{t('gui.retry')}</button>
+      ) : null}
+    </div>
+  )
+})
+
+const QA_Q = 62
+const QA_A = 34
+
+const QaView = memo(function QaView({ lane, seg }: { lane: Lane; seg: QaData }): ReactElement {
+  useSeg(lane, seg)
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const overflow = seg.q.length > QA_Q || seg.a.length > QA_A
+  const flip = (): void => pinRow(rowRef.current, () => store.toggleQa(lane, seg))
+  return (
+    <>
+      <div ref={rowRef} className={'wrow qa' + (overflow ? ' tog' : '') + (overflow && seg.open ? ' open' : '')}
+        {...(overflow ? { tabIndex: 0, onClick: flip, onKeyDown: onKeyToggle(flip) } : {})}>
+        <Ico d={ACT_ICO.ask as string} cls="ic" />
+        <span className="vb">{t(seg.skipped ? 'gui.qa.skipped' : 'gui.qa.answered')}</span>
+        <span className="ar">{store.shortArg(seg.q, QA_Q)}</span>
+        {seg.a && !seg.skipped ? <span className="an">{store.shortArg(seg.a, QA_A)}</span> : null}
+        {overflow ? <Chev /> : null}
+      </div>
+      {overflow ? (
+        <div className="dtl" hidden={!seg.open}>
+          <div className="bd">
+            <div className="hd">{t('gui.qa.q')}</div>
+            <pre>{seg.q}</pre>
+            {seg.a ? (
+              <>
+                <div className="hd">{t('gui.qa.a')}</div>
+                <pre>{seg.a}</pre>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+})
+
+const StatusView = memo(function StatusView({ lane, seg }: { lane: Lane; seg: StatusData }): ReactElement {
+  useSeg(lane, seg)
+  return (
+    <div className="status in">
+      <span className="pip" />
+      <span>{seg.text}</span>
+    </div>
+  )
+})
+
+/* One row per wire status: `error` is a failure the reader must notice,
+   `exception` is neither success nor failure -- the node suspended waiting on
+   a verdict -- so it wears its own class and text rather than folding into
+   either. A Record over the union rather than a lookup with a fallback, so a
+   status added to the wire without an entry here is a type error, not a row
+   that silently reads as `ok`. */
+const DELIVERED: Record<DeliveredData['status'], { cls: string; key: string }> = {
+  ok: { cls: ' good', key: 'gui.deleg.delivered' },
+  error: { cls: ' bad', key: 'gui.deleg.delivered_err' },
+  exception: { cls: ' warn', key: 'gui.deleg.delivered_exception' },
+}
+
+/* The counts a graph's own receipt ends with. A graph's `status` is always ok
+   -- the manager reports where the work was placed, not how it went -- so the
+   word on the row has to come out of this line instead, or every failed graph
+   would read as "finished". */
+const DAG_COUNTS = /(\d+) completed, (\d+) failed, (\d+) cancelled, (\d+) skipped/
+
+/* What the row says came back. The status for a spawn; for a graph, whichever
+   of the four counts is the honest word: stopped, failed, partly done, done. */
+function deliveredVerdict(seg: DeliveredData): { cls: string; key: string } {
+  const plain = DELIVERED[seg.status]
+  if (!seg.isDag) return plain
+  const m = DAG_COUNTS.exec(seg.body)
+  if (!m) return plain
+  const [done, failed, cancelled] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  if (cancelled && !failed) return { cls: ' dim', key: 'gui.deleg.dlv_stopped' }
+  if (failed && !done) return { cls: ' bad', key: 'gui.deleg.delivered_err' }
+  if (failed) return { cls: ' warn', key: 'gui.deleg.dlv_partial' }
+  return plain
+}
+
+/* What the fold holds, which is prose unless it is a graph's finished-summary.
+ *
+ * That one is two kinds of text in one string (`DagTool`): the counts line,
+ * the run directory and one line per node's output file -- machine lines,
+ * aligned, and read as a block -- then a section per terminal node, which is
+ * what the sub-agent actually said. Drawn as the two things they are rather
+ * than run through the markdown reader, which folds the `- node [status]`
+ * lines into a bullet list and loses the alignment that makes them scannable.
+ *
+ * Keyed on the summary's own opening rather than on `isDag`, because the other
+ * thing a graph delivers is a suspended node's report (`announce_dag_exception`)
+ * -- one paragraph in the node's own words, and setting that in the mono face
+ * would dress a sentence as machine output. */
+function DeliveredBody({ seg }: { seg: DeliveredData }): ReactElement {
+  const caption = <div className="cap">{t('gui.deleg.body_cap')}</div>
+  if (!seg.isDag || !DAG_COUNTS.test(seg.body)) {
+    return (
+      <>
+        {caption}
+        <div className="prose" dangerouslySetInnerHTML={{ __html: store.mdHtml(seg.body) }} />
+      </>
+    )
+  }
+  const lines = seg.body.split('\n')
+  const at = lines.findIndex((line) => /^Terminal outputs:/.test(line))
+  const head = (at < 0 ? lines : lines.slice(0, at)).join('\n').trimEnd()
+  const nodes: Array<{ cap: string; said: string[] }> = []
+  for (const line of at < 0 ? [] : lines.slice(at + 1)) {
+    const heading = /^### (.+)$/.exec(line)
+    if (heading) { nodes.push({ cap: heading[1] as string, said: [] }); continue }
+    nodes[nodes.length - 1]?.said.push(line)
+  }
+  return (
+    <>
+      {caption}
+      {head ? <pre className="raw">{head}</pre> : null}
+      {nodes.map((node) => (
+        <Fragment key={node.cap}>
+          <div className="cap">{node.cap}</div>
+          <div className="prose" dangerouslySetInnerHTML={{ __html: store.mdHtml(node.said.join('\n')) }} />
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+const DeliveredView = memo(function DeliveredView({ lane, seg }: { lane: Lane; seg: DeliveredData }): ReactElement {
+  useSeg(lane, seg)
+  /* The row says a result came back and opens the run it came from; the fold
+     holds what came back. Folded, because the retelling right below it is what
+     the reader is meant to read -- the delivered text is the receipt, there to
+     be checked against, and it is the sub-agent's words rather than Raven's. */
+  const headRef = useRef<HTMLButtonElement | null>(null)
+  const flip = (): void => pinRow(headRef.current, () => store.toggleDelivered(lane, seg))
+  const { cls, key } = deliveredVerdict(seg)
+  const name = seg.isDag ? t('gui.deleg.dag_title') : seg.label
+  return (
+    <div className={'sdlv' + cls + (seg.shown ? ' open' : '')}>
+      <div className="sdhd">
+        <Ico d={SDLV_ICO} cls="ic" />
+        {/* The whole name, in the tooltip: a long task sentence must not push
+            the word that says how it went out of sight. */}
+        <button className="nm" title={name} onClick={seg.open}>{name}</button>
+        <span className="st"><i className="dot" />{t(key)}</span>
+        {seg.body ? (
+          <button ref={headRef} className="sdcv" onClick={flip}
+            aria-label={t('gui.deleg.body_aria')}
+            aria-expanded={String(seg.shown) as 'true' | 'false'}>
+            <span className="lb">{t(seg.shown ? 'gui.deleg.body_hide' : 'gui.deleg.body')}</span>
+            <Chev />
+          </button>
+        ) : null}
+      </div>
+      {seg.body ? (
+        <div className="sdbd" hidden={!seg.shown}>
+          <DeliveredBody seg={seg} />
+        </div>
+      ) : null}
+    </div>
+  )
+})
+
+/* ── the turn's products ───────────────────────────────────────────────
+   A turn that wrote files ends with them. As tiles rather than a list of
+   names, because four documents out of one turn read as four identical names
+   and as four different miniatures -- that difference is what the extra
+   height buys. */
+
+/* Deliveries are capped by a STATED count. It used to be whatever fitted one row, measured by an observer that starts at
+   one -- so a full-width card could sit claiming it had no space for a second
+   tile until something happened to resize it, which is how three deliveries
+   came to show two. Three is one row at the reading column and three rows in a
+   desk pane; past that the card asks before it grows. */
+const DELIVERY_CAP = 3
+const DeliveryShot = memo(function DeliveryShot({ row, broken, src }: {
+  row: DeliveryRow; broken: () => void; src?: string
+}): ReactElement {
+  const [ready, setReady] = useState(false)
+  /* Versioned by the delivery: a path delivered again keeps its token and a
+     thumb is named by its path, so without the stamp the new card's picture
+     is the URL the old card already drew. */
+  return (
+    <span className={'pic shot' + (ready ? '' : ' skel')}>
+      <img src={versioned(src || row.downloadPath, row.when)} alt="" loading="lazy" decoding="async"
+        onLoad={() => setReady(true)} onError={broken} />
+      {ready ? null : <span className="sk" />}
+    </span>
+  )
+})
+
+/* The two answers that mean the deliverable itself is not there. */
+const GONE = new Set([404, 410])
+
+/* An <img> that failed says nothing about why -- a refused question, a file the
+   browser cannot decode and a file that is really gone all arrive as the same
+   event -- so the status is asked for. No answer at all is not an answer about
+   the file either. The workspace's `probeDeliveryMissing` draws the same line
+   for the same reason. */
+const askIfGone = (url: string): Promise<boolean> =>
+  fetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' })
+    .then((res) => !res.ok && GONE.has(res.status))
+    .catch(() => false)
+
+/* What a card's buttons offer, by kind (Figma: Raven / AssistantMessage, the
+   output-file variants). A page is opened in a browser tab as well as in the
+   panel; a document the panel can read is opened there; a binary is fetched.
+   The card itself opens in the panel whichever it is. */
+const BINARY_KINDS = new Set(['office', 'pdf', 'bin'])
+
+const DeliveryTile = memo(function DeliveryTile({ row }: { row: DeliveryRow }): ReactElement {
+  const [state, setState] = useState<'probe' | 'ready' | 'missing'>(row.missing ? 'missing' : 'probe')
+  const [shot, setShot] = useState<'draw' | 'broken'>('draw')
+  const url = row.downloadPath
+  useEffect(() => {
+    let alive = true
+    setShot('draw')
+    if (row.missing) {
+      setState('missing')
+      return () => { alive = false }
+    }
+    setState('probe')
+    /* Only "there is no such file" says the file is gone. Every other refusal
+       is about the asking, not about the deliverable: the gateway answers 401
+       to a page whose session another instance took over -- cookies ignore the
+       port, so a second `raven serve` claims the same jar entry -- and a file
+       the agent wrote seconds ago was then drawn as lost while it sat on disk.
+       404 is the route missing entirely; 410 is the store saying the token is
+       really gone. The rest leaves the card alone, and opening it reports what
+       actually happened. `loadFileText` and `probeDeliveryMissing` already
+       draw this line; this is the one place that did not. */
+    fetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' })
+      .then((res) => {
+        if (!alive) return
+        setState(res.ok || !GONE.has(res.status) ? 'ready' : 'missing')
+      })
+      .catch(() => { if (alive) setState('missing') })
+    return () => { alive = false }
+  }, [row.missing, url])
+  const kind = fileKind(row.name)
+  const mark = <span className="pic transcript-mark"><FileMark ext={row.ext || ''} /></span>
+  /* The picture of the file where the file has one -- an image as itself, a
+     deck or a pdf by its first page as the gateway renders it -- and the type's
+     mark otherwise and for a file that is gone; a placeholder while the probe
+     is out, so the card does not change its face the moment it answers. A
+     render the host cannot make (no LibreOffice, no rasteriser, a timeout)
+     arrives as a failed <img> and falls back to the mark: the file is there,
+     only the picture of it is not. */
+  const picture = state === 'probe' ? <span className="pic none skel"><span className="sk" /></span>
+    : state === 'missing' || shot === 'broken' ? mark
+    : kind === 'img' || kind === 'svg' ? (
+      <DeliveryShot row={row} broken={() => {
+        setShot('broken')
+        void askIfGone(url).then((gone) => { if (gone) setState('missing') })
+      }} />
+    ) : kind === 'office' || kind === 'pdf' ? (
+      <DeliveryShot row={row} src={thumbURL(row.path)} broken={() => setShot('broken')} />
+    ) : mark
+  const type = row.ext ? row.ext.toUpperCase() : t('gui.arts.file')
+  const meta = state === 'missing' ? t('gui.arts.missing') : humanSize(row.size) || type
+  const ready = state === 'ready'
+  const open = (): void => wsOpenDelivery(row.path)
+  return (
+    <div className={'atile' + (state === 'missing' ? ' missing' : '')} title={row.path}>
+      {picture}
+      <span className="cap">
+        <span className="nm">{row.title}</span>
+        {row.description ? <span className="ds">{row.description}</span> : null}
+        <span className="mt">{meta}</span>
+      </span>
+      <button className="hit" disabled={!ready}
+        aria-label={t('gui.arts.open', { f: row.name })}
+        onClick={open} />
+      {ready ? (
+        <span className="transcript-acts">
+          {kind === 'html' ? (
+            <a className="transcript-act" href={fileURL(row.path)} target="_blank" rel="noopener"
+              data-tip={t('gui.arts.browser')} aria-label={t('gui.arts.browser')}>
+              <Icon icon={InternetIcon} size={16} />
+            </a>
+          ) : null}
+          {BINARY_KINDS.has(kind) ? (
+            <a className="transcript-act" href={url} download={row.name}
+              data-tip={t('gui.arts.download')} aria-label={t('gui.arts.download')}>
+              <Icon icon={Download04Icon} size={16} />
+            </a>
+          ) : (
+            <button className="transcript-act" data-tip={t('gui.arts.open', { f: row.name })}
+              aria-label={t('gui.arts.open', { f: row.name })} onClick={open}>
+              <Icon icon={ArrowUpRight01Icon} size={16} />
+            </button>
+          )}
+        </span>
+      ) : null}
+    </div>
+  )
+})
+
+const ArtsView = memo(function ArtsView({ lane, seg }: { lane: Lane; seg: ArtsData }): ReactElement | null {
+  useSeg(lane, seg)
+  /* And on the registry the deliveries come from, not only on the lane. What a
+     delivered file IS keeps moving after this card is drawn: the reader opens it
+     from the desk, it is not there, and `markMissing` writes that back so every
+     surface says the same thing. Subscribed to the lane alone, this card kept
+     the frame it was painted with -- one file greyed out on the shelf and still
+     offered here, in the same window, from the same registry. */
+  useSyncExternalStore(deliveriesSubscribe, deliveriesVersion)
+  const deliveries = store.deliveriesOf(lane, seg.turn)
+  if (!deliveries.length) return null
+  const shownDeliveries = seg.deliveriesOpen ? deliveries : deliveries.slice(0, DELIVERY_CAP)
+  const deliveryRest = deliveries.length - shownDeliveries.length
+  return (
+    <div className="arts">
+      {/* No heading over the files: each is a card of its own under the reply,
+          and the cards are the list (Figma: Raven, the flattened layout). */}
+      {deliveries.length ? <section className="asec deliveries" aria-label={t('gui.arts.delivered')}>
+        <div className="atiles">
+          {shownDeliveries.map((row) => <DeliveryTile key={row.path} row={row} />)}
+        </div>
+        {deliveryRest > 0 || seg.deliveriesOpen ? <button className="amore"
+          aria-expanded={seg.deliveriesOpen} onClick={() => store.toggleArts(lane, seg)}>
+          {seg.deliveriesOpen ? t('gui.arts.less') : t('gui.arts.more', { n: String(deliveryRest) })}
+        </button> : null}
+      </section> : null}
+    </div>
+  )
+})
+
+const FoldView = memo(function FoldView({ lane, seg }: { lane: Lane; seg: FoldData }): ReactElement {
+  useSeg(lane, seg)
+  const headRef = useRef<HTMLButtonElement | null>(null)
+  const flip = (): void => pinRow(headRef.current, () => store.toggleFold(lane, seg))
+  return (
+    <div className={'tfold' + (seg.open ? ' open' : '')}>
+      <button ref={headRef} className="tfh" aria-label={t('gui.fold.aria')}
+        aria-expanded={String(seg.open) as 'true' | 'false'} onClick={flip}>
+        {/* The turn's verdict, not an inventory of the fold: the row is what
+            stays on screen once the steps fold away, so it reads as the turn's
+            closing line. It is the TURN that is done -- a backgrounded graph
+            dispatched from it may still be running below, and its own status
+            lives on the task rows, not here. */}
+        <span className="lb">{t('gui.fold.steps')}</span>
+        <span className="tm">{seg.time || ''}</span>
+        <Chev />
+      </button>
+      {/* A shut body is not built, which is where the weight was: a forty-turn
+          session built 7361 nodes of which 6400 sat in shut fold bodies. On the
+          conversation's lane the runtime opens none: a turn that just finished
+          shuts its own (`collapse`) and a replayed one arrives shut, so the only
+          bodies built are the ones the reader opened.
+
+          A delegated pane opens every turn's, and is a different size of thing:
+          measured on the two largest instance records on hand, 55 messages in
+          one turn built 356 nodes against 103 shut, and 197 messages in two
+          turns built 738 against 334. That is one instance's whole
+          conversation, an order of magnitude under the figure above. It grows
+          with the record at roughly 4 nodes a message, so an instance kept for
+          thousands of turns would reach it; nothing caps it today. */}
+      <div className="tfb" hidden={!seg.open}>
+        {seg.open ? seg.steps.map((s) => <StepView key={s.id} lane={lane} seg={s} />) : null}
+      </div>
+    </div>
+  )
+})
+
+/* ── the lane ──────────────────────────────────────────────────────────── */
+
+function SegView({ lane, seg }: { lane: Lane; seg: Seg }): ReactElement | null {
+  switch (seg.kind) {
+    case 'ask': return <AskView lane={lane} seg={seg} />
+    case 'step': return <StepView lane={lane} seg={seg} />
+    case 'answer': return <AnswerView lane={lane} seg={seg} />
+    case 'note': return <NoteView lane={lane} seg={seg} />
+    case 'qa': return <QaView lane={lane} seg={seg} />
+    case 'status': return <StatusView lane={lane} seg={seg} />
+    case 'sdlv': return <DeliveredView lane={lane} seg={seg} />
+    case 'arts': return <ArtsView lane={lane} seg={seg} />
+    case 'fold': return <FoldView lane={lane} seg={seg} />
+    default: return null
+  }
+}
+
+/* What a card holds: the work the agent did, folded, what it said, and the
+   delegated results that re-entered while it worked. One card spans everything
+   between two things the reader said, so it holds as many turns as the agent
+   took -- a result landing between them is a message inside the card, not a
+   seam across it.
+   The reader's own message and the page's annotations stay rows of their own:
+   the first carries its own shape, and the second is the page talking rather
+   than the agent. */
+const CARDED = new Set(['fold', 'step', 'answer', 'arts', 'sdlv'])
+
+/* How far apart two questions have to be before the column says when the
+   second one was asked (Figma: Raven / Chat, dates between long-gap
+   messages). Below this the exchange reads as one sitting, and a date between
+   every question would be a timestamp column. */
+const DATE_GAP = 30 * 60 * 1000
+
+/* The line itself: the day in words while it is still one of the last two,
+   the date after that, and the clock either way. */
+function dateLine(at: number, now = new Date()): string {
+  const d = new Date(at)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+  const day = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const ago = Math.round((day(now) - day(d)) / 86400000)
+  if (ago === 0) return t('gui.transcript.date_today', { t: hm })
+  if (ago === 1) return t('gui.transcript.date_yesterday', { t: hm })
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  return `${d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}-${md}`} ${hm}`
+}
+
+function stageRows(lane: Lane): ReactElement[] {
+  const rows: ReactElement[] = []
+  let lastAt = 0
+  let i = 0
+  while (i < lane.segs.length) {
+    const seg = lane.segs[i] as Seg
+    if (!CARDED.has(seg.kind)) {
+      if (seg.kind === 'ask' && seg.at) {
+        if (lastAt && seg.at - lastAt >= DATE_GAP) {
+          rows.push(<div className="transcript-date" key={`${lane.epoch}:${seg.id}d`}>{dateLine(seg.at)}</div>)
+        }
+        lastAt = seg.at
+      }
+      rows.push(<SegView key={`${lane.epoch}:${seg.id}`} lane={lane} seg={seg} />)
+      i += 1
+      continue
+    }
+    let end = i
+    while (end < lane.segs.length && CARDED.has(lane.segs[end]!.kind)) end += 1
+    /* A step that draws nothing yet takes the card down with it: the card is
+       the frame around what a turn produced, and a frame around nothing is
+       what the first seconds of every turn looked like. */
+    const group = lane.segs.slice(i, end).filter((part) => part.kind !== 'step' || !stepBlank(part))
+    if (!group.length) { i = end; continue }
+    /* The footer belongs to the answer but sits under whatever that turn
+       delivered, so a turn's products are above its own copy button rather
+       than below it. One per answer, not one per card: a card holds every turn
+       between two things the reader said, so a single footer would have copied
+       the first answer whichever one the reader clicked it beside, and left
+       every later answer without a button at all. The LAST answer keeps its
+       footer outside the card, which is where the one-turn card -- still the
+       ordinary case -- has always drawn it. */
+    const answers = group.filter((part) => part.kind === 'answer') as AnswerData[]
+    const last = answers.length ? answers[answers.length - 1] : undefined
+    /* Flat, the way the design lays a reply out: what the agent did and said
+       is one card, and what a turn delivered is a stack of file cards of its
+       own under it rather than a panel inside it. A turn that goes on talking
+       after its files opens a second card below them. */
+    const blocks: ReactNode[] = []
+    let card: ReactNode[] | null = null
+    let cardKey = ''
+    const flush = (): void => {
+      if (card && card.length) blocks.push(<div className="msg ai" key={cardKey}>{card}</div>)
+      card = null
+    }
+    group.forEach((part, idx) => {
+      const key = `${lane.epoch}:${part.id}`
+      let sink: ReactNode[]
+      if (part.kind === 'arts') {
+        flush()
+        blocks.push(<SegView key={key} lane={lane} seg={part} />)
+        sink = blocks
+      } else {
+        if (!card) { card = []; cardKey = `${key}c` }
+        card.push(part.kind === 'answer'
+          ? <AnswerView key={key} lane={lane} seg={part} showFoot={false} />
+          : <SegView key={key} lane={lane} seg={part} />)
+        sink = card
+      }
+      const before = group[idx - 1]
+      const owner = part.kind === 'answer' ? part
+        : part.kind === 'arts' && before?.kind === 'answer' ? before as AnswerData
+        : undefined
+      /* Held back one place when the answer's own products follow it, so the
+         footer still lands under them rather than between the two. */
+      if (!owner || owner === last || (part.kind === 'answer' && group[idx + 1]?.kind === 'arts')) return
+      sink.push(<AnswerFoot key={`${key}f`} lane={lane} seg={owner} />)
+    })
+    flush()
+    rows.push(
+      <div className="turn ai" key={`${lane.epoch}:${seg.id}`}>
+        {blocks}
+        {last ? <AnswerFoot lane={lane} seg={last} /> : null}
+      </div>,
+    )
+    i = end
+  }
+  return rows
+}
+
+export function StageView({ lane }: { lane: Lane }): ReactElement {
+  useSyncExternalStore((cb) => store.subscribe(lane, cb), () => lane.listV)
+  const req = useSyncExternalStore((cb) => store.subscribe(lane, cb), () => lane.scrollReq)
+  /* Tail-follow after the commit, so the new height is the one measured. */
+  useEffect(() => {
+    if (lane.main) tail.down()
+  }, [lane, req])
+  return (
+    <>
+      {stageRows(lane)}
+    </>
+  )
+}
+
+/* The agent stage pane: the same segments, plus the working glyph at the
+   tail and the pane's own empty note. */
+export function AgentStageView({ lane }: { lane: Lane }): ReactElement {
+  useSyncExternalStore((cb) => store.subscribe(lane, cb), () => lane.listV)
+  return (
+    <>
+      {lane.segs.map((s) => <SegView key={`${lane.epoch}:${s.id}`} lane={lane} seg={s} />)}
+      {lane.running ? (
+        <div className="act in sarun">
+          <span className="wkg" aria-hidden="true"><i /><i /><i /></span>
+        </div>
+      ) : null}
+      {!lane.running && !lane.segs.length ? (
+        <div className="wsempty">{lane.empty}</div>
+      ) : null}
+    </>
+  )
+}

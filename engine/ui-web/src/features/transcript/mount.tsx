@@ -1,0 +1,231 @@
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
+
+import { holdsHost } from '../../state/session/hosts'
+import * as citations from './citations'
+import * as store from './store'
+import { AgentStageView, StageView } from './TranscriptPage'
+
+import type { AgentCtxLike } from './store'
+import type { AnswerData, HistoryMessage, Lane, NoteHandle, StepHandle } from './types'
+import type { ReactElement } from 'react'
+import type { Root } from 'react-dom/client'
+
+/* The transcript island owns a lane host it appends INSIDE the container --
+ * #stage for the conversation, a stage box for an agent pane -- instead of
+ * the container itself. The container is shared ground other modules still
+ * write to (the composer's .turnlive glyph, the `innerHTML = ''` session wipes
+ * in state/session/, the session switch that takes a held host off the stage),
+ * and a React root
+ * cannot share a container with foreign writers. The host is one
+ * `display: contents` element, so layout, selectors on the segment classes
+ * and the scroll math all read exactly as before; a wipe detaches the host
+ * and the next segment simply starts a fresh lane (the epoch remount), while
+ * a held host carries its lane with it and resumes on reattach.
+ */
+
+interface Mounted {
+  host: HTMLElement
+  lane: Lane
+  root: Root
+}
+
+const HOSTS = new WeakMap<HTMLElement, Mounted>()
+/* The same records as a walkable list: releasing a lane means finding the
+   hosts that are gone, and a WeakMap cannot be walked. */
+const MOUNTED: Mounted[] = []
+let seq = 0
+
+/* A host the page threw away takes its lane and its React root with it --
+   otherwise the lane stays in the store's set and every redraw() renders a
+   transcript nobody can see, once more per session switch, unbounded.
+   Detached is NOT the whole test: leaving a conversation mid-turn takes its
+   host off the stage and files it on that conversation, so a disconnected host
+   may still be the only copy of a streaming turn. Ask the session layer's
+   residency rule before dropping one; on a page with no conversations held it
+   answers no. Called when a fresh host is built, which is the moment after a
+   wipe. */
+function release(): void {
+  for (let i = MOUNTED.length - 1; i >= 0; i -= 1) {
+    const m = MOUNTED[i]!
+    if (m.host.isConnected || holdsHost(m.host)) continue
+    MOUNTED.splice(i, 1)
+    HOSTS.delete(m.host)
+    store.dropLane(m.lane)
+    m.root.unmount()
+  }
+}
+
+function laneIn(container: HTMLElement, main: boolean, view: (lane: Lane) => ReactElement): Lane {
+  let host = container.querySelector<HTMLElement>(':scope > [data-tsl]')
+  if (host) {
+    const known = HOSTS.get(host)
+    if (known) return known.lane
+    host.remove()
+  }
+  release()
+  host = document.createElement('div')
+  host.dataset.tsl = '1'
+  host.style.display = 'contents'
+  /* An agent stage box is not shared ground the way #stage is: the subagents
+     island writes its own placeholders straight into it (emptyStage and
+     failStage in features/subagents/store.ts), and the renderer this replaces
+     opened with `box.innerHTML = ''`. Start a fresh lane there from an empty
+     box, or a failed first fetch leaves its error note pinned above the run's
+     transcript until the status changes. */
+  if (!main) container.textContent = ''
+  container.appendChild(host)
+  seq += 1
+  const lane = store.newLane(`${main ? 'main' : 'agent'}:${seq}`, main)
+  const root = createRoot(host)
+  /* Synchronous because the very next line at the call site may read the drawn
+     DOM (a graph selects its node right after). */
+  flushSync(() => root.render(view(lane)))
+  const rec: Mounted = { host, lane, root }
+  HOSTS.set(host, rec)
+  MOUNTED.push(rec)
+  return lane
+}
+
+/* Detached lane for a page without a #stage (unit tests exercise the store
+   through the mounted views instead; this keeps the verbs below answerable on
+   a page that has no stage to draw into). */
+let orphan: Lane | null = null
+
+export function mainLane(): Lane {
+  const stage = document.getElementById('stage')
+  if (!stage) {
+    if (!orphan) orphan = store.newLane('main:orphan', true)
+    return orphan
+  }
+  return laneIn(stage, true, (lane) => <StageView lane={lane} />)
+}
+
+/* ── the public face the page's own machinery calls ───────────────────── */
+
+/* Answers the segment's id: a mid-turn bubble may have to be taken back when
+   its message turns out to be running as a turn of its own (`dropSeg`). */
+export function ask(text: string, when?: string | null, opts?: { midTurn?: boolean } | null): number {
+  return store.askText(mainLane(), String(text), when ?? null, opts).id
+}
+
+export function dropSeg(id: number): boolean {
+  return store.dropSeg(mainLane(), id)
+}
+
+export function step(): StepHandle {
+  return store.newStep(mainLane())
+}
+
+export function answer(text: string, when?: string | null): AnswerData {
+  return store.answer(mainLane(), text, when ?? null)
+}
+
+/* The demo replay's typing effect drives the same answer segment. */
+export function answerTyped(text: string): { progress(shown: number): void; done(): void } {
+  const lane = mainLane()
+  const seg = store.answer(lane, text)
+  seg.shown = 0
+  return {
+    progress: (shown) => store.answerProgress(lane, seg, Math.min(shown, text.length)),
+    done: () => store.answerProgress(lane, seg, null),
+  }
+}
+
+export function note(label: string, detail: string,
+  opts?: { quiet?: boolean; retry?: (() => void) | null } | null): NoteHandle {
+  return store.note(mainLane(), label, detail, opts)
+}
+
+export function qa(question: string, answerText: string, opts?: { skipped?: boolean } | null): void {
+  store.qa(mainLane(), question, answerText, opts)
+}
+
+export function status(text: string): void {
+  store.status(mainLane(), text)
+}
+
+export function killStatus(): void {
+  store.killStatus(mainLane())
+}
+
+export function collapse(time?: string | null): void {
+  store.collapse(mainLane(), time ?? null)
+}
+
+export function foldRuns(steps: StepHandle[]): void {
+  store.foldRuns(mainLane(), steps.map((h) => h.seg))
+}
+
+export function finishTurn(st: StepHandle | null, steps: StepHandle[], time?: string | null): void {
+  const segs = steps.map((h) => h.seg)
+  store.finishTurn(mainLane(), st, segs, time ?? null)
+}
+
+/* The turn's products, as its closing line. The turn number is the workspace
+   record's own; the list is read from the source when the tiles draw. */
+export function artifacts(turn: number): void {
+  store.artifacts(mainLane(), turn)
+}
+
+export function delivery(turn: number, metadata: unknown, callId?: string | null): void {
+  store.recordDelivery(mainLane(), turn, metadata, callId)
+  /* The same channel, read for a different key. A search files where its
+     passages sit so the detail card can offer to open one; the deliveries
+     registry above reads the manifest a handover files. Neither sees the
+     other's. */
+  citations.record(callId, metadata)
+}
+
+export function turnKept(): boolean {
+  return store.turnKept(mainLane())
+}
+
+/** The words a failed turn's row reads, so the live row says what the replay says. */
+export function failedTurnLabel(): string {
+  return store.failedTurnLabel()
+}
+
+export function history(messages: HistoryMessage[]): void {
+  store.history(mainLane(), messages)
+}
+
+export function delivered(p: {
+  label: string; isDag: boolean; status?: string; open: () => void; body?: string
+}): void {
+  store.delivered(mainLane(), p)
+}
+
+export function dagFeed(type: string, p: Parameters<typeof store.dagFeed>[1]): void {
+  store.dagFeed(type, p)
+}
+
+export function spawnFeed(p: Parameters<typeof store.spawnFeed>[0]): void {
+  store.spawnFeed(p)
+}
+
+export function stopStream(): void {
+  store.stopFlush(mainLane())
+}
+
+export function nudge(): void {
+  store.nudge(mainLane())
+}
+
+export function redraw(): void {
+  store.redraw()
+}
+
+/* ── the agent stage: a delegated run in a workspace pane ──────────────
+   Painted synchronously (a caller may read the drawn DOM in the same task),
+   keeping the reader's scroll unless they were at the tail. */
+export function agentStage(box: HTMLElement, ctx: AgentCtxLike | null,
+  opts?: { key?: string; empty?: string; reset?: boolean } | null): void {
+  const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 4
+  const top = box.scrollTop
+  const lane = laneIn(box, false, (l) => <AgentStageView lane={l} />)
+  flushSync(() => {
+    store.agentPaintLane(lane, ctx, opts ?? null)
+  })
+  box.scrollTop = atEnd ? box.scrollHeight : top
+}

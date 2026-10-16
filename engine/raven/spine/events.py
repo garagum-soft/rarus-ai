@@ -1,0 +1,237 @@
+"""The single output vocabulary: everything a turn can emit."""
+
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any
+
+from raven.spine.message import Media, Source
+from raven.spine.turn import Origin
+
+
+@dataclass(frozen=True)
+class Usage:
+    """Token accounting for one turn."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class NoticeKind(StrEnum):
+    """Out-of-band signals a turn surfaces to the user."""
+
+    PROGRESS = "progress"
+    TOOL_HINT = "tool_hint"
+    # An optional organ failed this turn and the turn proceeded without it;
+    # outlets should render the detail so the user knows the answer was
+    # produced degraded (e.g. without long-term memory).
+    ORGAN_DEGRADED = "organ_degraded"
+    # The runtime ended the turn on a safety decision. Unlike the kinds above,
+    # this one replaces the answer rather than accompanying it, so an outlet
+    # that renders nothing else should still render this.
+    ACTION_BLOCKED = "action_blocked"
+    # A model call failed and the Model-Error Ladder is waiting before asking
+    # again. The turn is still running: the detail is the error category, never
+    # the vendor's own body.
+    LLM_RETRY = "llm_retry"
+
+
+# Which notices pass with the turn and which stand in for its answer. An outlet
+# draws a transient one where it draws a status -- a place the next frame of
+# real output overwrites -- and a closing one as a row that stays. Stated once
+# here rather than as a kind list repeated at every surface, because a kind
+# added there and forgotten here is drawn as the turn's outcome.
+TRANSIENT_NOTICE_KINDS = frozenset({NoticeKind.LLM_RETRY})
+
+
+class ToolPhase(StrEnum):
+    """When a tool event fires; outlets render the two phases differently."""
+
+    START = "start"
+    COMPLETE = "complete"
+
+
+# Lifecycle events — emitted by the worker, never by a runner.
+
+# ``turn_id`` is the second correlation axis alongside ``conversation_id``: the
+# lane is WHERE a turn ran, this is WHICH turn ran. A consumer keyed only on the
+# lane stamps a turn's end with whatever a per-lane slot last held, which is a
+# different turn whenever the runtime submits one of its own onto a busy lane.
+
+
+@dataclass(frozen=True)
+class TurnStarted:
+    """Marker that a turn began.
+
+    ``origin`` is the request's, so a consumer can tell a turn the runtime
+    opened from one a person sent -- the RPC spine turns the former into a
+    ``turn.started`` boundary (the runtime's ``message.start`` is suppressed
+    for it, see raven/rpc/spine.py), and the latter into nothing here, because
+    ``turn.send`` owns that event.
+
+    ``delegated`` is the delivery identity when this turn IS a delegated
+    result re-entering the conversation (the shape ``subagent.delivered`` used
+    to carry, plus the injected text): the boundary is the moment the result
+    is actually visible, so that moment is where the row belongs -- not at
+    submission, when the result is still queued behind its parent.
+    """
+
+    origin: Origin | None = None
+    delegated: dict[str, str] | None = None
+    content: str | None = None
+    conversation_id: str | None = None
+    turn_id: str = ""
+
+
+#: The longest failure text a turn's report carries. The providers layer bounds
+#: a model call's own account to the same number before it ever gets here; this
+#: second copy is for the texts that never passed through it -- a crash's
+#: message, a runner's own wording -- and it is written again rather than
+#: imported because the kernel does not reach into raven.providers.
+TURN_FAILURE_TEXT_MAX = 200
+
+_ELLIPSIS = "..."
+
+
+def bound_failure_text(text: str) -> str:
+    """``text`` cut to ``TURN_FAILURE_TEXT_MAX``, marked when it was cut.
+
+    A crash message is arbitrary -- a stack of chained exceptions, a whole HTTP
+    body -- and it is read back in a chat reply, a session marker and a cron
+    job record, none of which is a log.
+    """
+    text = text.strip()
+    if len(text) <= TURN_FAILURE_TEXT_MAX:
+        return text
+    return text[: TURN_FAILURE_TEXT_MAX - len(_ELLIPSIS)].rstrip() + _ELLIPSIS
+
+
+@dataclass(frozen=True)
+class TurnFailed:
+    """A turn that ended without an answer, and what it is reported by.
+
+    ``reported`` says the runner itself worded ``error`` -- it raised an
+    ``AnswerlessTurnError``, whose message is the report a reader should see --
+    rather than the text being whatever a crash carried. In-process only: the
+    wire frame stays one ``error``, and the distinction exists so a consumer
+    deciding what to show a stranger (the gateway's channel reply) can quote a
+    report and refuse to quote a crash.
+    """
+
+    error: str
+    cancelled: bool
+    conversation_id: str | None = None
+    turn_id: str = ""
+    reported: bool = False
+
+
+@dataclass(frozen=True)
+class TurnEnded:
+    usage: Usage
+    latency_ms: float
+    explicit_reply: bool
+    conversation_id: str | None = None
+    turn_id: str = ""
+
+
+# Deliverable events — emitted by the runner, routed to outlets.
+
+
+@dataclass(frozen=True)
+class ToolEvent:
+    phase: ToolPhase
+    tool_call_id: str
+    name: str = ""
+    arguments: dict[str, Any] | None = None
+    # Tool-authored call label for the start phase; None -> UI derives one.
+    display: str | None = None
+    result_preview: str = ""
+    truncated: bool = False
+    # COMPLETE only, and the verdict the emit site can actually give: derived
+    # from the registry's own failure convention (the model-facing text of a
+    # failed tool starts with "Error"), which is the same rule the retry hint
+    # uses. Defaulted true so an outlet that predates the field keeps drawing
+    # every row as it drew it before.
+    ok: bool = True
+    source: Source | None = None
+    conversation_id: str | None = None
+    # START only: the tool is a blocking interaction, so it has no automatic
+    # deadline and may emit nothing for as long as it runs. An outlet whose
+    # client clocks the stream must suspend that clock while it is in flight.
+    blocking: bool = False
+    # COMPLETE only: opt-in structured payload from Tool.take_metadata (e.g. a
+    # deliver_files manifest). Outlets that do not understand a key ignore it.
+    metadata: dict[str, Any] | None = None
+    # COMPLETE only: unified diff of what the call changed on disk, when the
+    # tool could produce one (see ToolResult.diff). For an outlet that renders
+    # the change; never shown to the model.
+    diff: str | None = None
+    # COMPLETE only, and beside ``diff`` rather than instead of it: the same
+    # change as ``{path, after, before}`` for an outlet that draws its own diff
+    # and therefore needs the contents, not a rendering of them. Carried as a
+    # plain mapping so ``spine`` stays free of the tools package.
+    file_change: dict[str, Any] | None = None
+    # COMPLETE only, and the other half of ``file_change``: the files this call
+    # made vanish, one ``{path, before?}`` mapping each. No tool deletes as its
+    # purpose, so this is reported from what was on disk either side of the call
+    # rather than from a tool's own result. Empty and None both mean none went.
+    file_removed: list[dict[str, Any]] | None = None
+    # COMPLETE only, and the third of that set: the files a command left behind,
+    # one ``{path, created, size, lines}`` mapping each. A file tool names what it
+    # wrote and a command names nothing, so these are read off a listing of the
+    # working directory either side of the call. Empty and None both mean none.
+    file_written: list[dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True)
+class Text:
+    content: str
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class MediaOut:
+    media: tuple[Media, ...]
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class StreamDelta:
+    delta: str
+    stream_id: str | None = None
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Reasoning:
+    content: str
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Notice:
+    kind: NoticeKind
+    source: Source | None = None
+    detail: str | None = None
+    conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class EpisodeStart:
+    """Boundary marker: a new model call (episode) begins. ``index`` is the
+    0-based step within the turn. Outlets that group a turn into per-call
+    episodes use it to start a fresh bucket; others ignore it."""
+
+    index: int
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+RunnerEvent = ToolEvent | Text | MediaOut | StreamDelta | Reasoning | Notice | EpisodeStart
+# Same union, named for its delivery role: what the hub routes and an Outlet renders.
+Deliverable = RunnerEvent
+TurnEvent = TurnStarted | TurnFailed | TurnEnded | RunnerEvent

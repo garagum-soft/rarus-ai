@@ -1,0 +1,581 @@
+# Memory Plugin Architecture & EverOS as a Bundled Backend
+
+> Design record (2026-06, pre-v0.2.0). The bundled-in-tree layout described here was superseded: EverOS now ships as its own distribution under `plugins-dist/everos-memory/` -- see the Plugins entries in `CONTEXT.md` for current terms.
+
+Status legend: **[DONE]** implemented on `feature/integrate-everos` · **[PLAN]** proposed.
+
+This document consolidates the memory subsystem design: the refactored
+`MemoryBackend` contract, the plugin discovery model, EverOS shipped as
+a built-in (bundled) plugin, how third-party backends integrate, and
+the EverOS version-pinning / upgrade procedure.
+
+---
+
+## 1. Goals
+
+1. EverOS works out of the box with no extra install step.
+2. Adding a memory backend (first- or third-party) requires **no host
+   code change** — drop a manifest + factory, or `uv add` a package.
+3. Heavy backend dependencies never slow or break startup: discovery
+   reads manifests only and never imports backend code until selected.
+4. Behaviour is typed and predictable, with graceful degradation.
+
+Key judgement: the plugin framework under `raven/plugin/` already
+provided the machinery (four-source discovery + manifest contract +
+typed Protocol). The work was to (a) wire the dormant directory sources
+into the live boot and (b) move EverOS in-tree under
+`raven/plugin/memory/everos/` — no new mechanism.
+
+---
+
+## 2. The `MemoryBackend` contract **[DONE]**
+
+`raven/contracts/memory.py` defines the single Protocol every
+memory plugin implements. The recall surface was refactored from a
+single prefixed opaque `owner_id` to explicit XOR track ids:
+
+```python
+class MemoryBackend(Protocol):
+    async def recall(self, query: str, *,
+                     user_id: str | None = None,
+                     agent_id: str | None = None,
+                     top_k: int) -> list[Memory]: ...
+    async def store(self, session_id: str, messages: list[dict]) -> bool: ...
+    async def feedback(self, signals: dict) -> None: ...   # may be no-op
+    async def start(self) -> None: ...
+    async def stop(self) -> None: ...
+    async def health(self) -> BackendHealth | None: ...   # doctor + import
+```
+
+Contract rules:
+
+- `recall` takes **exactly one** of `user_id` / `agent_id` (XOR). The
+  caller knows the track statically: the `# Memory` segment always
+  passes `user_id`; `BackendSkillSource` always passes `agent_id`.
+  Neither/both set → return `[]`.
+- Ids are **bare, backend-native strings** — no `user:` / `agent:`
+  prefix parsing. Dual-track backends (EverOS) route the set field to
+  the matching store; flat backends (mem0, MemOS) use `user_id` and
+  return `[]` for the `agent_id` call.
+- Rationale for naming the track explicitly: the prefix convention
+  smuggled the host's dual-track concept through an intentionally
+  generic field. Each caller already knows its track at construction,
+  so the prefix was redundant indirection.
+
+### Identity consistency
+
+`recall` is the read side and `store` is the write side, and they must
+agree on identity or stored memory is unretrievable. That is enforced
+structurally rather than asked of the user: **`memory.userId` and
+`memory.agentId` are the only place either id lives**, and the host
+hands both to the backend through `ctx.services`.
+
+| Host config | Reaches the backend as |
+|---|---|
+| `memory.userId` | `ctx.services.user_id` |
+| `memory.agentId` | `ctx.services.agent_id` |
+
+A backend must not read an id from its own `plugins.config[<id>]`
+slice. Two places holding the same value is what allowed a user to edit
+one of them and split writes from reads, and nothing warned: recall
+simply returned nothing forever. The everos backend logs a warning if
+those obsolete keys are still present and disagree.
+
+---
+
+## 3. Plugin discovery model **[DONE]**
+
+`raven/plugins/discover.py` scans four sources and deduplicates by
+plugin id. Discovery **reads manifests only — it never imports backend
+code.** `build_plugin_registry` (`raven/core/plugin_stack.py`) wires
+all four via the shared `plugin_discovery_sources()` helper, which the
+`raven plugins` CLI command reuses so both see the same set.
+
+### Sources & priority
+
+`Source` doubles as conflict priority (higher wins):
+
+| Priority | Source | Location | Audience |
+|---:|---|---|---|
+| 4 | `BUNDLED` | `raven/plugin/memory/<id>/` | first-party, ships with raven |
+| 3 | `USER` | `~/.raven/plugins/<id>/` | local drop-in |
+| 2 | `PROJECT` | `./.raven/plugins/<id>/`, and every root in `plugins.dirs` | per-project |
+| 1 | `ENTRY_POINTS` | pip pkg, group `raven.plugins` | third-party distribution |
+
+`bundled > user > project > entry_points` enforces the "builtin shadow
+rule": a bundled backend can never be silently shadowed by a same-id
+local or pip copy. Different ids never conflict — they coexist as
+available contributions; the active one is chosen by `memory.backend`.
+
+### Manifest
+
+Each plugin dir/package ships `raven-plugin.toml`:
+
+```toml
+[plugin]
+id           = "everos-memory"
+version      = "1.0.0"
+bundled      = true
+
+[[plugin.contributes.memory_backends]]
+name    = "everos"
+factory = "raven.plugin.memory.everos.backend:make_backend"
+```
+
+### Why manifest-only discovery matters
+
+Discovery parses TOML; it does **not** import the backend. A backend
+with a missing heavy dependency (lancedb, mem0ai) therefore cannot
+break discovery for every other backend. The factory module is imported
+only when `memory.backend` selects that backend — so "ships by default"
+never means "pays the import/startup cost by default".
+
+> Caveat: `_scan_entry_points` resolves a package's manifest via
+> `importlib.resources.files(pkg)`, which executes that package's
+> `__init__.py`. Plugin packages (and the bundled `everos/__init__.py`)
+> must stay empty/cheap and must not import their heavy substrate there.
+
+---
+
+## 4. EverOS as a bundled plugin **[DONE]**
+
+The EverOS adapter lives in-tree at `raven/plugin/memory/everos/`,
+discovered via the bundled source — no separate package to install.
+
+### 4.1 Layout
+
+```
+raven/
+  plugin/                         # plugin framework + bundled implementations
+    discover.py registry.py …     # framework (unchanged)
+    memory/
+      __init__.py                 # cheap
+      everos/
+        __init__.py               # cheap (touched by resource resolution; no heavy import)
+        backend.py                # EverosBackend + make_backend
+        tools.py                  # understand_media tool
+        multimodal.py
+        raven-plugin.toml      # manifest (ships as package-data)
+```
+
+The bundled memory implementations live **under the existing
+`raven/plugin/` package** (not a separate top-level `plugins/`), so
+there is a single, unambiguous home for both the framework and the
+backends it loads.
+
+### 4.2 What moved, what stays
+
+| Item | Disposition | Why |
+|---|---|---|
+| `raven_everos` adapter code | **moved** into `raven/plugin/memory/everos/` | thin adapter; no heavy logic enters the host |
+| `everos[multimodal]` substrate | **stays** a direct raven dependency | heavy deps stay isolated in the pip package; adapter only delegates |
+| `httpx` | stays (already a dep) | http-mode client reuses it |
+| `raven_everos` package / uv workspace member / its entry_points | **removed** | code is now built-in; no separate distribution |
+
+Manifest factory path changed from `raven_everos.backend:make_backend`
+to `raven.plugin.memory.everos.backend:make_backend`.
+
+### 4.3 Dependency & packaging changes (`pyproject.toml`)
+
+Removed: `raven-everos>=1.0.0,<2.0.0`; `[tool.uv.workspace]`;
+`[tool.uv.sources] raven-everos`.
+
+Added to the hatchling wheel include allowlist so bundled manifests
+ship in the wheel (hatchling `include` is an explicit allowlist; the
+`.toml` is not matched by `raven/**/*.py`):
+
+```toml
+[tool.hatch.build]
+include = [
+    "raven/**/*.py",
+    "raven/plugin/**/raven-plugin.toml",
+    ...
+]
+```
+
+Kept: `everos[multimodal]==1.0.0`, `httpx` — the relocated adapter
+reuses them, so **no new runtime dependency** was introduced.
+
+### 4.4 Host wiring
+
+`plugin_discovery_sources()` resolves the four source locations; both
+`build_plugin_registry` and the `raven plugins` CLI use it:
+
+```python
+import raven
+return {
+    "bundled_dir": Path(raven.__path__[0]) / "plugin" / "memory",
+    "user_dir": Path.home() / ".raven" / "plugins",
+    "project_dir": Path.cwd() / ".raven" / "plugins",
+    "entry_points_group": "raven.plugins",
+}
+```
+
+Wheel resource path: a normal pip/uv install extracts raven to real
+directories, so `raven.__path__[0]` is a usable `Path`. Only
+zipimport (running from a `.pyz`) would need
+`importlib.resources.as_file` materialization.
+
+### 4.5 User-facing impact
+
+None. Selection stays `memory.backend = "everos"`; config stays under
+`plugins.config["everos-memory"]`. EverOS moving from "external plugin"
+to "built-in plugin" is transparent.
+
+---
+
+## 5. Adding a new backend (drop-in contract)
+
+A backend is integrated through any of three channels; the contract is
+identical: ship `raven-plugin.toml` declaring a `memory_backends`
+contribution (name + factory) + a factory returning a `MemoryBackend`.
+
+Two more surfaces are optional. A `[[plugin.contributes.onboard]]` entry
+(name + factory returning an `OnboardStep`) gives the backend a screen in
+`raven onboard`: the host lends the wizard shell as one `OnboardUI` and
+records `memory.backend` from the `StepOutcome` the step returns.
+Implementing `MemoryBackend.health()` lets `raven doctor` and `raven
+import` diagnose the backend through the contract alone, without the host
+importing it ahead of selection.
+
+| Channel | Where | "Install" | Dependencies |
+|---|---|---|---|
+| pip + entry_points (recommended) | standalone package | `uv add <pkg>` | package declares its own (e.g. `mem0ai`) |
+| user drop-in | `~/.raven/plugins/<id>/` | copy the dir | user must provide deps |
+| project drop-in | `./.raven/plugins/<id>/` | checked into project | user must provide deps |
+
+### Example: a mem0 backend via pip + entry_points
+
+```
+raven-mem0/
+  pyproject.toml          # [project.entry-points."raven.plugins"] mem0 = "raven_mem0"
+  src/raven_mem0/
+    __init__.py           # empty/cheap
+    backend.py            # make_backend + Mem0Backend(MemoryBackend)
+    raven-plugin.toml  # id="mem0-memory", contributes memory_backends name="mem0"
+```
+
+```python
+class Mem0Backend:  # structurally a MemoryBackend
+    async def recall(self, query, *, user_id=None, agent_id=None, top_k):
+        if user_id is None:        # flat backend: no agent track
+            return []
+        hits = self._m.search(query, user_id=user_id, limit=top_k)
+        return [Memory(text=h["memory"], score=h.get("score", 0.0),
+                       metadata={"id": h.get("id")}) for h in hits["results"]]
+    # store / feedback / start / stop ...
+
+def make_backend(ctx) -> MemoryBackend:
+    return Mem0Backend(ctx)
+```
+
+Install + activate:
+
+```bash
+uv add raven-mem0          # mem0ai pulled transitively; entry_points auto-discovered
+```
+```json
+"memory":  { "backend": "mem0", "userId": "user-raven", "memoryTopK": 5 },
+"plugins": { "config": { "mem0-memory": { "mem0_config": { "...": "..." } } } }
+```
+
+Multiple backends coexist; `memory.backend` picks one; `plugins.disabled`
+turns one off. An installed-but-unselected backend's code is never
+imported.
+
+---
+
+## 6. Lifecycle & failure semantics
+
+- **Discovery**: cheap, manifest-only.
+- **Construction**: lazy — `make_backend(ctx)` runs only for the
+  selected backend. `ctx` carries `config` (the `plugins.config` slice),
+  `services`, `logger`.
+- **Lifecycle**: host calls `start()` once at boot but may not await
+  it before the first turn -- `recall` and `store` must tolerate being
+  called while `start` is still running -- and calls `stop()` at
+  shutdown.
+- **Failure contract** (`raven/contracts/memory.py`): a session host --
+  the agent loop, the TUI, the gateway, `raven serve` -- wraps every call
+  into a backend and treats a raise as the loss of that one call: `recall`
+  counts as no hits, `store` as not landed, `start` as no long-term memory
+  for this session, `feedback` and `stop` as logged and ignored. `raven
+  import` is the deliberate exception: nothing wraps `start` or `stop`
+  there, so a raise in either ends the command, and a `store` that raises
+  or returns `False` fails that one source and leaves it unsubmitted for a
+  retry rather than passing as not landed. A backend that can classify its own
+  failures (a timeout is not a refused connection) should catch and act on
+  them, because the host cannot.
+- **Factory raises**: `maybe_build_memory_backend` catches and falls
+  back to no backend (core `MemoryStore` still works).
+- **Drop-in dep missing**: that backend's construction fails and is
+  skipped; other backends are unaffected.
+
+---
+
+## 7. EverOS version pinning & upgrade SOP
+
+### 7.1 Exact pin is mandatory **[DONE: `everos[multimodal]==1.4.1`]**
+
+The adapter is written against EverOS **internal** APIs, not a stable
+public surface:
+
+- `everos.service.search.search`, `everos.service.memorize.memorize`
+- `everos.memory.search.dto.SearchRequest`
+- `everos.entrypoints.api.app.create_app` (embedded lifespan)
+- `everos.memory.extract.parser`, `everos.component.llm.client`
+- `everos.config.load_settings`; and for drain in tests/scripts:
+  `everos.service.memorize._get_engine`,
+  `everos.infra.persistence.sqlite.md_change_state_repo`
+
+Any release — even a patch — can move these symbols. Therefore EverOS
+is pinned to an exact version (`==X.Y.Z`), not a range: upgrades are
+deliberate, re-validated events, never something `uv lock --upgrade`
+can do silently.
+
+Single pin: EverOS is pinned in **one** place, the plugin's own
+`plugins-dist/everos-memory/pyproject.toml`. The upgrade surface is one line.
+
+### 7.2 Upgrade procedure
+
+0. **Assess**: read the EverOS changelog; check whether the internal
+   symbols above moved, and whether the on-disk schema
+   (`~/.everos/.index/` sqlite + lancedb) changed.
+1. **Bump the pin (uv only — never hand-edit pyproject/lock)**:
+   ```bash
+   uv add --package everos-memory 'everos[multimodal]==1.4.1' && uv sync
+   ```
+   Always keep the `[multimodal]` extra. Skip `1.2.0`: it shipped a
+   path-traversal regression fixed in `1.2.1`.
+2. **Adapt the adapter** if symbols/signatures changed — only
+   `raven/plugin/memory/everos/`. Re-check version assumptions
+   written in adapter comments.
+3. **Test (all three layers)**:
+   ```bash
+   uv run pytest tests/test_everos_plugin_discovery.py tests/test_everos_backend.py \
+     tests/test_everos_http_adapter.py tests/test_memory_backend_protocol.py \
+     tests/test_memory_backend_contract.py -q          # unit (mock adapter)
+   uv run pytest tests/integration/test_everos_backend_e2e.py -m real_llm  # real
+   ```
+4. **Data migration (major bumps only)**: if the schema changed, real
+   `~/.everos/.index/` may need rebuild/migration per the changelog.
+   Tests use per-test tmp roots and are unaffected.
+
+   **Migrations can be one-way, and reverting Raven does not undo them.**
+   `1.2.1` is the standing example: on its first start it migrates the
+   LanceDB schema and prunes older manifest versions, so a machine that
+   has run `1.2.1` keeps that on-disk shape after a `git revert` of the
+   pin. Rolling back the data means restoring `~/.everos/` from a copy
+   taken *before* the upgrade — so take one, and say so in the release
+   notes for any bump whose migration behaves this way. An upgrade whose
+   only record is a pull-request description is known to whoever read
+   that description.
+5. **Finalize**: bump the manifest `version`. Two tests assert it as a
+   literal and must be updated with it —
+   `test_everos_plugin_discovery.py::test_bundled_shadows_lower_priority_source`
+   and `test_cli_plugin_commands.py::TestActiveBackend::test_lists_everos_memory`.
+   Then commit
+   `pyproject.toml` + `uv.lock` + adapter changes. Rollback =
+   `git revert` (plus data restore if the schema changed — see step 4).
+
+### 7.3 Record: `1.2.1` -> `1.2.3`
+
+Four packages moved: `everos`, `everalgo-agent-memory` `0.3.1` ->
+`0.4.0`, `everalgo-user-memory` `0.3.2` -> `0.4.0`, and `lancedb`
+`0.33.0` -> `0.34.0`.
+
+**No data migration.** No LanceDB table schema changed: `user_profile`
+and `knowledge_topic` are byte-identical between the two releases, and
+the five files that differ at all (`episode`, `atomic_fact`,
+`agent_case`, `agent_skill`, `foresight`) differ only in docstrings. So
+the startup schema check that `1.2.2` extended to column *types* does
+not fire on an index this upgrade produced. `0.33` and `0.34` were
+verified compatible in both directions — each writes Lance file format
+`v2.1`, and a table written by either opens, searches (over the other's
+IVF and FTS indexes), upserts and prunes under the other — so reverting
+the pin can still read the index. Step 4's backup is cheap insurance,
+not a precondition.
+
+**The Linux floor moved to glibc 2.28.** `lancedb 0.34.0` ships no
+`manylinux_2_17` wheel and no sdist, so CentOS/RHEL 7, Ubuntu 18.04 and
+Amazon Linux 2 can no longer install. `install.sh` hands the exported
+lockfile to the user's `uv` as constraints, which makes this an
+install-time hard failure rather than a slow source build.
+
+**Two behaviour changes.** `extract_foresight` now ships disabled, and
+because the default moved in code rather than in `default_ome.toml` an
+existing `~/.everos/ome.toml` does not opt out of the change; re-enable
+it per install. Agent-skill extraction works for the first time —
+before `1.2.3` a cascade race meant it produced zero `SKILL.md` files —
+so `BackendSkillSource` starts contributing real skills to the prompt
+instead of nothing.
+
+**Two known gaps, not addressed here.** On exhausting a supervised
+loop's restart budget the server now `SIGTERM`s itself, expecting a
+process supervisor; raven spawns it once per session and
+`_SPAWNABLE_STATES` deliberately excludes `FAILED`, so memory stays off
+until the session restarts. And `everos cascade rebuild`, now the
+supported index recovery, refuses to run while a server holds the OME
+lock — while raven exposes no way to stop the server it started.
+
+### 7.4 Record: `1.2.3` -> `1.4.1`
+
+Five packages moved: `everos` `1.2.3` -> `1.4.1`, `pyarrow` `24.0.0` ->
+`25.0.1` (EverOS's new floor), `everalgo-boundary` `0.2.0` -> `0.2.1` and
+`everalgo-core` `0.4.0` -> `0.3.0` (EverOS now pins its everalgo transitive
+layer with `==`, so the resolver follows it down), and `msvc-runtime` joins
+on `win32` only. `lancedb` stays at `0.34.0`.
+
+**No adapter change.** Every internal symbol the adapter reaches
+(`MemoryRoot`, `episode_repo` / `agent_skill_repo`, `EpisodeWriter` /
+`AgentSkillWriter`, the `init_cmd` templates, the multimodal parser and
+client, the two error classes) is present in `1.4.1` with the same
+signature.
+
+**No data migration.** A copy of a 46 MB store written by `1.2.x` (568
+episodes, 5528 atomic facts, seven LanceDB tables at table schema version 2)
+started under `1.4.1` with no schema complaint and a healthy cascade. The same
+keyword searches returned the same ids in the same order on both versions;
+BM25 scores drift in the third decimal place. First start builds an IVF_FLAT
+index on any vector column past 2000 rows (`atomic_fact` here) -- seconds, and
+searches keep working meanwhile. A real turn through raven then wrote a new
+episode into that store and a fresh session recalled it, alongside episodes
+written months earlier under `1.2.x`. Rollback was not exercised this time;
+`lancedb` did not move, so the file format is the one `1.2.3` already reads.
+
+**A running server from before the upgrade is replaced.** raven used to
+reuse whatever answered on the configured port, so an EverOS `1.2.3` left
+running kept serving after the pin moved, with every surface green.
+`ensure_everos_server` now reads the running server's `/health` version and,
+for a root raven owns, sends a mismatch through the same precheck / stop /
+spawn chain a rotated credential takes (`stale_reason`). A root the user
+manages is theirs to restart. `everos cascade sync`, `cascade fix --apply` and
+`cascade rebuild` refuse to run beside a running server (exit code 3).
+
+**Windows.** `1.4.0` runs natively on Windows, so the platform gate raven
+carried (`everos_platform_note`, `ServiceState.UNSUPPORTED`, the wizard's
+WSL notice) is gone and `_everos_executable` looks for `everos.exe` there.
+Spawning, probing and reusing the server were already portable. Identifying
+and stopping a stale server was not: `_cmdline_of` asked `ps`, and the marker
+`everos server start` never matched a Windows command line, which prints the
+executable as `...\Scripts\everos.exe server start`. The command line now
+comes from WMI through PowerShell on `win32` and the marker accepts both
+shapes; the pidfile raven writes at spawn already named the pid. Verified on
+a Windows 11 box: a changed memory role sent the running server through
+"holds credentials raven has since changed; restarting", the old pid exited
+and the new one answered `/health`. `_listening_port` asks the TCP table
+through PowerShell there (no `lsof`, no `/proc`), walking the launcher's
+descendants because the socket belongs to the base interpreter two launchers
+below `everos.exe`. The stop is Ctrl-Break: the child is spawned in a process
+group of its own (`CREATE_NEW_PROCESS_GROUP`, the Windows counterpart of
+`start_new_session`, and what keeps a Ctrl-C at the gateway off the server),
+uvicorn takes the event as a shutdown, and a server that has not acted on it
+in ten seconds -- one another console started, which the event cannot reach
+-- gets `TerminateProcess`, the stop every server there had before. Verified
+on the same box: a stop from the spawning console runs the full uvicorn
+shutdown (`Shutting down` ... `Finished server process`) in three seconds; a
+stop from another console falls back and the process is gone in two.
+
+**The upgrade helper sweeps the environment on Windows.** Windows cannot
+replace an executable that is running, and the server outlives the gateway
+by design, on the environment's own python: with it up, `uv` failed to
+replace `Scripts\everos.exe` (`os error 32`). After waiting for the parent,
+the helper now stops every process whose executable lives under the tool
+environment -- that directory and nothing wider -- and only then installs.
+Verified on the box: the same reinstall that failed with the server up
+succeeds after the sweep, and the relaunched gateway spawns a fresh server.
+
+**What a six-angle review of the branch then changed.** Each item is a
+scenario a real install can reach; the rule behind them is that memory
+degrades with a notice and never blocks a turn, a start or an upgrade.
+
+- A gateway starts the server again when it finds nothing listening
+  (`EverosBackend._may_respawn` / `_respawn`): only for a root raven owns, only
+  when no child of its own still runs, only when nothing holds the OME lock,
+  at most once per thirty seconds. Before, the only spawn was in `start()`,
+  which a running gateway never passes through again, so a server that went
+  away -- an upgrade's sweep, a crash, a stop another process sent -- left the
+  gateway without memory until it was restarted by hand.
+- A stop that was sent and did not finish (`STILL_DRAINING`: uvicorn closes
+  the port at once and finishes the requests it had, an extraction included)
+  is no longer adopted by `ensure_everos_server`; it raises, the backend keeps
+  probing, and the probe above starts a replacement once the lock is free.
+  Adopting it reported memory over a process that no longer answered.
+- A command-line lookup that failed (`_cmdline_of` -> `None`: no `ps`,
+  PowerShell blocked, WMI wedged, the timeout hit) is distinct from a process
+  that is gone. A stop keeps waiting on it; `lock_holder` identifies nothing;
+  `restart_for_config_change` reports "could not be identified" instead of
+  applied when something still answers on the address.
+- A spawn that loses the boot race no longer overwrites the pidfile of the
+  live server (`_start_server_if_unlocked`): on Windows the pidfile is the
+  only way back to it.
+- `stop_pid` counts wall time (each Windows poll launches PowerShell) and takes
+  a `grace`; on Windows a backend drains the server it started itself at
+  `stop()` (Ctrl-Break, sixty seconds), so an upgrade finds nothing to
+  terminate mid-write and a settings change restarts it cleanly.
+- The helper's sweep asks again after `Stop-Process` and refuses to run `uv`
+  while anything from the environment survives (elevated or another user's
+  process): `uv tool install --force` removes the environment before it
+  writes, and would have left every file but the one that could not go.
+- An embedding pin narrower than the index is measured at backend start
+  (`configured_embedding_width`, once per pin per process) and withheld from
+  the spawn (`withhold_role`): EverOS runs keyword recall and keeps storing,
+  and the notice names the model and the width. The write-time check covers a
+  pin written through raven; this covers one written around it. The probe no
+  longer raises on an odd response, times out at ten seconds, and an install
+  with the plugin on `plugins.disabled` is not gated. `migrate_roles` runs off
+  the event loop, which the probe had put a provider round-trip onto.
+- The memory page calls the `/api/v2` routes (v1 is EverOS's legacy alias),
+  asks `/health` before a search the way the chat adapter does (keyword
+  without embedding, the LLM rerank on the agent track without a
+  cross-encoder, the profile opted in), and shows the server's own sentence
+  on a refusal instead of "unreachable".
+- The recalled profile is rendered as lines again: the search response
+  arrives as namespaces, and the renderer, handed one, had put
+  `namespace(explicit_info=[namespace(...)])` -- evidence fields included --
+  into every prompt. A tool-call-only assistant row is stored with empty
+  content, not `"None"`; `top_k` is clamped to the server's 1..100; an empty
+  query asks nothing; a `/health` probe that failed is not cached as "no
+  capabilities" for the life of the adapter.
+- The wizard accepts a model wider than 1024 (EverOS keeps the first 1024,
+  the settings page already accepted it) and turns the host's refusal into a
+  re-prompt rather than a traceback.
+
+**One guard added alongside.** The live install was found pinned to a
+768-dimension embedding model against this 1024-wide index, with every store
+and search answering 500. `set_embedding_endpoint` now measures the model's
+width before writing the pin and refuses anything narrower than
+`REQUIRED_EMBEDDING_DIMENSIONS`, but only where the config names EverOS as
+the memory backend: a knowledge base sizes itself to whatever width the
+model returns, so an install with memory off or on another backend keeps
+any width. The wizard's own check reads the same constant and probe.
+
+---
+
+## 8. Validation (this change)
+
+| Layer | Result |
+|---|---|
+| Unit (everos plugin discovery / backend / http adapter, protocol, contract, plugin command/tools, cli plugin stack, context, config, agent-loop backend dispatch + feedback, agent-loop pipeline) | 240 passed |
+| `raven plugins` | everos-memory · Source=`bundled` · Status=`activated` |
+| `real_llm` e2e (`test_everos_backend_e2e.py`) | 2 passed, 1 xfailed (best-effort skill-cluster check) — store→extract→recall + dual-track isolation |
+| roundtrip script (new import path) | OK; `users/user-raven/user.md` generated |
+
+Known unrelated: the full unit suite cannot run to completion in-process
+because `agent -m` calls an unconditional `os._exit(0)`
+(`agent_commands.py`, commit 33b4b0d9, to dodge a torch teardown
+segfault), which kills the in-process pytest CliRunner. Pre-existing,
+independent of this refactor.
+
+---
+
+## 9. Design decisions & trade-offs
+
+| Decision | Chosen | Rejected | Why |
+|---|---|---|---|
+| Recall track | explicit `user_id` XOR `agent_id` | prefixed opaque `owner_id` | caller knows track statically; prefix was redundant indirection |
+| EverOS code home | bundled in-tree (`raven/plugin/memory/everos/`) | external `raven_everos` package | default-available, single upgrade surface; substrate stays an isolated pip dep |
+| Bundled dir location | under existing `raven/plugin/` | separate top-level `raven/plugins/` | one home for framework + backends; avoids singular/plural ambiguity |
+| Discovery | manifest-only (TOML) | import-on-scan (Hermes-style) | missing deps can't break discovery; no startup cost for unselected backends |
+| EverOS pin | exact `==X.Y.Z` | range `>=,<` | adapter binds internal (non-public) APIs; upgrades must be deliberate |
+| Conflict priority | `bundled > user > project > entry_points` | user-overrides-bundled | builtin can't be silently shadowed |

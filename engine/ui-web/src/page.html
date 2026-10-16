@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Raven</title>
+<!-- The mark is a tile with its own ground, so one icon serves both a light
+     tab strip and a dark one. -->
+<link rel="icon" type="image/png" href="assets/raven.png" />
+<style>
+/*__STYLE__*/
+</style>
+</head>
+<body>
+
+<!-- What is left in here is what React cannot put on screen: the two
+     pre-JavaScript shells, and the one empty host another root mounts into.
+     Every other region of the page is rendered by src/App.tsx, which portals
+     into this body after these three -- and the two shells are taken down at
+     boot, so the body a reader ever sees is the React tree. -->
+
+<!-- Boot splash: the literal first frame. Markup lives here, before anything
+     else in <body>, so the browser paints it ahead of the app shell -- no
+     flash of skeleton rows or half-drawn chrome. The demo hides it on window
+     load; live mode keeps it up until the boot sequence has real data. -->
+<div id="splash" aria-hidden="true">
+  <div class="sp-in">
+    <img class="sp-rv" src="assets/raven-mark.svg" alt="" width="88" height="88" decoding="async">
+    <div class="sp-wl">Raven Agent</div>
+    <div class="sp-bar"><i></i></div>
+  </div>
+</div>
+
+<!-- First-run onboarding surface. Empty shell: the onboarding island roots
+     itself in it (src/main.tsx) and renders the steps, driven by the same RPCs
+     the TUI setup gate uses (setup.status / model.options / model.save_key /
+     config.set), so the onboarding logic itself lives once, server-side.
+
+     Static, and between the two shells on purpose: a portal can only append,
+     so a region rendered from App.tsx lands after #noJs -- and this one has to
+     stay where the page has always served it. -->
+<div id="onb" hidden></div>
+
+<!-- Said twice, once per language, because this is the one notice no translator
+     can reach: it is on screen exactly when the bundle did not run, so the
+     message catalogue and the language resolver are both unreachable, and the advice it
+     gives -- open the saved file -- puts the reader on file:// with no server
+     left to negotiate one either. Each block declares its own language rather
+     than leaning on <html lang>, so neither is mislabelled if that changes. -->
+<div id="noJs" style="position:fixed;left:0;right:0;top:0;z-index:99;background:#e0a030;color:#16150f;
+  font:13px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;padding:10px 16px">
+  <p lang="en" style="margin:0">
+    <b>This page's script is not running</b> -- so all that is left is a shell: no session list,
+    no conversation, and a send key that does nothing. Most likely this preview environment does
+    not run JavaScript. Save the file to disk and open it directly in Chrome or Safari.
+  </p>
+  <p lang="zh-CN" style="margin:3px 0 0">
+    <b>这个页面的脚本没有运行</b> —— 所以只剩空壳：没有会话列表、没有对话、发送键是空的。
+    多半是当前预览环境不执行 JavaScript。把文件保存到本地，用 Chrome 或 Safari 直接打开即可。
+  </p>
+</div>
+
+<script>
+/* The digest of the asset tree this page was built from, hung on the window
+   before anything reads it. Icon helpers append it to every asset URL, so a
+   replaced drawing is a new URL and no client can answer it from a copy it
+   decided was still fresh. See ui-web/build.py. */
+window.__ASSETV = "__ASSETV__";
+</script>
+<script>
+/*__MODERN__*/
+</script>
+</body>
+</html>

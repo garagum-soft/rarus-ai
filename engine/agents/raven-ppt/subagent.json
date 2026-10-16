@@ -1,0 +1,26 @@
+{
+  "name": "Raven-PPT",
+  "kind": "acp",
+  "description": "Builds a PowerPoint deck: turns the user's material into a .pptx, reviewing every rendered page before it publishes. Use when the deliverable the user asks for is a .pptx -- a presentation, slides, a keynote, or a deck template all count. A .pptx named only as source material is not such a request.",
+  "owns": "owns decks and slides. Do not build the deck yourself.",
+  "enabled": true,
+  "hidden": true,
+  "command": "{PYTHON} {SUBAGENT_DIR}/run.py --acp",
+  "cwd": "{SUBAGENT_DIR}",
+  "engine": {
+    "package": "raven_ppt",
+    "wheel": "ppt-engine"
+  },
+  "readyTimeoutMs": 180000,
+  "timeout": null,
+  "maxOutputChars": 60000,
+  "everos": {
+    "userId": "raven-design",
+    "agentId": "raven-design"
+  },
+  "recommendedLlm": {
+    "provider": "ppt",
+    "model": "z-ai/glm-5.3-flash",
+    "apiBase": "https://openrouter.ai/api/v1"
+  }
+}

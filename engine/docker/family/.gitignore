@@ -1,0 +1,3 @@
+# Members' settings (their model keys) and their data never go into git.
+members/
+data/

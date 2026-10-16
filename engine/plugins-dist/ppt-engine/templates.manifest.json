@@ -1,0 +1,65 @@
+{
+  "purpose": "Per-file sha256 pins for the 10 bundled deck templates the ppt engine offers when a task brings no template of its own. The payload itself is tracked in git beside this file, under the destination below: an install that cannot build a deck is not an install, and the private package registry an outside user cannot read was the reason a fresh clone got an empty catalogue and the ppt-engine wheel shipped 0 templates. Git is the source of truth for the bytes; these pins are what the release gate, the large-file allowance and fetch_templates.py --verify hold the tracked payload against, and what a re-cut must rewrite.",
+  "endpoint": {
+    "url": "https://gitlab.com/api/v4/projects/84258686/packages/generic/ppt-templates/2026.09.17",
+    "status": "NAMED",
+    "package": "ppt-templates 2026.09.17, generic package registry of gitlab.com/npc-work/aic/ai/raven (project 84258686)",
+    "auth": "the project is private: fetch_templates.py sends PRIVATE-TOKEN from $GITLAB_TOKEN (any token that can read the repository), or JOB-TOKEN from $CI_JOB_TOKEN inside CI",
+    "owner": "maintainer + raven-ppt product team, jointly (ppt verdict C4)",
+    "note": "NAMED means the url is a real place, not that anyone must visit it: the payload ships in git and in the wheel, so no install needs a token. The registry is the archive of what shipped and the lane fetch_templates.py pulls a new cut down through; a new cut is a new package version (upload, rewrite the pins, bump this url, commit the new bytes)."
+  },
+  "destination": "raven_ppt/assets/templates",
+  "source_of_truth": "The tracked payload under raven_ppt/assets/templates, whose bytes these pins sign: the eight re-cut light templates, corrected for a lone-punctuation text box and for card titles that collided when wrapped, plus two dark templates cut from user uploads (hidden vendor pages removed, reference pages from the other templates borrowed onto their own layouts, vendor marks stripped). This is the same payload the registry serves as ppt-templates 2026.09.09 (project 84258686). The earlier 2026.09.03 version carries only the eight-file payload and a gold template that no longer matches these pins; it stays downloadable for older checkouts. The retired fork kept its own twelve and was never the payload (its record: git history at the subagents/ removal commit) Two pages were then edited in place on 2026-09-17 and the whole set uploaded as the 2026.09.17 cut the endpoint names: beige_geometric_general_report lost its page 20 (a dark photograph under pale rounded cards), and black_circuit_tech_launch lost the circuit texture on its master and the photograph on its Section Header layout, so its body and section pages sit on the master's plain #000000.",
+  "files": [
+    {
+      "name": "amber_wave_quarterly_summary.pptx",
+      "bytes": 717283,
+      "sha256": "9ce8ef5f1a6876154047b077533cab612367f3d89e3dac34b7a8183f33246bf3"
+    },
+    {
+      "name": "beige_geometric_general_report.pptx",
+      "bytes": 614470,
+      "sha256": "40b2f529334f1fa03af7c41422725c37e567163c5fda70526b97979a67716254"
+    },
+    {
+      "name": "black_circuit_tech_launch.pptx",
+      "bytes": 4976916,
+      "sha256": "7391915b64e18a8be8766d805c43d8d22f900e035a240a7d96a1dad8577cbee5"
+    },
+    {
+      "name": "blue_minimal_general_analysis.pptx",
+      "bytes": 3751516,
+      "sha256": "e191812cda19542dd86676a1bdc6a24d3f70084f2bd6e3aae2da85f79d1e1ea0"
+    },
+    {
+      "name": "gold_panel_year_end_summary.pptx",
+      "bytes": 3096785,
+      "sha256": "1e1abafe8b3561b9dc42490ebd4e6e00433048352242d34a7ba3af4df8a03d2e"
+    },
+    {
+      "name": "green_aurora_tech_trends.pptx",
+      "bytes": 6078335,
+      "sha256": "3ba48f1521dc700d5081b101eb7853cf61c8e628bb8519c94a7a776eb1e710ab"
+    },
+    {
+      "name": "mint_memphis_thesis_defense.pptx",
+      "bytes": 387203,
+      "sha256": "2d684d1305f53c360f83dd93fad8f0a4cc4133622a6f37c7d0aa4dc770c47275"
+    },
+    {
+      "name": "red_chinese_traditional_culture.pptx",
+      "bytes": 9446177,
+      "sha256": "011bd7eed739ef5668cc61e0ed2de18378c2bc14a2072c066c38e4e75b7f618b"
+    },
+    {
+      "name": "teal_illustrated_work_analysis.pptx",
+      "bytes": 5798772,
+      "sha256": "6988d590c54ed7e2e3b9f4e3d4730da25fe4af584caaf7fb168de76fc41519bd"
+    },
+    {
+      "name": "warm_bauhaus_quarterly_review.pptx",
+      "bytes": 13517342,
+      "sha256": "61b20764e7a6af5cba0a98f57aeba991d013241f222590fc58ac5c0d91e688f1"
+    }
+  ]
+}

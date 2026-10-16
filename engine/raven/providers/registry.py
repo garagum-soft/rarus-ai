@@ -1,0 +1,1545 @@
+"""
+Provider Registry — what Raven knows about a vendor that LiteLLM does not.
+
+Any vendor LiteLLM supports already works without an entry here: a key under
+its name in ``providers`` plus a "<vendor>/<model>" model id is enough -- the
+key reaches LiteLLM as a per-call argument (see ``ProvidersConfig.get``).
+
+Add a ProviderSpec only for what LiteLLM cannot tell us:
+  - keywords, so a bare model name ("kimi-k2.5") finds its vendor;
+  - default_model / display_name for the wizard and the pickers;
+  - a gateway that fronts other vendors (OpenRouter, AiHubMix), an OAuth flow,
+    a non-LiteLLM path (Azure), prompt caching, per-model param defaults;
+  - a second env var to mirror, or another vendor's driver we are reached through.
+A provider's ``name`` IS LiteLLM's spelling for it wherever LiteLLM has one, so
+there is one name per provider and nothing to reconcile. A vendor LiteLLM spells
+differently is renamed here, with the old spelling kept in ``name_aliases`` so
+saved configs keep loading; only a borrowed driver states ``via_driver``.
+
+Order matters — it controls match priority and fallback. Gateways first.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ProviderSpec:
+    """One LLM provider's metadata. See PROVIDERS below for real examples.
+
+    Placeholders in env_extras values:
+      {api_key}  — the user's API key
+      {api_base} — api_base from config, or this spec's default_api_base
+    """
+
+    # identity
+    name: str  # config field name, e.g. "dashscope"
+    keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
+    # LiteLLM env var, e.g. "DASHSCOPE_API_KEY". Also shown in the model picker
+    # as the variable to export. Empty for OAuth and direct providers.
+    env_key: str = ""
+    display_name: str = ""  # shown in `raven status`
+    homepage: str = ""
+    # Where the vendor hands out API keys. Empty for OAuth and local providers
+    # and for vendors the registry carries no console link for.
+    key_url: str = ""
+
+    # model prefixing
+    # This provider is reached through ANOTHER vendor's LiteLLM driver: SiliconFlow
+    # speaks OpenAI's API, MiniMax speaks Anthropic's. It names the driver, never
+    # this provider -- so it is deliberately absent from `route_names`, and
+    # "openai/gpt-4o" cannot be answered by SiliconFlow's key.
+    #
+    # A vendor LiteLLM merely spells differently is NOT this: adopt LiteLLM's
+    # spelling as `name` and keep ours in `name_aliases` (see hosted_vllm).
+    via_driver: str = ""
+    # Prefix LiteLLM's metadata table files this provider's models under, when it
+    # differs from the routing prefix ("minimax-global/MiniMax-M3" is priced at
+    # "minimax/MiniMax-M3"). None: the two coincide.
+    metadata_prefix: str | None = None
+    # What the user is billed on. "plan" is a subscription (ChatGPT, a Copilot
+    # seat): no per-token figure describes a call. Declared rather than inferred
+    # from ``is_oauth`` -- Vertex is OAuth and metered.
+    billing: str = "per_token"
+    skip_prefixes: tuple[str, ...] = ()  # don't prefix if model already starts with these
+    # Former names this provider answered to, so model ids saved under the old
+    # one ("zhipu/glm-4.6") still resolve after a rename.
+    name_aliases: tuple[str, ...] = ()
+
+    # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
+    env_extras: tuple[tuple[str, str], ...] = ()
+
+    # gateway / local detection
+    is_gateway: bool = False  # routes any model (OpenRouter, AiHubMix)
+    is_local: bool = False  # local deployment (vLLM, Ollama)
+    detect_by_key_prefix: str = ""  # match api_key prefix, e.g. "sk-or-"
+    detect_by_base_keyword: str = ""  # match substring in api_base URL
+    default_api_base: str = ""  # fallback base URL
+    #: The vendor's public address, for the settings field alone.
+    #:
+    #: Separate from `default_api_base` because that one is not display data:
+    #: the catalogue probe pings it, `env_extras` interpolates it, and with
+    #: `passes_default_api_base` the router sends to it. A direct vendor whose
+    #: address LiteLLM keeps inside its own driver must state none of those --
+    #: filling `default_api_base` in for the pane sent Gemini's catalogue probe
+    #: to /v1/models instead of the /v1beta/models its shape asks for.
+    #:
+    #: So this says only "show this when the field would otherwise be blank".
+    #: Read through `display_api_base` or `is_display_only`, never directly.
+    shown_api_base: str = ""
+    native_api_bases: tuple[tuple[str, str], ...] = ()
+    #: Addresses one vendor serves the same account model from, where the choice
+    #: is the reader's rather than a default we could pick for them: DMXAPI sells
+    #: a CNY platform, an international one and an enterprise one, and an account
+    #: on each is a separate signup. Given as (label, api_base, signup_url), the
+    #: first being what a fresh install starts on.
+    #:
+    #: Distinct from `native_api_bases`, which is one vendor's addresses keyed by
+    #: the protocol spoken to them and never a question anyone is asked. A
+    #: provider that states these is offered the list instead of a free-text
+    #: host field -- there is nothing to type when the answer is one of three.
+    platforms: tuple[tuple[str, str, str], ...] = ()
+    passes_default_api_base: bool = False  # send the shipped default as a per-call api_base
+    strip_api_base_trailing_slash: bool = False
+
+    # gateway behavior
+    strip_model_prefix: bool = False  # strip "provider/" before re-prefixing
+
+    #: This gateway serves other vendors' models under names of its own, so the
+    #: bundled registry's ids for it are not ids it accepts. A catalogue list
+    #: must then come from the gateway alone: the registry rows would be
+    #: selectable, and every one of them a wrong-model error on first use.
+    renames_models: bool = False
+
+    # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
+    model_overrides: tuple[tuple[str, dict[str, Any]], ...] = ()
+
+    # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
+    is_oauth: bool = False  # if True, uses OAuth flow instead of API key
+
+    # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
+    supports_prompt_caching: bool = False
+
+    # Whether a tool result may carry an image block. None = decide by probing
+    # the resolved LiteLLM target (see supports_image_tool_result); set it only
+    # to override that, e.g. a gateway whose backend is known to be Anthropic.
+    #
+    # This is an API-shape property, not a model property: a vision model still
+    # cannot see an image delivered in a tool result if the wire format has
+    # nowhere to put one. OpenAI's Chat Completions types `role:"tool"` content
+    # as `string | ChatCompletionContentPartText[]` — image is excluded at the
+    # schema level, so the fallback is to hand the model a text placeholder and
+    # attach the picture to a following user message.
+    image_tool_result_override: bool | None = None
+
+    # Whether the models behind this provider can see images at all. None = ask
+    # the gateway catalogue per model (see supports_vision), which answers "yes"
+    # whenever it has no entry -- so a provider it does not carry needs nothing
+    # set here. Set it to False for a provider whose models the catalogue lists
+    # as vision-capable but this route does not serve that way, and to True to
+    # overrule a listing that is wrong in the other direction. Source-level, like
+    # image_tool_result_override: there is no config surface for either.
+    vision_override: bool | None = None
+
+    # Onboard wizard fallback for agents.defaults.model when /v1/models is empty
+    default_model: str = ""
+
+    # Some providers are served by a dedicated client rather than LiteLLM (Azure
+    # needs an api-version and a deployment name; Codex speaks the Responses API
+    # over OAuth). They take no LiteLLM route prefix.
+    bypasses_litellm: bool = False
+
+    # Which client constructs the provider, when it is not LiteLLM's. Stated here
+    # so adding a family does not mean editing the factory's dispatch.
+    client: str = ""
+
+    # The setup shape exposes an endpoint alongside the API key: Azure gives
+    # every tenant its own resource URL, while a regional vendor may ship a
+    # working endpoint that the user can override. Distinct from `is_local`,
+    # which needs an address but no key.
+    requires_api_base: bool = False
+
+    # A local deployment that will also take a key. Reached by address like any
+    # other `is_local` provider, but its server can be put behind a token --
+    # Ollama's remote mode and LM Studio's server setting both do this -- and a
+    # deployment on someone else's machine usually is. Declared here rather than
+    # matched by name at each surface: the settings pane, the wizard and the
+    # save handler all have to agree on it, and three copies of one list is how
+    # the second such provider gets the key field in one place and not another.
+    accepts_optional_api_key: bool = False
+
+    # The image tool can run on this provider's address and key: OpenRouter, its
+    # default backend, or a vendor serving OpenAI's Images API
+    # (`/images/generations`, `/images/edits`). Declared here for the same reason
+    # as the field above: the roles card offering the image role and the save
+    # refusing a provider must read one answer.
+    image_api: bool = False
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.name.title()
+
+    @property
+    def display_api_base(self) -> str:
+        """The address to show in a settings field, or "" for none.
+
+        `default_api_base` first: where a spec states one it is the real answer,
+        and several are addresses this project chose rather than the vendor's.
+        """
+        return self.default_api_base or self.shown_api_base
+
+    def is_display_only(self, api_base: object) -> bool:
+        """Whether ``api_base`` is the address this spec shows and nothing sends.
+
+        That is `shown_api_base`, standing in for a `default_api_base` the spec
+        does not state: the vendor's own endpoint, which LiteLLM reaches without
+        being told. A section holding it holds no address of its own, and keeping
+        it there is not harmless -- Gemini's driver takes a stored base as its
+        versioned root, and the provider probe takes one for a proxy.
+
+        Anything but a string is not that address. Both callers hand over a value
+        read from JSON before any schema has seen it, and a write needs the
+        schema's refusal of a bad one, not an error raised here.
+        """
+        if self.default_api_base or not self.shown_api_base or not isinstance(api_base, str):
+            return False
+        return api_base.strip().rstrip("/") == self.shown_api_base.rstrip("/")
+
+    @property
+    def usable_default_api_base(self) -> str:
+        """The shipped default address ``Config.get_api_base`` would actually serve.
+
+        Non-empty for a gateway, local deployment, or direct provider explicitly
+        marked for a per-call base. Other direct vendors' defaults travel via
+        env vars instead and the reader never hands them out. Stated once so the
+        credential gate cannot accept a default the reader then refuses to serve
+        (see ``providers.auth``).
+        """
+        return self.default_api_base if (self.is_gateway or self.is_local or self.passes_default_api_base) else ""
+
+    @property
+    def model_prefix(self) -> str:
+        """Route prefix LiteLLM needs on this provider's model ids.
+
+        LiteLLM routes on "<vendor>/<model>", and `name` IS LiteLLM's spelling
+        wherever LiteLLM has one -- that is the point of adopting it. Only a
+        provider reached through someone else's driver sends a different prefix.
+        """
+        if self.bypasses_litellm:
+            return ""
+        return self.via_driver or self.name
+
+    @property
+    def route_names(self) -> frozenset[str]:
+        """Every normalized model-id prefix that names THIS provider.
+
+        `name` is LiteLLM's own spelling wherever LiteLLM has one, so there is
+        nothing to reconcile here -- just this provider's current name plus the
+        ones it used to answer to. A borrowed driver (`via_driver`) is absent by
+        construction: it names the vendor whose API is spoken, not this one.
+
+        Callers must compare prefixes against this rather than rebuilding the
+        set, so the rule cannot drift apart across call sites again.
+        """
+        return frozenset(normalize_provider_name(n) for n in (self.name, *self.name_aliases))
+
+    def matches_keywords(self, model: str) -> bool:
+        """Does this model id mention this vendor by name, prefix aside?
+
+        Keyword matching is what a bare id ("kimi-k2.5") has to go on. It says
+        nothing about routing on its own -- see `claims`.
+        """
+        model_lower = model.lower()
+        model_normalized = model_lower.replace("-", "_")
+        return any(
+            kw.lower() in model_lower or kw.lower().replace("-", "_") in model_normalized for kw in self.keywords
+        )
+
+    def claims(self, model: str) -> bool:
+        """Would `model` route to this provider under ``provider: auto``?
+
+        The one place the prefix-beats-keyword rule is written down. A prefix
+        names its owner and only its owner answers; a keyword is all a bare id
+        offers. Asking a spec directly, rather than each caller re-deriving the
+        rule from a prefix and a keyword list, is what keeps the credential
+        path and the wizard's guard from disagreeing about the same model id.
+        """
+        prefix, _ = split_model_id(model)
+        if prefix:
+            return prefix in self.route_names
+        return self.matches_keywords(model)
+
+
+# ---------------------------------------------------------------------------
+# PROVIDERS — the registry. Order = priority. Copy any entry as template.
+# ---------------------------------------------------------------------------
+
+PROVIDERS: tuple[ProviderSpec, ...] = (
+    # === Custom (any OpenAI-compatible endpoint, via LiteLLM) ==============
+    ProviderSpec(
+        name="custom",
+        keywords=(),
+        env_key="",
+        display_name="Custom",
+        # Route through LiteLLM as a generic OpenAI-compatible gateway: the
+        # `openai/` prefix + configured api_base reach any OpenAI-compatible
+        # endpoint, with LiteLLM providing streaming / retry / tool-calling.
+        # Matched only via an explicit `provider: custom` selection (keywords
+        # empty).
+        via_driver="openai",
+        is_gateway=True,
+        requires_api_base=True,
+        default_api_base="http://localhost:8000/v1",
+        image_api=True,
+    ),
+    # === Azure OpenAI ======================================================
+    # Served by AzureOpenAIProvider, not LiteLLM (hence ``client`` below): Azure
+    # needs an api-version and takes a deployment name where every other provider
+    # takes a model id.
+    ProviderSpec(
+        name="azure_openai",
+        key_url="https://portal.azure.com/",
+        client="azure",
+        keywords=("azure", "azure-openai"),
+        env_key="",
+        display_name="Azure OpenAI",
+        homepage="https://azure.microsoft.com/en-us/products/ai-services/openai-service",
+        bypasses_litellm=True,
+        requires_api_base=True,
+    ),
+    # === Gateways (detected by api_key / api_base, not model name) =========
+    # Gateways can route any model, so they win in fallback.
+    # OpenRouter: global gateway, keys start with "sk-or-"
+    ProviderSpec(
+        name="openrouter",
+        key_url="https://openrouter.ai/settings/keys",
+        keywords=("openrouter",),
+        env_key="OPENROUTER_API_KEY",
+        display_name="OpenRouter",
+        homepage="https://openrouter.ai/",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="sk-or-",
+        detect_by_base_keyword="openrouter",
+        default_api_base="https://openrouter.ai/api/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=True,
+        default_model="openrouter/anthropic/claude-sonnet-5",
+        image_api=True,
+    ),
+    # AiHubMix: global gateway, OpenAI-compatible interface.
+    # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
+    # so we strip to bare "claude-3" then re-prefix as "openai/claude-3".
+    ProviderSpec(
+        name="aihubmix",
+        key_url="https://aihubmix.com/token",
+        keywords=("aihubmix",),
+        env_key="OPENAI_API_KEY",  # OpenAI-compatible
+        display_name="AiHubMix",
+        homepage="https://aihubmix.com",
+        via_driver="openai",  # → openai/{model}
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="aihubmix",
+        default_api_base="https://aihubmix.com/v1",
+        strip_model_prefix=True,  # anthropic/claude-3 → claude-3 → openai/claude-3
+        model_overrides=(),
+    ),
+    # SiliconFlow: OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="siliconflow",
+        key_url="https://cloud.siliconflow.cn/account/ak",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",
+        display_name="SiliconFlow",
+        homepage="https://www.siliconflow.cn",
+        via_driver="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # VolcEngine: OpenAI-compatible gateway
+    ProviderSpec(
+        name="volcengine",
+        key_url="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+        native_api_bases=(("responses", "https://ark.cn-beijing.volces.com/api/v3"),),
+        keywords=("volcengine", "volces", "ark"),
+        env_key="OPENAI_API_KEY",
+        display_name="VolcEngine",
+        homepage="https://console.volcengine.com/ark/region:cn-beijing/overview",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="volces",
+        default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # Poe resells whole vendor catalogues under one subscription key, so a model
+    # id here names the model's maker and never Poe. Gateway for that reason:
+    # the rule is what puts Poe's own prefix in front of "anthropic/..." rather
+    # than letting Anthropic's key answer for a Poe subscription.
+    #
+    # No `default_model` and no shortlist, for the reason the resale gateways
+    # below state. Poe names what it serves by bot rather than by the
+    # maker's id, and only the outer "poe/" comes off before the request is
+    # sent -- so a vendor-spelled id arrives as a model Poe does not have, and
+    # shipping one as the default makes the first chat a wrong-model error.
+    ProviderSpec(
+        name="poe",
+        keywords=("poe",),
+        env_key="POE_API_KEY",
+        display_name="Poe",
+        homepage="https://poe.com/api_key",
+        skip_prefixes=(),
+        is_gateway=True,
+        detect_by_base_keyword="api.poe.com",
+        default_api_base="https://api.poe.com/v1",
+        strip_model_prefix=False,
+        renames_models=True,
+    ),
+    # === Resale gateways reached through OpenAI's driver ===================
+    # Thirteen shelves that resell other vendors' models over an
+    # OpenAI-compatible endpoint. LiteLLM routes none of them, so each borrows
+    # OpenAI's driver and states the address that distinguishes it -- the same
+    # shape as SiliconFlow above, and a gateway for the same reason: a model id
+    # here names its maker, so only the gateway rule keeps that vendor's key
+    # from answering for a subscription bought here.
+    #
+    # None states a `default_model` or ships a shortlist. Nothing Raven bundles
+    # carries a row for any of them, and a gateway's ids are its own spelling of
+    # somebody else's model -- guessing at that spelling would put an id the
+    # vendor rejects in front of the user as a recommendation. Their own
+    # /v1/models answers it once a key is entered, and `catalog.describe` names
+    # whatever comes back by matching the model rather than the shelf.
+    ProviderSpec(
+        name="ai302",
+        keywords=(
+            "302ai",
+            "ai302",
+        ),
+        env_key="OPENAI_API_KEY",
+        display_name="302.AI",
+        homepage="https://302.ai",
+        via_driver="openai",
+        name_aliases=("302ai",),  # not a Python identifier, so it cannot be the field name
+        is_gateway=True,
+        detect_by_base_keyword="302.ai",
+        default_api_base="https://api.302.ai/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="dmxapi",
+        keywords=("dmxapi",),
+        env_key="OPENAI_API_KEY",
+        display_name="DMXAPI",
+        homepage="https://www.dmxapi.cn/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="dmxapi",
+        default_api_base="https://www.dmxapi.cn/v1",
+        # Three storefronts, three signups, one key format. Which one a key was
+        # issued by is not discoverable from the key, so it is asked rather than
+        # detected -- and the address follows from the answer, which is why this
+        # provider offers no host field.
+        platforms=(
+            ("www.DMXAPI.cn (CNY)", "https://www.dmxapi.cn/v1", "https://www.dmxapi.cn/register"),
+            (
+                "www.DMXAPI.com (International)",
+                "https://www.dmxapi.com/v1",
+                "https://www.dmxapi.com/register",
+            ),
+            (
+                "ssvip.DMXAPI.com (Enterprise)",
+                "https://ssvip.dmxapi.com/v1",
+                "https://ssvip.dmxapi.com/register",
+            ),
+        ),
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="burncloud",
+        keywords=("burncloud",),
+        env_key="OPENAI_API_KEY",
+        display_name="BurnCloud",
+        homepage="https://ai.burncloud.com/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="burncloud",
+        default_api_base="https://ai.burncloud.com/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="ocoolai",
+        keywords=("ocoolai",),
+        env_key="OPENAI_API_KEY",
+        display_name="ocoolAI",
+        homepage="https://one.ocoolai.com/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="ocoolai",
+        default_api_base="https://api.ocoolai.com/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="ppio",
+        keywords=(
+            "ppio",
+            "ppinfra",
+        ),
+        env_key="OPENAI_API_KEY",
+        display_name="PPIO",
+        homepage="https://ppio.com/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="ppinfra",
+        default_api_base="https://api.ppinfra.com/v3/openai",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="lanyun",
+        keywords=("lanyun",),
+        env_key="OPENAI_API_KEY",
+        display_name="LANYUN",
+        homepage="https://maas.lanyun.net",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="lanyun",
+        default_api_base="https://maas-api.lanyun.net/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="alayanew",
+        keywords=("alayanew",),
+        env_key="OPENAI_API_KEY",
+        display_name="AlayaNew",
+        homepage="https://www.alayanew.com/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="alayanew",
+        default_api_base="https://deepseek.alayanew.com/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="sophnet",
+        keywords=("sophnet",),
+        env_key="OPENAI_API_KEY",
+        display_name="SophNet",
+        homepage="https://sophnet.com",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="sophnet",
+        default_api_base="https://www.sophnet.com/api/open-apis/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="tokenhub",
+        keywords=("tokenhub",),
+        env_key="OPENAI_API_KEY",
+        display_name="TokenHub",
+        homepage="https://cloud.tencent.com/product/tokenhub",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="tencentmaas",
+        default_api_base="https://tokenhub.tencentmaas.com/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="xirang",
+        keywords=(
+            "xirang",
+            "wishub",
+        ),
+        env_key="OPENAI_API_KEY",
+        display_name="Xirang",
+        homepage="https://www.ctyun.cn",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="wishub",
+        default_api_base="https://wishub-x1.ctyun.cn/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="ph8",
+        keywords=("ph8",),
+        env_key="OPENAI_API_KEY",
+        display_name="PH8",
+        homepage="https://ph8.co",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="ph8.co",
+        default_api_base="https://ph8.co/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="aionly",
+        keywords=(
+            "aionly",
+            "aiionly",
+        ),
+        env_key="OPENAI_API_KEY",
+        display_name="AIOnly",
+        homepage="https://www.aiionly.com",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="aiionly",
+        default_api_base="https://api.aiionly.com/v1",
+        strip_model_prefix=False,
+    ),
+    ProviderSpec(
+        name="radeon_cloud",
+        keywords=("radeon",),
+        env_key="OPENAI_API_KEY",
+        display_name="AMD GPU Cloud",
+        homepage="https://developer.amd.com.cn/radeon/",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="amd.com.cn",
+        default_api_base="https://developer.amd.com.cn/radeon/v1",
+        strip_model_prefix=False,
+    ),
+    # === CN vendors reached through OpenAI's driver ========================
+    # LiteLLM carries no driver for any of these six, so each is reached the way
+    # SiliconFlow is: its OpenAI-compatible endpoint, spoken by OpenAI's driver.
+    # That is also why every one of them hands its address to LiteLLM per call
+    # -- as a gateway, or by stating `passes_default_api_base` -- because the
+    # borrowed driver's own default is api.openai.com, and a spec that keeps its
+    # address to itself would post a Baichuan key there.
+    ProviderSpec(
+        name="baichuan",
+        keywords=("baichuan",),
+        env_key="OPENAI_API_KEY",
+        display_name="Baichuan",
+        homepage="https://www.baichuan-ai.com/",
+        via_driver="openai",
+        passes_default_api_base=True,
+        detect_by_base_keyword="baichuan",
+        default_api_base="https://api.baichuan-ai.com/v1",
+    ),
+    # Qianfan, which serves ERNIE and resells others. Its address carries the
+    # version, and it is v2 rather than the v1 every other entry here ends in.
+    ProviderSpec(
+        name="baidu_cloud",
+        keywords=("ernie", "baidu", "qianfan"),
+        env_key="OPENAI_API_KEY",
+        display_name="Baidu Cloud",
+        homepage="https://cloud.baidu.com/",
+        via_driver="openai",
+        passes_default_api_base=True,
+        detect_by_base_keyword="baidubce",
+        default_api_base="https://qianfan.baidubce.com/v2",
+        default_model="baidu-cloud/ernie-5.1",
+    ),
+    ProviderSpec(
+        name="stepfun",
+        keywords=("stepfun",),
+        env_key="OPENAI_API_KEY",
+        display_name="StepFun",
+        homepage="https://platform.stepfun.com/",
+        via_driver="openai",
+        passes_default_api_base=True,
+        detect_by_base_keyword="stepfun",
+        default_api_base="https://api.stepfun.com/v1",
+        default_model="stepfun/step-3.7-flash",
+    ),
+    ProviderSpec(
+        name="longcat",
+        keywords=("longcat",),
+        env_key="OPENAI_API_KEY",
+        display_name="LongCat",
+        homepage="https://longcat.chat",
+        via_driver="openai",
+        passes_default_api_base=True,
+        detect_by_base_keyword="longcat",
+        default_api_base="https://api.longcat.chat/openai/v1",
+        default_model="longcat/longcat-2.0",
+    ),
+    # ModelScope and Qiniu serve other people's weights rather than their own,
+    # so a model id here names its maker and the gateway rule applies.
+    ProviderSpec(
+        name="modelscope",
+        keywords=("modelscope",),
+        env_key="OPENAI_API_KEY",
+        display_name="ModelScope",
+        homepage="https://modelscope.cn",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="modelscope",
+        default_api_base="https://api-inference.modelscope.cn/v1",
+        strip_model_prefix=False,
+        default_model="modelscope/Qwen/Qwen3-235B-A22B-Instruct-2507",
+    ),
+    ProviderSpec(
+        name="qiniu",
+        keywords=("qiniu", "qnaigc"),
+        env_key="OPENAI_API_KEY",
+        display_name="Qiniu",
+        homepage="https://qiniu.com",
+        via_driver="openai",
+        is_gateway=True,
+        detect_by_base_keyword="qnaigc",
+        default_api_base="https://api.qnaigc.com/v1",
+        strip_model_prefix=False,
+        default_model="qiniu/deepseek-v3",
+    ),
+    # === Standard providers (matched by model-name keywords) ===============
+    # Anthropic. Model ids go out as "anthropic/claude-*": LiteLLM resolves that
+    # and a bare "claude-*" to the same provider and wire model, and an explicit
+    # prefix is what keeps another vendor's key from answering for the id.
+    ProviderSpec(
+        name="anthropic",
+        key_url="https://console.anthropic.com/settings/keys",
+        native_api_bases=(("anthropic", "https://api.anthropic.com"),),
+        keywords=("anthropic", "claude"),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="Anthropic",
+        shown_api_base="https://api.anthropic.com",
+        homepage="https://anthropic.com/",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=True,
+        default_model="anthropic/claude-sonnet-5",
+    ),
+    # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
+    ProviderSpec(
+        name="openai",
+        key_url="https://platform.openai.com/api-keys",
+        native_api_bases=(("responses", "https://api.openai.com/v1"),),
+        keywords=("openai", "gpt"),
+        env_key="OPENAI_API_KEY",
+        display_name="OpenAI",
+        shown_api_base="https://api.openai.com/v1",
+        homepage="https://openai.com/",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="openai/gpt-5.5",
+        image_api=True,
+    ),
+    # OpenAI Codex: uses OAuth, not API key.
+    ProviderSpec(
+        name="openai_codex",
+        client="codex",
+        keywords=("openai-codex",),
+        env_key="",  # OAuth-based, no API key
+        display_name="OpenAI Codex",
+        homepage="https://openai.com/codex",
+        bypasses_litellm=True,
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="codex",
+        default_api_base="https://chatgpt.com/backend-api",
+        metadata_prefix="chatgpt",
+        billing="plan",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+        # No static default: every id we shipped here came back "not supported
+        # when using Codex with a ChatGPT account", and the slugs an account does
+        # offer are only knowable by asking it (see ``codex_catalog``). Empty
+        # makes the wizard ask for one rather than write a rejected id.
+    ),
+    # Claude through the user's Claude subscription: no API key, the Agent SDK
+    # runs Claude Code's CLI on the login made on this machine
+    # (raven/providers/claude_subscription_provider.py). Its keywords stay off
+    # "claude", which is how a bare claude-* id keeps meaning the Anthropic API.
+    ProviderSpec(
+        name="claude_subscription",
+        client="claude_sdk",
+        keywords=("claude-subscription", "claude_subscription"),
+        env_key="",  # OAuth-based, no API key
+        display_name="Claude (subscription)",
+        homepage="https://claude.com/pricing",
+        bypasses_litellm=True,
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        billing="plan",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+        # Every Claude model sees images, and the transcript carries them in
+        # place -- a tool's image result included -- so neither is asked of a
+        # catalogue that does not list these aliases.
+        vision_override=True,
+        image_tool_result_override=True,
+        # The CLI's own aliases: they follow the newest model of each tier.
+        default_model="claude-subscription/sonnet",
+    ),
+    # Github Copilot: uses OAuth, not API key.
+    ProviderSpec(
+        name="github_copilot",
+        keywords=("github_copilot", "copilot"),
+        env_key="",  # OAuth-based, no API key
+        display_name="Github Copilot",
+        homepage="https://github.com/features/copilot",
+        billing="plan",
+        skip_prefixes=("github_copilot/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+        default_model="github_copilot/gpt-4o",
+    ),
+    # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
+    ProviderSpec(
+        name="deepseek",
+        key_url="https://platform.deepseek.com/api_keys",
+        native_api_bases=(("responses", "https://api.deepseek.com"),),
+        keywords=("deepseek",),
+        env_key="DEEPSEEK_API_KEY",
+        display_name="DeepSeek",
+        shown_api_base="https://api.deepseek.com",
+        homepage="https://deepseek.com/",
+        skip_prefixes=("deepseek/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="deepseek/deepseek-v4-flash",
+    ),
+    # Gemini: needs "gemini/" prefix for LiteLLM.
+    ProviderSpec(
+        name="gemini",
+        key_url="https://aistudio.google.com/apikey",
+        keywords=("gemini",),
+        env_key="GEMINI_API_KEY",
+        display_name="Gemini",
+        shown_api_base="https://generativelanguage.googleapis.com",
+        homepage="https://gemini.google.com/",
+        skip_prefixes=("gemini/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="gemini/gemini-3.8-flash",
+    ),
+    # Z.ai (formerly Zhipu AI): named after the vendor's current brand, which is
+    # also what LiteLLM calls it. Old configs saying "zhipu" still load.
+    # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
+    # skip_prefixes: don't add "zai/" when already routed via gateway.
+    ProviderSpec(
+        name="zai",
+        key_url="https://z.ai/manage-apikey/apikey-list",
+        native_api_bases=(("anthropic", "https://api.z.ai/api/anthropic"),),
+        keywords=("zhipu", "glm", "zai"),
+        name_aliases=("zhipu",),  # model ids written before the rename
+        env_key="ZAI_API_KEY",
+        display_name="Z.ai",
+        shown_api_base="https://api.z.ai/api/paas/v4",
+        homepage="https://z.ai",
+        skip_prefixes=("zhipu/", "zai/", "openrouter/", "hosted_vllm/"),
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="zai/glm-4.6",
+    ),
+    # BigModel, the same vendor's Chinese platform. A sibling of Z.ai above and
+    # not a second spelling of it: the brands differ, the hosts differ, and an
+    # account on one does not authenticate against the other -- so a reader on
+    # BigModel had no row to pick, only Z.ai's with the address typed over it.
+    # Shaped like MiniMax (CN) for the same reason, down to borrowing the global
+    # vendor's driver and filing its metadata under that vendor: GLM is GLM
+    # whichever platform serves it, and the price book is written once.
+    #
+    # `zhipu` stays Z.ai's alias rather than moving here. It is what pre-rename
+    # model ids say, and repointing it would send a saved `zhipu/glm-*` to a
+    # different host on a key that was never issued for it.
+    ProviderSpec(
+        name="bigmodel",
+        native_api_bases=(("anthropic", "https://open.bigmodel.cn/api/anthropic"),),
+        keywords=("bigmodel",),
+        env_key="ZAI_API_KEY",
+        display_name="BigModel",
+        homepage="https://open.bigmodel.cn/",
+        via_driver="zai",
+        metadata_prefix="zai",
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+        skip_prefixes=("openrouter/",),
+        default_api_base="https://open.bigmodel.cn/api/paas/v4",
+        passes_default_api_base=True,
+        default_model="bigmodel/glm-4.6",
+    ),
+    # Alibaba Cloud: Qwen models over DashScope, which is the service and the
+    # name every id and config section is written with -- so the section stays
+    # `dashscope` while the shelf it appears on says who runs it.
+    ProviderSpec(
+        name="dashscope",
+        key_url="https://bailian.console.aliyun.com/?apiKey=1",
+        keywords=("qwen", "dashscope"),
+        env_key="DASHSCOPE_API_KEY",
+        display_name="Alibaba Cloud",
+        homepage="https://www.aliyun.com/product/bailian",
+        # The OpenAI-compatible endpoint, shown as the address to talk to and
+        # probed for the catalogue. Not `passes_default_api_base`: LiteLLM's own
+        # driver already knows where to send a dashscope call, and handing it a
+        # second answer is how a working route breaks.
+        default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1/",
+        skip_prefixes=("dashscope/", "openrouter/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="dashscope/qwen-plus",
+    ),
+    # Moonshot: Kimi models. Kimi K2.5 enforces temperature >= 1.0.
+    ProviderSpec(
+        name="moonshot",
+        key_url="https://platform.moonshot.cn/console/api-keys",
+        keywords=("moonshot", "kimi"),
+        env_key="MOONSHOT_API_KEY",
+        display_name="Moonshot",
+        homepage="https://www.moonshot.cn/",
+        skip_prefixes=("moonshot/", "openrouter/"),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(("kimi-k2.5", {"temperature": 1.0}),),
+        # Needed by `provider test` and the wizard preflight, which probe
+        # /v1/models before any LiteLLM call resolves an endpoint.
+        # intl; api.moonshot.cn in China. LiteLLM defaults to the same host, but
+        # `provider test` and the wizard probe /v1/models before any LiteLLM call.
+        default_api_base="https://api.moonshot.ai/v1",
+    ),
+    ProviderSpec(
+        name="nvidia_nim",
+        keywords=("nvidia", "nemotron"),
+        env_key="NVIDIA_NIM_API_KEY",
+        display_name="NVIDIA",
+        homepage="https://build.nvidia.com/explore/discover",
+        skip_prefixes=("nvidia_nim/",),
+        default_api_base="https://integrate.api.nvidia.com/v1",
+        passes_default_api_base=True,
+        default_model="nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+    ),
+    # MiniMax Global: needs "minimax/" prefix for LiteLLM routing.
+    # Uses OpenAI-compatible API at api.minimax.io/v1.
+    ProviderSpec(
+        name="minimax",
+        key_url="https://platform.minimaxi.com/user-center/basic-information/interface-key",
+        native_api_bases=(("responses", "https://api.minimax.io/v1"),),
+        keywords=("minimax",),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax (Global)",
+        homepage="https://platform.minimax.io/",
+        skip_prefixes=("minimax/", "openrouter/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        strip_api_base_trailing_slash=True,
+        model_overrides=(),
+        # Needed by `provider test` and the wizard preflight, which probe
+        # /v1/models before any LiteLLM call resolves an endpoint.
+        default_api_base="https://api.minimax.io/v1",
+    ),
+    ProviderSpec(
+        name="minimax_cn_api",
+        native_api_bases=(("responses", "https://api.minimax.cn/v1"),),
+        keywords=("minimax-cn-api",),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax (CN)",
+        homepage="https://platform.minimaxi.com/",
+        via_driver="minimax",
+        metadata_prefix="minimax",
+        skip_prefixes=("openrouter/",),
+        default_api_base="https://api.minimaxi.com/v1/",
+        passes_default_api_base=True,
+        strip_api_base_trailing_slash=True,
+        requires_api_base=True,
+        default_model="minimax-cn-api/MiniMax-M3",
+    ),
+    ProviderSpec(
+        name="minimax_global",
+        client="minimax_oauth",
+        keywords=("minimax-global",),
+        env_key="",
+        display_name="MiniMax Global (OAuth)",
+        homepage="https://platform.minimax.io/",
+        via_driver="anthropic",
+        skip_prefixes=("anthropic/",),
+        default_api_base="https://api.minimax.io/anthropic/v1",
+        metadata_prefix="minimax",
+        billing="plan",
+        is_oauth=True,
+        default_model="minimax-global/MiniMax-M3",
+    ),
+    ProviderSpec(
+        name="minimax_cn",
+        client="minimax_oauth",
+        keywords=("minimax-cn",),
+        env_key="",
+        display_name="MiniMax CN (OAuth)",
+        homepage="https://platform.minimaxi.com/",
+        via_driver="anthropic",
+        skip_prefixes=("anthropic/",),
+        default_api_base="https://api.minimaxi.com/anthropic/v1",
+        metadata_prefix="minimax",
+        billing="plan",
+        is_oauth=True,
+        default_model="minimax-cn/MiniMax-M3",
+    ),
+    # === Local deployment (matched by config key, NOT by api_base) =========
+    # vLLM / any OpenAI-compatible local server.
+    # Detected when config key is "vllm" (provider_name="vllm").
+    ProviderSpec(
+        name="hosted_vllm",
+        keywords=("vllm",),
+        env_key="HOSTED_VLLM_API_KEY",
+        display_name="vLLM/Local",
+        homepage="https://docs.vllm.ai/",
+        name_aliases=("vllm",),
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",  # user must provide in config
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # === LM Studio (local, OpenAI-compatible) ===============================
+    ProviderSpec(
+        name="lm_studio",
+        keywords=("lmstudio", "lm-studio"),
+        env_key="",
+        display_name="LM Studio",
+        homepage="https://lmstudio.ai/",
+        name_aliases=("lmstudio",),
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        accepts_optional_api_key=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="http://localhost:1234/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # === Ollama (local, OpenAI-compatible) ===================================
+    ProviderSpec(
+        name="ollama_chat",
+        keywords=("ollama", "nemotron"),
+        env_key="OLLAMA_API_KEY",
+        display_name="Ollama",
+        homepage="https://ollama.com/",
+        name_aliases=("ollama",),
+        skip_prefixes=("ollama/", "ollama_chat/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        accepts_optional_api_key=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="11434",
+        default_api_base="http://localhost:11434",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # === Direct vendors LiteLLM routes ====================================
+    # LiteLLM already routes all six from a key plus a prefixed id, so these
+    # specs carry only what it cannot answer: the keyword a bare id offers, and
+    # the /v1/models address `provider test` and the wizard preflight probe
+    # before any LiteLLM call has resolved an endpoint. None passes its default
+    # base per call -- LiteLLM's own driver knows where to send these.
+    ProviderSpec(
+        name="xai",
+        keywords=("xai", "grok"),
+        env_key="XAI_API_KEY",
+        display_name="xAI",
+        homepage="https://x.ai/api",
+        skip_prefixes=("xai/", "openrouter/"),
+        default_api_base="https://api.x.ai/v1",
+        default_model="xai/grok-4.6",
+    ),
+    ProviderSpec(
+        name="mistral",
+        keywords=("mistral", "magistral", "devstral", "pixtral", "codestral", "voxtral"),
+        env_key="MISTRAL_API_KEY",
+        display_name="Mistral",
+        homepage="https://mistral.ai/",
+        skip_prefixes=("mistral/", "openrouter/"),
+        default_api_base="https://api.mistral.ai/v1",
+        default_model="mistral/mistral-large-latest",
+    ),
+    ProviderSpec(
+        name="together_ai",
+        keywords=("together", "togetherai"),
+        env_key="TOGETHERAI_API_KEY",
+        display_name="Together AI",
+        homepage="https://www.together.ai/",
+        skip_prefixes=("together_ai/", "together-ai/", "openrouter/"),
+        default_api_base="https://api.together.xyz/v1",
+        default_model="together-ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    ),
+    # Mirrors the key to FIREWORKS_API_KEY: LiteLLM reads either name, and which
+    # one it checks differs between the chat and the rerank path.
+    ProviderSpec(
+        name="fireworks_ai",
+        keywords=("fireworks",),
+        env_key="FIREWORKS_AI_API_KEY",
+        display_name="Fireworks AI",
+        homepage="https://fireworks.ai/",
+        env_extras=(("FIREWORKS_API_KEY", "{api_key}"),),
+        skip_prefixes=("fireworks_ai/", "fireworks-ai/", "openrouter/"),
+        default_api_base="https://api.fireworks.ai/inference/v1",
+        default_model="fireworks-ai/accounts/fireworks/models/kimi-k2-instruct",
+    ),
+    # The only one of the six whose API is not under a /v1 path.
+    ProviderSpec(
+        name="perplexity",
+        keywords=("perplexity", "sonar"),
+        env_key="PERPLEXITYAI_API_KEY",
+        display_name="Perplexity",
+        homepage="https://www.perplexity.ai/",
+        skip_prefixes=("perplexity/", "openrouter/"),
+        default_api_base="https://api.perplexity.ai",
+        default_model="perplexity/sonar-pro",
+    ),
+    ProviderSpec(
+        name="cerebras",
+        keywords=("cerebras",),
+        env_key="CEREBRAS_API_KEY",
+        display_name="Cerebras",
+        homepage="https://www.cerebras.ai/inference",
+        skip_prefixes=("cerebras/", "openrouter/"),
+        default_api_base="https://api.cerebras.ai/v1",
+        default_model="cerebras/gpt-oss-120b",
+    ),
+    # Hugging Face Inference Providers: one key in front of many backends, and
+    # LiteLLM's driver builds a different route per backend out of the model id
+    # ("fireworks-ai/..." becomes /fireworks-ai/inference/v1). An explicit
+    # api_base replaces that whole route, so the address below is a probe target
+    # only -- which is also why this is not marked a gateway, as that would hand
+    # the default to LiteLLM on every call and collapse the per-backend routing.
+    ProviderSpec(
+        name="huggingface",
+        keywords=("huggingface",),
+        env_key="HUGGINGFACE_API_KEY",
+        display_name="Hugging Face",
+        homepage="https://huggingface.co/docs/inference-providers",
+        env_extras=(("HF_TOKEN", "{api_key}"),),
+        skip_prefixes=("huggingface/", "openrouter/"),
+        default_api_base="https://router.huggingface.co/v1",
+        default_model="huggingface/deepseek-ai/DeepSeek-V4-Pro",
+    ),
+    ProviderSpec(
+        name="xiaomi_mimo",
+        keywords=("mimo", "xiaomi"),
+        env_key="XIAOMI_MIMO_API_KEY",
+        display_name="Xiaomi MiMo",
+        homepage="https://mimo.mi.com/",
+        skip_prefixes=("xiaomi_mimo/", "xiaomi-mimo/", "openrouter/"),
+        default_api_base="https://api.xiaomimimo.com/v1",
+        default_model="xiaomi-mimo/mimo-v2.5",
+    ),
+    # === Self-hosted servers reached through OpenAI's driver ===============
+    # Two more local deployments alongside vLLM, LM Studio and Ollama above,
+    # differing in one way that matters: LiteLLM carries a driver for those
+    # three and none for these, so each borrows OpenAI's and is distinguished
+    # by its address. Both take a key optionally -- a server on someone else's
+    # machine usually sits behind one -- and neither counts as configured until
+    # an address is set, which is what keeps a borrowed driver from posting to
+    # api.openai.com on a key meant for a box on the LAN.
+    ProviderSpec(
+        name="gpustack",
+        keywords=("gpustack",),
+        env_key="OPENAI_API_KEY",
+        display_name="GPUStack",
+        homepage="https://gpustack.ai/",
+        via_driver="openai",
+        is_local=True,
+        accepts_optional_api_key=True,
+        # No default: a GPUStack cluster is wherever the operator put it, and
+        # the shipped-default question has one honest answer here -- ask.
+        default_api_base="",
+    ),
+    # OpenVINO Model Server serves its OpenAI-compatible API under /v3, not the
+    # /v1 every other entry here ends in.
+    ProviderSpec(
+        name="ovms",
+        keywords=("ovms", "openvino"),
+        env_key="OPENAI_API_KEY",
+        display_name="OpenVINO Model Server",
+        homepage="https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html",
+        via_driver="openai",
+        is_local=True,
+        accepts_optional_api_key=True,
+        default_api_base="http://localhost:8000/v3",
+    ),
+    # === Auxiliary (not a primary LLM provider) ============================
+    # Groq: mainly used for Whisper voice transcription, also usable for LLM.
+    # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.
+    ProviderSpec(
+        name="groq",
+        key_url="https://console.groq.com/keys",
+        keywords=("groq",),
+        env_key="GROQ_API_KEY",
+        display_name="Groq",
+        shown_api_base="https://api.groq.com/openai/v1",
+        homepage="https://groq.com/",
+        skip_prefixes=("groq/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_model="groq/openai/gpt-oss-120b",
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Name and model-id primitives
+#
+# Every comparison of a provider name or a model-id prefix in this codebase goes
+# through these, so the rule is spelled once: a rule spelled at each call site
+# drifts, and a fix then lands at one site and misses the rest.
+# ---------------------------------------------------------------------------
+
+
+def normalize_provider_name(name: str | None) -> str:
+    """The single spelling every provider-name comparison is made in.
+
+    Callers hand this whatever a config or a command line gave them, absent
+    values included, so an empty name normalizes rather than raising.
+
+    LiteLLM hyphenates some vendors ("nano-gpt") where this project's config
+    fields are snake_case, and either may arrive in any case, so neither form
+    may be compared raw. camelCase keys are not decomposed here -- splitting on
+    capitals cannot tell "azureOpenai" (two words) from "OpenRouter" (one), so
+    that comparison is made in the safe direction, by camelCasing the snake name
+    (see `ProvidersConfig.get`).
+    """
+    return (name or "").strip().lower().replace("-", "_")
+
+
+SHAPE_OAUTH = "oauth"  # a token file, written by `raven provider login`
+SHAPE_LOCAL = "local"  # reached by address; there is no key
+SHAPE_ENDPOINT = "endpoint"  # a key plus a base URL the user supplies
+SHAPE_KEY = "key"  # a key alone, including vendors Raven carry no spec for
+
+
+def auth_shape(provider: str | None) -> str:
+    """Which of the four setup shapes this provider takes.
+
+    Every decision about how a provider is set up follows from this: whether to
+    ask for a key, an address, both, or neither. It lives here because it is a
+    fact about the provider, and because the wizard and the model picker both
+    need it and must not answer it separately.
+
+    Coarser than an Auth Method, and not the same question: a method says what
+    material satisfies a connection and whether it is satisfied
+    (``providers/auth.py::credential_status``), while a shape says what the
+    wizard asks for. The two derive from the same four spec predicates today,
+    in the same order, in two places.
+
+    Derived rather than stored: a spec is optional metadata, and a vendor Raven
+    holds no spec for is reached with a key like most others.
+    """
+    spec = find_by_name(provider) if provider else None
+    if spec is None:
+        return SHAPE_KEY
+    if spec.is_oauth:
+        return SHAPE_OAUTH
+    if spec.is_local:
+        return SHAPE_LOCAL
+    if spec.requires_api_base:
+        return SHAPE_ENDPOINT
+    return SHAPE_KEY
+
+
+def endpoints_unsupported_reason(provider_name: str | None) -> str | None:
+    """Why ``provider_name``'s config cannot carry an ``endpoints`` list, or None
+    if it can.
+
+    Shared by every path that could write one -- `make_provider` at build time,
+    `add_provider_endpoint`, and the TUI `/model` picker's ``model.add_endpoint``
+    -- so a section rejected at build time is rejected at write time too,
+    instead of being accepted by the write paths and only failing later when
+    something tries to build a provider from it. Codex, MiniMax OAuth and Azure
+    (``client`` set) each connect through one dedicated client and one account,
+    not several; an OAuth section reached through litellm instead (``is_oauth``,
+    e.g. github_copilot, which has no dedicated client) is the same shape.
+    ``endpoints`` is meaningful only for a plain API-key vendor reached through
+    litellm.
+    """
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None or not (spec.client or spec.is_oauth):
+        return None
+    return (
+        f"{provider_name} does not support multiple endpoints -- remove the `endpoints` "
+        "field from its config; this provider connects through a single account, not several"
+    )
+
+
+def litellm_spelling(name: str | None) -> str:
+    """How LiteLLM spells this vendor, which is the only form usable as a prefix.
+
+    Names are matched spelling-insensitively everywhere else, so the one arriving
+    here may be underscored where LiteLLM hyphenates -- and LiteLLM rejects the
+    underscored form outright ("nano_gpt/..." comes back as "LLM Provider NOT
+    provided"), which turns a provider that configured cleanly into one that
+    cannot be called.
+    """
+    from raven.providers.litellm_provider_names import LITELLM_PROVIDER_NAMES
+
+    wanted = normalize_provider_name(name)
+    for candidate in LITELLM_PROVIDER_NAMES:
+        if normalize_provider_name(candidate) == wanted:
+            return candidate
+    return wanted
+
+
+def public_model_prefix(spec: "ProviderSpec") -> str:
+    """The prefix a user writes to reach THIS provider, which is not always the
+    one that goes on the wire.
+
+    ``model_prefix`` answers "what does LiteLLM route on", and for a provider
+    LiteLLM does not carry it is empty by design. But a model id still has to say
+    who serves it: written bare, it is claimed by keyword and fallback instead --
+    "gpt-5.6-sol" resolves to OpenAI, so a Codex model configured that way is sent
+    somewhere it does not exist. A provider reached through another vendor's
+    driver has the same split: the wire prefix names that vendor.
+
+    Both cases resolve back here through ``route_names``, which is built from this
+    same spelling.
+    """
+    return spec.name.replace("_", "-")
+
+
+def names_same_provider(key: str, name: str) -> bool:
+    """Do these two strings name the same provider?
+
+    One provider is written three ways and all three must resolve to it: the
+    snake_case field name, LiteLLM's hyphenated spelling, and the camelCase this
+    project's models serialize to. The camelCase comparison is made forwards, by
+    camelCasing the snake name -- splitting a key on capitals cannot tell
+    "azureOpenai" (two words) from "OpenRouter" (one).
+
+    Every place that matches a config key against a provider name uses this, so
+    the read path and the write path cannot answer it differently: they did, and
+    a section stored under one spelling was invisible to `provider get/set` while
+    the runtime read it happily -- then a write added a second section and the
+    real credential became unreachable.
+    """
+    from pydantic.alias_generators import to_camel
+
+    if key == name:
+        return True
+    # Case-insensitive, so "AzureOpenai" counts too -- still built forwards from
+    # the snake name, never by splitting the key on its capitals.
+    if key.lower() == to_camel(name).lower():
+        return True
+    return normalize_provider_name(key) == normalize_provider_name(name)
+
+
+def metadata_model_id(model: str) -> str | None:
+    """The id LiteLLM's metadata table files this model under, when it differs.
+
+    Returns None when the routing id is already the metadata id -- the caller
+    then keeps whatever candidates it had. One answer here rather than a mapping
+    beside every consumer: price, context window and capability lookups all ask
+    the same question.
+    """
+    spec = find_by_name(split_model_id(model)[0]) if "/" in (model or "") else None
+    if spec is None or spec.metadata_prefix is None:
+        return None
+
+    _, rest = split_model_id(model)
+    return f"{spec.metadata_prefix}/{rest}" if spec.metadata_prefix else rest
+
+
+def split_model_id(model: str) -> tuple[str, str]:
+    """Split a model id into its normalized route prefix and the rest.
+
+    The prefix is routing (which provider), the remainder is the vendor's own
+    model id. Returns ("", model) for a bare id -- no prefix means no claim
+    about the provider, which is a different case from an unrecognized one.
+    """
+    head, sep, rest = (model or "").partition("/")
+    if not sep:
+        return "", model or ""
+    return normalize_provider_name(head), rest
+
+
+# ---------------------------------------------------------------------------
+# Lookup helpers
+# ---------------------------------------------------------------------------
+
+
+def find_by_model(model: str) -> ProviderSpec | None:
+    """Which provider does this model id name? The one answer to that question.
+
+    An explicit prefix names the vendor outright, so it decides alone -- falling
+    through to keywords would let one vendor claim another's model whenever the
+    id happens to contain its name ("deepinfra/deepseek-ai/DeepSeek-V3" is
+    DeepInfra's, and matching DeepSeek there would send DeepInfra's key to
+    DEEPSEEK_API_KEY and rewrite the model id). A gateway prefix likewise names
+    the gateway itself, not the upstream vendor behind it.
+
+    Local providers answer to their prefix too, but are otherwise matched by
+    api_base -- a bare id never resolves to one here.
+    """
+    prefix, _ = split_model_id(model)
+    if prefix:
+        for spec in PROVIDERS:
+            if prefix in spec.route_names:
+                return spec
+        return None
+    return find_by_keywords(model)
+
+
+def find_by_keywords(model: str) -> ProviderSpec | None:
+    """Match a vendor by keyword alone, ignoring any prefix on the model id.
+
+    For gateway-routed ids the prefixes belong to the gateway and its upstream
+    ("openrouter/moonshotai/kimi-k2.5"), neither of which is a spec name -- but
+    the vendor's own quirks still apply, so the keyword is all there is to go on.
+    Only safe where the spec is not used to place credentials.
+    """
+    for spec in PROVIDERS:
+        if spec.is_gateway or spec.is_local:
+            continue
+        if spec.matches_keywords(model):
+            return spec
+    return None
+
+
+def find_gateway(
+    provider_name: str | None = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> ProviderSpec | None:
+    """Detect gateway/local provider.
+
+    Priority:
+      1. provider_name — if it maps to a gateway/local spec, use it directly.
+      2. api_key prefix — e.g. "sk-or-" → OpenRouter.
+      3. api_base keyword — e.g. "aihubmix" in URL → AiHubMix.
+
+    A standard provider with a custom api_base (e.g. DeepSeek behind a proxy) is
+    not mistaken for vLLM: detection is by provider_name, key prefix or base
+    keyword only.
+    """
+    # 1. Direct match by config key
+    if provider_name:
+        spec = find_by_name(provider_name)
+        if spec and (spec.is_gateway or spec.is_local):
+            return spec
+
+    # 2. Auto-detect by api_key prefix / api_base keyword
+    for spec in PROVIDERS:
+        if spec.detect_by_key_prefix and api_key and api_key.startswith(spec.detect_by_key_prefix):
+            return spec
+        if spec.detect_by_base_keyword and api_base and spec.detect_by_base_keyword in api_base:
+            return spec
+
+    return None
+
+
+def find_by_name(name: str | None) -> ProviderSpec | None:
+    """Find a provider spec by config field name, e.g. "dashscope".
+
+    Accepts a provider's former name too: callers all over the codebase look
+    specs up by whatever string a config or a command line handed them, so
+    canonicalizing here is the only way a rename reaches all of them.
+    """
+    name = normalize_provider_name(canonical_provider_name(name))
+    return _tables()[0].get(name)
+
+
+def canonical_provider_name(name: str | None) -> str:
+    """Map a provider's former name to its current one, e.g. zhipu -> zai.
+
+    Renaming a provider otherwise splits users in two: saved configs and typed
+    commands keep the old name, while everything in the code speaks the new one.
+    Unknown names come back normalized, not unchanged: a caller writing the
+    LiteLLM spelling of a vendor Raven has no spec for still has to match the
+    config section, which is written in the underscored form.
+    """
+    normalized = normalize_provider_name(name)
+    return _tables()[1].get(normalized, normalized)
+
+
+_TABLES: "tuple[tuple[int, int], dict[str, ProviderSpec], dict[str, str]] | None" = None
+
+
+def _tables() -> "tuple[dict[str, ProviderSpec], dict[str, str]]":
+    """The two lookups above as tables: current name by normalized name, and
+    current name by normalized alias.
+
+    Both used to scan every spec per call, and between them they were reached
+    some 22,000 times while one ``model.options`` answered -- a fifth of that
+    answer's time went into normalizing the same fifty-five names over and
+    over. Keyed on the tuple's identity so a registry a test installs is read
+    rather than remembered.
+    """
+    global _TABLES
+    key = (id(PROVIDERS), len(PROVIDERS))
+    if _TABLES is None or _TABLES[0] != key:
+        by_name = {normalize_provider_name(spec.name): spec for spec in PROVIDERS}
+        by_alias = {normalize_provider_name(alias): spec.name for spec in PROVIDERS for alias in spec.name_aliases}
+        _TABLES = (key, by_name, by_alias)
+    return _TABLES[1], _TABLES[2]

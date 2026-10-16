@@ -1,0 +1,695 @@
+"""Shape tests for OpenAICodexProvider (Responses API), no live call / no key.
+
+Pins that this provider targets the OpenAI Responses endpoint and sends the
+experimental Responses beta header — so a switch away from the Responses API
+trips a test.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import http.server
+import json
+
+import pytest
+
+from raven.contracts.llm_provider import ProviderHTTPError
+from raven.providers.openai_codex_provider import (
+    DEFAULT_CODEX_URL,
+    OpenAICodexProvider,
+    _build_headers,
+    _consume_sse,
+    _convert_messages,
+    _convert_tool_choice,
+    _convert_tool_output,
+    _friendly_error,
+    _iter_sse,
+)
+from tests._tls import https_endpoint, private_ca
+
+
+def test_default_url_targets_codex_responses_endpoint():
+    assert DEFAULT_CODEX_URL == "https://chatgpt.com/backend-api/codex/responses"
+    assert DEFAULT_CODEX_URL.endswith("/codex/responses")
+
+
+def test_headers_declare_experimental_responses_beta():
+    headers = _build_headers(account_id="acct-123", token="tok-abc")
+    assert headers["OpenAI-Beta"] == "responses=experimental"
+    assert headers["Authorization"] == "Bearer tok-abc"
+    assert headers["chatgpt-account-id"] == "acct-123"
+    assert headers["accept"] == "text/event-stream"
+
+
+def test_named_function_tool_choice_is_converted_for_responses():
+    assert _convert_tool_choice({"type": "function", "function": {"name": "emit_worker_table"}}) == {
+        "type": "function",
+        "name": "emit_worker_table",
+    }
+
+
+def test_non_function_tool_choices_pass_through():
+    assert _convert_tool_choice("auto") == "auto"
+    choice = {"type": "allowed_tools", "tools": [{"type": "function", "name": "x"}]}
+    assert _convert_tool_choice(choice) is choice
+
+
+def test_the_model_is_the_callers_to_supply():
+    """No built-in default: every id shipped here was refused by the backend, and
+    only the account knows which slugs it offers. Omitting it has to fail here
+    rather than at the first request, where the id would come back rejected."""
+    with pytest.raises(TypeError):
+        OpenAICodexProvider()  # type: ignore[call-arg]
+
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    # OAuth-based: constructed without an API key.
+    assert provider.api_key is None
+
+
+class _FakeStreamResponse:
+    """SSE response stand-in: emits complete events, then stalls forever."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+        await asyncio.sleep(10)
+
+
+@pytest.mark.asyncio
+async def test_iter_sse_per_event_idle_timeout_raises():
+    """A stream that stalls after a complete event trips the per-event idle cap
+    instead of hanging (httpx's per-read timeout would reset on the trickle)."""
+    resp = _FakeStreamResponse(['data: {"type": "ping"}', ""])
+    events = []
+    with pytest.raises(TimeoutError):
+        async for event in _iter_sse(resp, timeout=0.05):
+            events.append(event)
+    assert events == [{"type": "ping"}]
+
+
+@pytest.mark.asyncio
+async def test_consume_sse_error_event_keeps_the_structured_code_and_message():
+    """The code is the retry signal: without it, an overloaded backend looks
+    like an unclassifiable error instead of a retryable one."""
+    event = {
+        "type": "error",
+        "code": "server_is_overloaded",
+        "message": "Our servers are currently overloaded. Please try again later.",
+    }
+    resp = _FakeStreamResponse([f"data: {json.dumps(event)}", ""])
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await _consume_sse(resp, timeout=1.0)
+
+    assert "server_is_overloaded" in str(exc_info.value)
+    assert "Our servers are currently overloaded. Please try again later." in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_consume_sse_response_failed_event_keeps_the_nested_error():
+    """response.failed nests the same error shape under "response" instead of
+    at the event's top level."""
+    event = {
+        "type": "response.failed",
+        "response": {
+            "status": "failed",
+            "error": {
+                "code": "server_is_overloaded",
+                "message": "Our servers are currently overloaded.",
+            },
+        },
+    }
+    resp = _FakeStreamResponse([f"data: {json.dumps(event)}", ""])
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await _consume_sse(resp, timeout=1.0)
+
+    assert "server_is_overloaded" in str(exc_info.value)
+    assert "Our servers are currently overloaded." in str(exc_info.value)
+
+
+def test_consume_sse_error_classifies_as_retryable_server_error():
+    """Closes the loop: the RuntimeError raised for a codex error event must
+    still land classify_error in the retryable "server" bucket, not unknown."""
+    event = {
+        "type": "error",
+        "code": "server_is_overloaded",
+        "message": "Our servers are currently overloaded.",
+    }
+    resp = _FakeStreamResponse([f"data: {json.dumps(event)}", ""])
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(_consume_sse(resp, timeout=1.0))
+    classification = OpenAICodexProvider.classify_error(exc_info.value)
+
+    assert classification.category == "server"
+    assert classification.retryable is True
+    assert classification.should_fallback is True
+
+
+def test_http_404_classifies_as_model_unavailable_via_the_live_status():
+    """The non-200 branch raises ProviderHTTPError so classify_error reads the
+    real status instead of guessing from the rendered text -- a plain 404 body
+    carrying none of the model-not-found phrases must still bucket correctly."""
+    exc = ProviderHTTPError(404, _friendly_error(404, "Resource not found"))
+
+    classification = OpenAICodexProvider.classify_error(exc)
+
+    assert classification.category == "model_unavailable"
+    assert classification.should_fallback is True
+
+
+def test_chat_classifies_a_wire_404_from_the_live_status(monkeypatch):
+    """Pins the raise site itself, not just the exception class: a non-200 off
+    the wire must reach ``error_classification`` still carrying its status.
+    A plain RuntimeError here degrades the same input to ``unknown``."""
+    monkeypatch.setattr("raven.providers.chatgpt_token.access_token_and_account", lambda: ("tok", "acct"))
+
+    class _Resp:
+        status_code = 404
+
+        async def aread(self):
+            return b"Resource not found"
+
+    class _StreamCM:
+        async def __aenter__(self):
+            return _Resp()
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return _StreamCM()
+
+    monkeypatch.setattr("raven.providers.openai_codex_provider.httpx.AsyncClient", _Client)
+    provider = OpenAICodexProvider(default_model="gpt-5")
+
+    resp = asyncio.run(provider.chat(messages=[{"role": "user", "content": "hi"}], model="gpt-5"))
+
+    assert resp.finish_reason == "error"
+    assert resp.error_classification is not None
+    assert resp.error_classification.category == "model_unavailable"
+    assert resp.error_classification.should_fallback is True
+    assert "404" in (resp.content or "")
+
+
+def _stream_codex_events(monkeypatch, events: list[dict]) -> None:
+    """Serve ``events`` as the account's SSE stream, credential stubbed out."""
+    monkeypatch.setattr("raven.providers.chatgpt_token.access_token_and_account", lambda: ("tok", "acct"))
+    lines: list[str] = []
+    for event in events:
+        lines += [f"data: {json.dumps(event)}", ""]
+
+    class _Resp:
+        status_code = 200
+
+        async def aiter_lines(self):
+            for line in lines:
+                yield line
+
+    class _StreamCM:
+        async def __aenter__(self):
+            return _Resp()
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return _StreamCM()
+
+    monkeypatch.setattr("raven.providers.openai_codex_provider.httpx.AsyncClient", _Client)
+
+
+_COMPLETED_USAGE = {
+    "input_tokens": 1200,
+    "input_tokens_details": {"cached_tokens": 1024},
+    "output_tokens": 9,
+    "output_tokens_details": {"reasoning_tokens": 4},
+    "total_tokens": 1209,
+}
+
+
+def test_chat_reports_the_usage_the_stream_ends_with(monkeypatch):
+    """The account sends its counters on ``response.completed``. Dropped, every
+    Codex call was recorded as zero tokens, and the usage section showed none."""
+    _stream_codex_events(
+        monkeypatch,
+        [
+            {"type": "response.created", "response": {"status": "in_progress", "usage": None}},
+            {"type": "response.output_text.delta", "delta": "391"},
+            {"type": "response.completed", "response": {"status": "completed", "usage": _COMPLETED_USAGE}},
+        ],
+    )
+
+    resp = asyncio.run(
+        OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol").chat([{"role": "user", "content": "17*23"}])
+    )
+
+    assert (resp.content, resp.finish_reason) == ("391", "stop")
+    assert resp.usage["prompt_tokens"] == 1200
+    assert resp.usage["completion_tokens"] == 9
+    assert resp.usage["total_tokens"] == 1209
+    assert resp.usage["cache_read_input_tokens"] == 1024
+    assert resp.usage["reasoning_tokens"] == 4
+
+
+def test_a_failed_stream_still_reports_what_it_used(monkeypatch):
+    """A response that fails after generating was still paid for in tokens."""
+    _stream_codex_events(
+        monkeypatch,
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "usage": _COMPLETED_USAGE,
+                    "error": {"code": "server_error", "message": "boom"},
+                },
+            },
+        ],
+    )
+
+    resp = asyncio.run(
+        OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol").chat([{"role": "user", "content": "x"}])
+    )
+
+    assert resp.finish_reason == "error"
+    assert resp.usage["prompt_tokens"] == 1200
+
+
+_TINY_PNG_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+
+
+def test_convert_tool_output_passes_plain_string_through():
+    assert _convert_tool_output("file contents") == "file contents"
+
+
+def test_convert_tool_output_joins_text_only_blocks_without_json():
+    blocks = [{"type": "text", "text": "line one"}, {"type": "text", "text": "line two"}]
+    assert _convert_tool_output(blocks) == "line one\nline two"
+
+
+def test_convert_tool_output_emits_responses_array_when_an_image_is_present():
+    blocks = [
+        {"type": "text", "text": "screenshot of the dashboard"},
+        {"type": "image_url", "image_url": {"url": _TINY_PNG_URI}},
+    ]
+    assert _convert_tool_output(blocks) == [
+        {"type": "input_text", "text": "screenshot of the dashboard"},
+        {"type": "input_image", "image_url": _TINY_PNG_URI, "detail": "auto"},
+    ]
+
+
+def test_convert_tool_output_never_serializes_base64_as_prose():
+    """Regression: the old fallback json.dumps'd the block list, so the model got
+    the image's base64 payload as text instead of a picture -- silently."""
+    blocks = [{"type": "image_url", "image_url": {"url": _TINY_PNG_URI}}]
+    out = _convert_tool_output(blocks)
+
+    assert isinstance(out, list)
+    assert not any("base64" in part.get("text", "") for part in out)
+    assert out == [{"type": "input_image", "image_url": _TINY_PNG_URI, "detail": "auto"}]
+
+
+def test_convert_tool_output_keeps_unknown_blocks_reaching_the_model():
+    blocks = [{"type": "citation", "source": "docs"}]
+    assert _convert_tool_output(blocks) == '{"type": "citation", "source": "docs"}'
+
+
+def test_convert_messages_wires_tool_output_into_function_call_output():
+    _, items = _convert_messages(
+        [
+            {
+                "role": "tool",
+                "tool_call_id": "call_7|fc_7",
+                "content": [
+                    {"type": "text", "text": "here it is"},
+                    {"type": "image_url", "image_url": {"url": _TINY_PNG_URI}},
+                ],
+            }
+        ]
+    )
+
+    assert len(items) == 1
+    assert items[0]["type"] == "function_call_output"
+    assert items[0]["call_id"] == "call_7"
+    assert items[0]["output"][1]["type"] == "input_image"
+
+
+def _capture_body(monkeypatch) -> list[dict]:
+    """Run ``chat`` without a network call or a credential, keeping the body.
+
+    The budgets this stand-in does not read arrive as ``**kwargs`` on purpose.
+    ``chat`` reports a failed call as an ``LLMResponse``, so a stand-in that
+    refuses an argument the real ``_request_codex`` grew fails here as an empty
+    ``bodies`` -- which reads as "no request was issued" rather than as the
+    signature mismatch it is.
+    """
+    bodies: list[dict] = []
+
+    async def fake_request(url, headers, body, **kwargs):
+        bodies.append(body)
+
+        return "", [], "stop"
+
+    monkeypatch.setattr("raven.providers.openai_codex_provider._request_codex", fake_request)
+    monkeypatch.setattr(
+        "raven.providers.chatgpt_token.access_token_and_account",
+        lambda: ("token", "acct"),
+    )
+
+    return bodies
+
+
+async def test_named_tool_choice_reaches_the_codex_request_in_responses_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bodies = _capture_body(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+
+    await provider.chat(
+        [{"role": "user", "content": "build the worker table"}],
+        tool_choice={"type": "function", "function": {"name": "emit_worker_table"}},
+    )
+
+    assert bodies[0]["tool_choice"] == {"type": "function", "name": "emit_worker_table"}
+
+
+async def test_the_cache_key_is_stable_while_the_conversation_grows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keyed on the transcript, it changed every turn -- so requests sharing a
+    cached prefix never landed on the same cache, which is the only thing the key
+    is for."""
+    bodies = _capture_body(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+
+    await provider.chat([{"role": "system", "content": "you are raven"}, {"role": "user", "content": "one"}])
+    await provider.chat(
+        [
+            {"role": "system", "content": "you are raven"},
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": "two"},
+        ]
+    )
+
+    assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
+
+
+async def test_a_different_system_prompt_is_a_different_cache_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    bodies = _capture_body(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+
+    await provider.chat([{"role": "system", "content": "you are raven"}, {"role": "user", "content": "x"}])
+    await provider.chat([{"role": "system", "content": "you are something else"}, {"role": "user", "content": "x"}])
+
+    assert bodies[0]["prompt_cache_key"] != bodies[1]["prompt_cache_key"]
+
+
+async def test_no_instructions_means_no_cache_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One key shared by requests that share no prefix is worse than none."""
+    bodies = _capture_body(monkeypatch)
+
+    await OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol").chat([{"role": "user", "content": "x"}])
+
+    assert "prompt_cache_key" not in bodies[0]
+
+
+def test_litellm_still_filters_out_the_cache_key() -> None:
+    """The one cost of migrating that a test can see.
+
+    LiteLLM's Responses transformation filters the body through an allow-list,
+    and ``prompt_cache_key`` is not on it -- so a migration would keep every test
+    green while dropping the field that groups requests for a cache hit.
+    """
+    import inspect
+
+    from litellm.llms.chatgpt.responses.transformation import ChatGPTResponsesAPIConfig
+
+    source = inspect.getsource(ChatGPTResponsesAPIConfig.transform_responses_api_request)
+
+    assert '"prompt_cache_key"' not in source, (
+        "LiteLLM now preserves prompt_cache_key: the measured cost of routing codex "
+        "through LiteLLMProvider is gone, so re-read this provider's docstring and decide "
+        "whether it still has a reason to exist."
+    )
+
+
+def test_chat_error_content_renders_the_canonical_shape(monkeypatch):
+    """Codex's swallowed error must carry the canonical
+    ``Error calling LLM (<category>@<provider>)`` content the CLI renderer
+    parses, not a raw ``Error calling Codex`` string that renders as a fake
+    agent reply with exit 0."""
+    from raven.providers.base import parse_llm_error
+
+    monkeypatch.setattr("raven.providers.chatgpt_token.access_token_and_account", lambda: ("tok", "acct"))
+
+    class _Resp:
+        status_code = 401
+
+        async def aread(self):
+            return b"Unauthorized"
+
+    class _StreamCM:
+        async def __aenter__(self):
+            return _Resp()
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return _StreamCM()
+
+    monkeypatch.setattr("raven.providers.openai_codex_provider.httpx.AsyncClient", _Client)
+    provider = OpenAICodexProvider(default_model="gpt-5")
+
+    resp = asyncio.run(provider.chat(messages=[{"role": "user", "content": "hi"}], model="gpt-5"))
+
+    assert resp.finish_reason == "error"
+    parsed = parse_llm_error(resp.content)
+    assert parsed is not None, resp.content
+    category, provider_name, _detail = parsed
+    assert category == "auth"
+    assert provider_name == "openai_codex"
+
+
+@pytest.mark.asyncio
+async def test_arguments_that_needed_repair_are_reported_as_such():
+    """The Responses stream hands over the arguments as text, and a cut turn
+    ends that text mid-blob. Parsing it into `{"raw": ...}` on failure kept the
+    call dispatchable while telling nothing about why it was malformed: the
+    model then reads a schema complaint about a field it never sent.
+
+    Repaired and marked instead, which is what the other transports do -- the
+    registry refuses a marked call before validation, so the repaired arguments
+    are never acted on.
+    """
+
+    class _EndingStream:
+        """Unlike `_FakeStreamResponse`, ends rather than stalling -- this case
+        needs the consumer to return, not to hit its idle timeout."""
+
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = lines
+
+        async def aiter_lines(self):
+            for line in self._lines:
+                yield line
+
+    def stream(arguments: str) -> "_EndingStream":
+        done = {
+            "type": "response.output_item.done",
+            "item": {"type": "function_call", "call_id": "c1", "name": "write_file", "arguments": arguments},
+        }
+        completed = {"type": "response.completed", "response": {"status": "completed"}}
+        return _EndingStream([f"data: {json.dumps(done)}", "", f"data: {json.dumps(completed)}", ""])
+
+    _, whole, _ = await _consume_sse(stream('{"path": "a.py", "content": "done"}'), timeout=1.0)
+    assert whole[0].run_meta is None
+
+    _, cut, _ = await _consume_sse(stream('{"path": "a.py", "content": "import ran'), timeout=1.0)
+    assert cut[0].run_meta is not None
+    assert cut[0].run_meta.arguments_repaired is True
+    assert cut[0].arguments["content"] == "import ran", "repaired, not stuffed into a raw blob"
+
+
+@pytest.mark.asyncio
+async def test_the_codex_sse_watchdog_runs_on_the_stream_idle_budget_not_the_call_budget(monkeypatch):
+    """`streamIdleTimeout` is what a silent stream is given up after; the call
+    budget is what the whole request may take. This adapter fed the call budget
+    to its per-line watchdog, so with llmCallTimeout 600 and streamIdleTimeout
+    180 a silent Codex stream still waited 600 s and the setting did nothing.
+
+    Three budgets reach the request now, so each is asserted by value rather
+    than by the call not raising: the call budget arrives as per-phase httpx
+    caps and is carried by the read phase, the watchdog gets the idle budget,
+    and the wait for the first event gets the first-byte bound. ``first_byte``
+    defaults to None here so that chat dropping it fails rather than reading as
+    the adapter's own default."""
+    from raven.contracts.llm_provider import GenerationSettings, LLMResponse  # noqa: F401
+    from raven.providers import openai_codex_provider as mod
+
+    seen: list[dict] = []
+
+    async def fake_request(url, headers, body, *, timeout, idle_timeout=None, first_byte=None, **kwargs):
+        seen.append({"timeout": timeout, "idle_timeout": idle_timeout, "first_byte": first_byte})
+        return "ok", [], "stop"
+
+    monkeypatch.setattr(mod, "_request_codex", fake_request)
+    monkeypatch.setattr("raven.providers.chatgpt_token.access_token_and_account", lambda: ("tok", "acct"))
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5")
+    provider.generation = GenerationSettings(timeout=600, stream_idle_timeout=7)
+
+    await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert seen, "chat reports a failed call as a response, so an empty list means no request went out"
+    assert seen[0]["idle_timeout"] == 7
+    assert seen[0]["timeout"].read == 600
+    assert seen[0]["first_byte"] == 120
+
+
+def test_a_replayed_assistant_message_carries_its_annotations() -> None:
+    """`annotations` is required on a `ResponseOutputTextParam`.
+
+    It is the reply's own field, not a request one, so an assistant message
+    being replayed has none to carry -- and the empty list is what says so.
+
+    Every request that carries earlier non-empty assistant text has this shape,
+    which is more than the case that found it: the second Iteration of a Turn
+    whose first one said something before calling a tool, and equally the first
+    Iteration of every Turn after the first in a conversation. A post-tool
+    Iteration is only affected when that assistant response included text; the
+    fixture below has no tool result in it at all.
+
+    Without the field the gateway refuses the request:
+
+        HTTP 400: 3 validation errors for ValidatorIterator
+        0.ResponseOutputTextParam.annotations
+          Field required [type=missing, input_value={'type': 'output_text', …
+
+    Measured on a live `raven serve` against a local vLLM. The loop spends its
+    three retries on it and then hands the reader the validation error as the
+    answer.
+    """
+    from raven.providers.openai_codex_provider import _convert_messages
+
+    _system, items = _convert_messages(
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "let me look"},
+        ]
+    )
+
+    said = next(i for i in items if i.get("role") == "assistant")
+    part = said["content"][0]
+    assert part["type"] == "output_text"
+    assert part["annotations"] == []
+
+
+def test_every_replayed_assistant_message_carries_them_not_only_the_first() -> None:
+    """The trigger is the shape, not the position.
+
+    A conversation with several assistant messages replays all of them, and one
+    of them missing the field is one request refused -- so the property has to
+    hold per message, not for the fixture's only one. An assistant message with
+    no text produces no `output_text` part at all and is not a case.
+    """
+    from raven.providers.openai_codex_provider import _convert_messages
+
+    _system, items = _convert_messages(
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "first"},
+            {"role": "user", "content": "again"},
+            {"role": "assistant", "content": "second"},
+            {"role": "assistant", "content": "", "tool_calls": []},
+        ]
+    )
+
+    parts = [c for i in items if i.get("role") == "assistant" for c in i.get("content", [])]
+    assert [p["text"] for p in parts] == ["first", "second"]
+    assert all(p["annotations"] == [] for p in parts)
+
+
+@pytest.fixture
+def impostor(tmp_path, monkeypatch):
+    """An HTTPS endpoint whose certificate no trust store vouches for.
+
+    It answers like Codex, so a client that carried on without verifying would
+    get an ordinary reply. What it keeps is every Authorization header that
+    reached it.
+    """
+    received: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append(self.headers.get("Authorization", ""))
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            reply = (
+                b'data: {"type": "response.output_text.delta", "delta": "hello"}\n\n'
+                b'data: {"type": "response.completed", "response": {"status": "completed"}}\n\n'
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args):
+            pass
+
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    with https_endpoint(private_ca(tmp_path / "pki").server, Handler) as origin:
+        yield f"{origin}/backend-api/codex/responses", received
+
+
+async def test_a_certificate_that_fails_verification_ends_the_call_before_the_token_leaves(
+    impostor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed verification is the answer, not a reason to try again without it.
+
+    Reconnecting with verification off hands the bearer token, and the whole
+    conversation with it, to whoever presented the certificate.
+    """
+    url, received = impostor
+    monkeypatch.setattr("raven.providers.openai_codex_provider.DEFAULT_CODEX_URL", url)
+    monkeypatch.setattr("raven.providers.chatgpt_token.access_token_and_account", lambda: ("tok-secret", "acct"))
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5")
+
+    response = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert received == []
+    assert response.finish_reason == "error"

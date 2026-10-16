@@ -1,0 +1,97 @@
+"""The four harness strategy roles, and the default set the loop runs on.
+
+``default_harness_modules`` is the behaviour-preserving set: Memory is this
+generation's context engine plus the window's own turn decisions, Planning
+passes messages through, Capability reports the registry's own view, and
+Action dispatches the one call the loop used to dispatch inline. Binding it
+changes nothing a turn does -- that is the point, and it is what the
+same-query comparison against the previous revision checks.
+
+Every organ reaches the roles through a callable rather than a captured
+instance: a live ``/model`` switch rebuilds the provider and the window, and
+a hot config apply rebuilds the registry, so anything read once at assembly
+would answer for the retired one.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any
+
+from raven.agent.harness.action import DefaultAction
+from raven.agent.harness.action import bind as bind_action
+from raven.agent.harness.capability import DefaultCapability
+from raven.agent.harness.memory import DefaultMemory
+from raven.agent.harness.memory import bind as bind_memory
+from raven.agent.harness.planning import DefaultPlanning
+from raven.agent.harness.planning import bind as bind_planning
+from raven.contracts.harness import HarnessModules
+
+if TYPE_CHECKING:
+    from raven.agent.tools.registry import ToolRegistry
+    from raven.contracts.context import ContextEngine
+
+
+def default_harness_modules(
+    engine: "ContextEngine",
+    registry_provider: Callable[[], "ToolRegistry"],
+    *,
+    provider: Callable[[], Any],
+    model: Callable[[], str],
+    context_window_tokens: Callable[[], int],
+    system_prompt: Callable[[list[Any] | None], str],
+    compaction: Callable[[], Any],
+    output_ceiling: Callable[[str | None], int],
+    team_state: Callable[[str], str] | None = None,
+) -> HarnessModules:
+    """Assemble the default four around this generation's own organs."""
+    memory = DefaultMemory(
+        engine,
+        provider=provider,
+        model=model,
+        context_window_tokens=context_window_tokens,
+        tool_definitions=lambda: registry_provider().get_definitions(),
+        system_prompt=system_prompt,
+        compaction=compaction,
+        output_ceiling=output_ceiling,
+        team_state=team_state,
+    )
+    return HarnessModules(
+        memory=bind_memory(memory),
+        planning=bind_planning(DefaultPlanning()),
+        capability=DefaultCapability(registry_provider),
+        action=bind_action(DefaultAction()),
+    )
+
+
+_BOUND: ContextVar["HarnessModules | None"] = ContextVar("raven_harness", default=None)
+
+
+@contextmanager
+def bind_harness(modules: HarnessModules):
+    """The modules a turn runs on, for the seats that ask them from inside the
+    hook chain. Turn-scoped like the model binding: a swap that lands mid-turn
+    is not visible to the turn that already started."""
+    token = _BOUND.set(modules)
+    try:
+        yield modules
+    finally:
+        _BOUND.reset(token)
+
+
+def current_harness() -> "HarnessModules | None":
+    return _BOUND.get()
+
+
+__all__ = [
+    "bind_harness",
+    "current_harness",
+    "DefaultAction",
+    "DefaultCapability",
+    "DefaultMemory",
+    "DefaultPlanning",
+    "HarnessModules",
+    "default_harness_modules",
+]

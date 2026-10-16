@@ -1,0 +1,267 @@
+# Third-Party Notices
+
+Raven is licensed under the Apache License 2.0. It incorporates code from the
+projects below (MIT unless noted). Their copyright notices and license texts are
+retained in `LICENSES/`.
+
+## nanobot (base agent runtime)
+- Source: https://github.com/HKUDS/nanobot
+- Copyright (c) 2025 nanobot contributors
+- License: MIT — see `LICENSES/MIT-nanobot.txt`
+- Scope: forked at v0.1.5.post3; modified throughout `raven/`
+  (agent/, bus/, channels/, cli/, config/, cron/, providers/, session/,
+   skills/, templates/, utils/).
+
+## hermes-agent (TUI layer)
+- Source: https://github.com/NousResearch/hermes-agent
+- Copyright (c) 2025 Nous Research
+- License: MIT — see `LICENSES/MIT-hermes-agent.txt`
+- Vendored at commit: `dd0923bb89ed2dd56f82cb63656a1323f6f42e6f` (2026-05-12)
+- Scope: full `ui-tui/` import (169 files / ~31.6k LOC TypeScript src
+  + ~26.3k LOC vendored `@hermes/ink`). Modifications: branding replaced
+  with minimal Raven component, gateway stubbed (no real IPC; deferred
+  to `tui-ipc-bridge` L2), 36+ env vars renamed `HERMES_*` → `RAVEN_*`,
+  literal Hermes/Nous brand strings replaced throughout `ui-tui/src/`,
+  SPDX/Copyright headers added to every ≥ 50 LOC source file.
+
+## ink (vendored via `@hermes/ink`)
+- Upstream source: https://github.com/vadimdemedes/ink
+- Copyright (c) Vadym Demedes, Sindre Sorhus, and ink contributors
+- License: MIT — see `LICENSES/MIT-ink.txt`
+- Scope: hermes-agent ships its own fork of community ink at
+  `ui-tui/packages/hermes-ink/` (~26.3k LOC). Raven inherits this
+  vendor verbatim (package name `@hermes/ink` preserved for attribution).
+  Triple attribution chain (ink contributors → Nous Research hermes-ink
+  → EverMind modifications) is encoded in the 5-line SPDX header of
+  every substantial file under `ui-tui/packages/hermes-ink/src/`.
+  The fork policy (hard fork, no upstream sync, fixes land in-tree) lives
+  in `ui-tui/packages/hermes-ink/README.md`.
+
+## RAGFlow (retrieval engine)
+- Upstream source: https://github.com/infiniflow/ragflow
+- Copyright (c) 2025 InfiniFlow and RAGFlow contributors
+- License: Apache-2.0
+- Scope: `raven/knowledge/_naive_chunker.py` is a port of RAGFlow's
+  `naive_merge_docx` and the delimiter helpers around it (`rag/nlp/__init__.py`,
+  `rag/nlp/delim.py`, `common/token_utils.py`): the delimiter field syntax, the
+  build-then-merge arrangement, the rule that a table or a figure stands as its
+  own chunk, and the tokenizer the sizes are counted with.
+  `raven/knowledge/parser/_tables.py` carries `__compose_table_content` and the
+  cell taxonomy from `deepdoc.parser.docx_parser`, and composes a grid as an
+  HTML table the way `TableStructureRecognizer.construct_table` does.
+  `raven/knowledge/parser/excel_parser.py` follows `deepdoc.parser.excel_parser`
+  in shape: a row labelled by its header is the unit, the sheet name travels
+  with a row when it names something, and the same file renders whole as HTML
+  tables or as markdown. `raven/knowledge/_vision.py` carries a port of the
+  figure-describing prompt (`rag/prompts/vision_llm_figure_describe_prompt.md`
+  and its with-context variant), and `raven/knowledge/parser/image_parser.py`
+  follows `deepdoc.parser.figure_parser.VisionFigureParser` in what it asks a
+  vision model for and in carrying the prose around a figure into the call.
+  `raven/knowledge/parser/ppt_parser.py` follows
+  `deepdoc.parser.ppt_parser.RAGFlowPptParser`: shapes read in the order they
+  sit on the slide rather than the order the file lists them, bulleted
+  paragraphs marked by their indent, group shapes walked through, and one
+  string per slide. `raven/knowledge/parser/deepdoc/` is a port of RAGFlow's
+  `deepdoc.vision` package -- the preparation operators and the detector
+  postprocessing (`operators.py`, `postprocess.py`), the ONNX wrapper and its
+  box sorting and overlap arithmetic (`recognizer.py`), the layout classifier
+  and its garbage filter (`layout_recognizer.py`), the text detector and
+  recognizer (`ocr.py`), and the table-structure model with the row, column and
+  span reconstruction around it (`table_structure_recognizer.py`). The parser
+  package's layout follows `deepdoc.parser` the same way; each module names its
+  origin in its own docstring. `ui-web/src/assets/file-icon/` is eighteen of
+  RAGFlow's own file-format icons (`web/src/assets/svg/file-icon/`): a page
+  outline with the format's letters on a coloured band. The drawings are
+  byte-for-byte theirs; each file gained the one trailing newline this repo's
+  hooks require, and nothing else. `raven/knowledge/_crops.py` follows
+  `RAGFlowPdfParser.crop` in what it produces: one image a chunk, with the
+  regions that chunk covers cut out of the rendered pages and stacked top to
+  bottom. The chunk reader takes its shape from the same product: the file
+  drawn as a column of page images (`raven/rpc/knowledge_pages.py`) with the
+  region a chunk was cut from washed over in colour, beside the list of what
+  the index holds.
+- Modifications: rewritten rather than vendored -- it carries no RAGFlow
+  import, is written against this package's Section and Chunk shapes, keeps the
+  positional metadata RAGFlow discards, and answers a tokenizer failure with an
+  estimate rather than with zero. The spreadsheet parser reads the formats with
+  the standard library and LibreOffice instead of openpyxl and pandas, which
+  this install does not carry, and renders every sheet where RAGFlow's markdown
+  renders the first. The figure path drops the OCR ladder RAGFlow puts in front
+  of the vision model: a figure is a picture, and reading the words printed on
+  one instead of describing it is the wrong answer however cheap. The two
+  prompts are merged into one template whose context sections are omitted when
+  there is no context, rather than rendered empty. The vision package drops the
+  remote-inference client, the Ascend NPU variant and the CUDA branch that
+  pip-installs torch at import to ask whether a GPU exists; it holds one session
+  per model for the process rather than one per device behind a semaphore, runs
+  on the CPU unless an operator opts in, retries a failed inference three times
+  rather than a hundred thousand, and carries the label order the published
+  weights actually answer with -- RAGFlow's own list is for an older export and
+  disagrees on every index. `deepdoc/_pipeline.py` arranges the three models the
+  way `deepdoc.parser.pdf_parser.RAGFlowPdfParser` does, with one difference:
+  where RAGFlow detects text boxes on every page, this uses the file's own text
+  layer wherever there is one and runs the detector and recognizer only on the
+  pages that have nothing to read. The crops differ in two ways as well. RAGFlow
+  writes each region's coordinates into the chunk's own text as `@@...##` markers
+  and parses them back out with a regex, because its chunk is a bare string with
+  nowhere else to keep them; here they are already structured in the parser's
+  `elements` spans, so the markers would only put text nobody wrote into the
+  thing being embedded. And RAGFlow renders every page of a document up front
+  and holds them while it is processed, where this visits the pages once each
+  and releases each before the next, so the peak is one page however long the
+  document. Two things about the table HTML differ as well. Every cell's text
+  and every caption is escaped, where upstream interpolates them raw -- the text
+  comes off a page, and the string is indexed, handed to a model and rendered in
+  a panel, so a cell holding a `<` otherwise produces markup that is no longer a
+  table. And the span attributes are quoted and written only where there is a
+  span, where upstream emits `<td  >` for every ordinary cell. The Word parser
+  reaches the same HTML through `_tables.html_table` rather than through the
+  vision stack, and states its merges as `colspan` and `rowspan`: the flat form
+  it used to produce had to repeat a straddling cell across the columns it
+  covered, because there was nowhere to record a span. Of RAGFlow's forty-one
+  file icons only the nineteen whose formats a parser here accepts were taken:
+  an icon for a format nothing can ingest is a drawing nobody can ever see, and
+  the handful this tree takes that RAGFlow draws no icon for fall back to a
+  page carrying their own suffix. The slide parser reads the
+  OOXML package with the standard library instead of python-pptx, which this
+  package does not carry, and reads slide order through the presentation's own
+  relationships -- python-pptx resolves that, and the part names do not. Its
+  sections are marked atomic, so one slide is one chunk; RAGFlow returns the
+  slides as strings and leaves the merging to its caller.
+
+## Infinity (rag tokenizer)
+- Upstream source: https://github.com/infiniflow/infinity
+- Copyright (c) 2025 InfiniFlow and Infinity contributors
+- License: Apache-2.0
+- Scope: `raven/core/tokenizer.py` is a port of `infinity/rag_tokenizer.py`
+  from the Infinity python SDK -- the dictionary trie, the forward and backward
+  maximum-matching passes, the scored resolution of ambiguous spans, and the
+  latin path's stemming and lemmatisation. It is the tokenizer RAGFlow indexes
+  Chinese with.
+- Modifications: ported rather than depended on -- the package it ships in is a
+  vector database's client, and a knowledge base that segments Chinese should
+  not need a second vector store installed. The class is renamed `Tokenizer`,
+  the dictionary is resolved under `raven/core/res/` and a missing one raises
+  with the command that fetches it rather than calling `exit(1)`, nltk reads
+  the corpora fetched beside it rather than a machine-wide path, the CLI demo
+  is dropped, and the full-width punctuation class is written as escapes for
+  the source-language gate.
+
+## Infinity resource files (word dictionary)
+- Upstream source: https://github.com/infiniflow/resource
+- Copyright (c) 2023 InfiniFlow
+- License: MIT
+- Scope: `rag/huqie.txt`, the word-and-frequency dictionary the tokenizer
+  segments against. Not vendored: it is 8 MB, and `scripts/fetch_resources.py`
+  downloads it into `raven/core/res/` at install time.
+- Modifications: none. The file is used as published; the trie beside it is
+  built locally because the published one is serialised against a different
+  libdatrie and does not load.
+
+## deepdoc models (document vision)
+- Upstream source: https://huggingface.co/InfiniFlow/deepdoc
+- Copyright (c) 2025 InfiniFlow
+- License: Apache-2.0 for the repository. The weights are not all under it --
+  see the per-file table below, which is what each file's own embedded
+  metadata states rather than what the repository does.
+- Scope: the ONNX weights the PDF parser runs -- text detection (`det.onnx`),
+  text recognition (`rec.onnx`) with its character set (`ocr.res`), page layout
+  (`layout.onnx`) and table structure (`tsr.onnx`).
+- **Not published by this project, but baked into the default container.**
+  Two artifacts, and they differ:
+
+  The wheel carries no weight. They are gitignored (`.gitignore`,
+  `raven/knowledge/res/`), the wheel's include list names no `.onnx` and no
+  `res/`, and `python -m raven.resources` fetches them from Hugging Face into
+  an already-installed `raven/knowledge/res/` when an operator runs
+  `make fetch-resources`. An install that skips that step reads PDFs
+  geometrically and never loads them.
+
+  The Docker image does. `Dockerfile` defaults `RAVEN_RESOURCES=1` and runs
+  that same fetch at build time, so the image `docker/docker-compose.yml`
+  builds -- the one the top-level README's install instructions produce --
+  contains all four, `layout.onnx` among them. The default is deliberate and is
+  explained where it is set: a container that first reached Hugging Face when
+  somebody uploaded a PDF would fail in a deployment with no egress, long after
+  the build that could have said so.
+
+  No registry push exists in `.github/workflows/`, so this project publishes no
+  such image; the compose file builds one on the operator's own machine, which
+  is their own fetch happening inside a container rather than beside one.
+  Pushing that image to a registry, or shipping an appliance built from it, is
+  redistribution -- and that is the moment `layout.onnx`'s licence field stops
+  being a footnote. `RAVEN_RESOURCES=0` builds an image without any of them;
+  what it costs is PDF layout and Chinese segmentation, both of which report
+  their own absence.
+
+  What each file says about itself, read out of its ONNX metadata:
+
+  | file | author | license, as stamped | trained on |
+  |---|---|---|---|
+  | `layout.onnx` | Ultralytics | **AGPL-3.0** | YOLOv10m-doclayout, a mixed document-layout set |
+  | `tsr.onnx` | Ultralytics | Apache-2.0 | PubTables-1M |
+  | `det.onnx` | -- (PaddlePaddle export) | not stamped | PaddleOCR detection |
+  | `rec.onnx` | -- (PaddlePaddle export) | not stamped | PaddleOCR recognition |
+
+  `layout.onnx` is the one that matters and its metadata is self-contradictory:
+  the licence field reads `AGPL-3.0 License` and the URL beside it points at
+  RAGFlow's own LICENSE, which is Apache-2.0. AGPL-3.0 is also what Ultralytics'
+  export tooling stamps by default on anything built with it, so the field may
+  record the tool rather than the publisher's intent. This repository cannot
+  settle which was meant, and does not try to: the fact is recorded here so that
+  anyone who builds an image or an appliance with the weights already fetched
+  into it -- which is redistribution, where a plain `pip install` is not --
+  decides it with the upstream rather than discovering it.
+- Modifications: none to the weights. The three genre-specific layout variants
+  published beside them are not fetched, and neither are the `.ort`
+  serialisations, because nothing here selects between the first or reads the
+  second.
+
+## agentscope (web-service framework)
+- Upstream source: https://github.com/agentscope-ai/agentscope
+- Copyright (c) 2025 Alibaba Group and AgentScope contributors
+- License: Apache-2.0 - see `LICENSES/Apache-2.0-agentscope.txt`
+- Adopted at commit: `c84fd1a54dcc207257a8d616ff63b65470febc95` (the RavenX fork
+  of agentscope 2.0.4, itself based on upstream `4cb58320`)
+- Scope: the vendored tree it was adopted into (`ui-webui/service/agentscope/`,
+  284 files supplying the retired web service's FastAPI app, Redis storage,
+  RAG/knowledge-base managers and sub-agent DAG machinery) was removed with
+  `ui-webui` itself. What remains in this repository, and what this notice is
+  now about, is the code adopted FROM it and rewritten in place:
+  `raven/knowledge/_types.py`, `raven/knowledge/_chunker.py`,
+  and `raven/knowledge/parser/` (the `ParserBase` contract and the plain-text
+  parser; the package layout follows RAGFlow's `deepdoc.parser` and the Word
+  parser is our own). Each names its origin in its own module docstring. A
+  fourth module, `dag_projection`, carried derived code until it was removed
+  for having no importer; nothing of it remains.
+- Modifications: the three modules above are rewritten rather than vendored --
+  they take agentscope's chunking, parsing and DAG-projection logic and nothing
+  else, and they carry no agentscope import. The attribution stays because the
+  derivation does; the licence text is kept at
+  `LICENSES/Apache-2.0-agentscope.txt`. The retired tree's own PROVENANCE.md
+  went with it, and its per-subsystem trimming rationale is only of interest to
+  a tree that no longer exists.
+
+# External Runtime Tools (not vendored)
+
+The following tools are invoked by Raven via `subprocess` calls but are
+**not bundled or redistributed** as part of any Raven release artifact.
+Their attribution here is supply-chain hygiene, not a license requirement.
+Users install them separately through their respective package managers.
+
+## tui-use (TUI autotest harness Tier 1 backend)
+- Source: https://github.com/onesuper/tui-use
+- Copyright (c) 2026 Wei Hong (onesuper)
+- License: MIT
+- Install: `npm install -g tui-use` (npm package `tui-use`)
+- Scope: invoked by `tests/tui/autotest/runner.py::Harness` for PTY-driven
+  TUI subprocess control. Selected as Tier 1 backend per Day 0 spike
+  (2026-05-20) — all 5 acceptance gates S1-S5 passed. Raven does NOT
+  vendor, redistribute, or modify `tui-use` source.
+- Fallback contingency: if upstream maintenance halts (>90 days no push) or
+  a severe incompatibility surfaces, the vendor-or-pivot decision follows the
+  L0-L3 ladder recorded with the original evaluation.
+  Vendoring (path L1) Vendoring (path L1) would require moving
+  `tui-use` to `vendor/tui-use/` and adding its LICENSE to `LICENSES/` plus
+  updating this section's "Scope" line to "vendored" — same pattern as
+  `hermes-agent` above.

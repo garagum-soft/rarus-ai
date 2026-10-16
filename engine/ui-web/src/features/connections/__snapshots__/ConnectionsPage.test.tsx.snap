@@ -1,0 +1,77 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`connections island > keeps its rendered shape, list 1`] = `
+"div.hub-head
+  button.hub-head-tab
+  button.hub-head-tab
+p.hub-head-sub
+div.su-tabs
+  button.su-tab
+    span.su-tn
+  button.su-tab
+    span.su-tn
+  button.su-tab
+    span.su-tn
+div.su-grid
+  div.su-card
+    div.su-ctop
+      span.channel-mark
+        img
+      div.su-nm
+        span.su-t
+        span.su-led
+    div.su-one
+    div.su-foot-slot
+      div.su-foot.su-foot-quiet
+  div.su-card
+    div.su-ctop
+      span.channel-mark
+        img
+      div.su-nm
+        span.su-t
+      button.su-cbtn
+        svg
+          path
+    div.su-one
+    div.su-foot-slot
+      div.su-foot.su-foot-quiet
+  div.su-card
+    div.su-ctop
+      span.channel-mark.channel-mark-inset
+        svg
+          rect
+          path
+      div.su-nm
+        span.su-t
+      button.su-cbtn
+        svg
+          path
+    div.su-one
+    div.su-foot-slot
+      div.su-foot.su-foot-quiet"
+`;
+
+exports[`connections island > keeps its rendered shape, the picked channel 1`] = `
+"div.su-sheet
+  div.su-head
+    span.channel-mark
+      img
+    div.su-meta
+      h3
+      div.su-by
+        span.st.off
+  div#connDlgBody.subody
+    a.su-guide
+      span.su-guide-t
+      span.su-guide-go
+        svg
+          path
+    div.sugroup
+      div.sufields
+        div.sufield
+          label
+          input
+  div.sufoot
+    span.n
+    button.mini.key"
+`;

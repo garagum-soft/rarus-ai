@@ -1,0 +1,2838 @@
+"""`raven serve` -- locating the page it serves.
+
+Two independent pieces of the repo have to agree on one path for a released
+raven to answer with the real page: the wheel build hook copies ``ui-web/dist`` to
+``raven/ui/dist``, and ``resolve_ui_dist`` looks for it there. Nothing failed
+loudly when they disagreed -- the gateway came up, the WebSocket worked, and
+``/`` answered with the "No front end built here" placeholder, which is
+indistinguishable from a developer who simply never ran the build.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import sys
+from contextlib import suppress
+from pathlib import Path
+
+import pytest
+import typer
+
+from raven.cli import serve_commands
+
+
+@pytest.fixture(autouse=True)
+def _sigterm_restored():
+    """Put this process's SIGTERM disposition back after every test.
+
+    ``_supervise`` run in-process ignores SIGTERM on its way out, as it must in
+    the real supervisor. Left in place, the test process would ignore SIGTERM
+    for the rest of the run, and so would every child it starts afterwards:
+    an ignored disposition survives exec.
+    """
+    import signal
+
+    before = signal.getsignal(signal.SIGTERM)
+    yield
+    signal.signal(signal.SIGTERM, before)
+
+
+@pytest.fixture
+def two_candidates(tmp_path: Path, monkeypatch):
+    """A packaged copy and a source-tree copy, neither built yet."""
+    packaged = tmp_path / "wheel" / "raven" / "ui" / "dist"
+    source = tmp_path / "repo" / "ui-web"
+    monkeypatch.setattr(serve_commands, "_PACKAGED_UI_DIST", packaged)
+    monkeypatch.setattr(serve_commands, "_UI_DIR", source)
+    return packaged, source / "dist"
+
+
+def _build(dist: Path, marker: str) -> None:
+    dist.mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text(marker, encoding="utf-8")
+
+
+def test_no_page_built_is_none_rather_than_a_broken_path(two_candidates) -> None:
+    """The gateway stays up and serves its notice; it must not be handed a
+    directory that does not exist."""
+    assert serve_commands.resolve_ui_dist() is None
+
+
+def test_the_source_tree_serves_a_developer_who_built_it(two_candidates) -> None:
+    _packaged, source = two_candidates
+    _build(source, "source")
+
+    assert serve_commands.resolve_ui_dist() == source
+
+
+def test_the_packaged_copy_wins_over_a_stale_source_tree(two_candidates) -> None:
+    """An installed raven runs from the wheel. A source tree that happens to sit
+    beside it is somebody's checkout, not what this install shipped."""
+    packaged, source = two_candidates
+    _build(source, "source")
+    _build(packaged, "packaged")
+
+    assert serve_commands.resolve_ui_dist() == packaged
+
+
+def test_a_directory_without_an_index_does_not_count(two_candidates) -> None:
+    """A directory is not a built page.
+
+    Not a state `ui-web/build.py` leaves behind, as it happens -- it writes
+    index.html first and copies the assets second, and a failed marker check
+    exits before `dist/` exists at all. The reachable half-built state is the
+    opposite one (index.html present, assets missing or half-copied), and that
+    one is accepted here on purpose: the page loads and its images do not,
+    which is better than refusing to serve. The wheel gate in release.yml is
+    where the missing assets are caught."""
+    packaged, source = two_candidates
+    (packaged / "assets").mkdir(parents=True)
+    _build(source, "source")
+
+    assert serve_commands.resolve_ui_dist() == source
+
+
+def test_the_build_hook_copies_the_page_where_serve_looks_for_it() -> None:
+    """The seam itself, asserted across the two files that must agree.
+
+    Read as text rather than by importing the hook: hatchling is a build-time
+    dependency and is not installed in the test environment, and the value that
+    matters is the literal destination string either way.
+    """
+    hook = (Path(__file__).resolve().parent.parent / "hatch_build.py").read_text(encoding="utf-8")
+    destinations = re.findall(r'=\s*"(raven/ui/[^"]+)"', hook)
+
+    assert destinations == ["raven/ui/dist"], f"the hook's destination moved: {destinations}"
+
+    packaged = serve_commands._PACKAGED_UI_DIST
+    assert packaged.parts[-3:] == ("raven", "ui", "dist")
+    # And it must be inside the installed package, not next to it: the hook puts
+    # the page under `raven/`, so a resolver pointed one level out would find
+    # nothing in a wheel while still passing every test above.
+    assert packaged.parent.parent == Path(serve_commands.__file__).resolve().parent.parent
+
+
+# ---------------------------------------------------------------------------
+# `raven web` -- open the page, and attach rather than start a second engine.
+#
+# Split by layer because the layers can only be reached separately: `_attach`
+# does real HTTP against a real gateway, and `_web` owns the loop that probe
+# runs in, so a test inside a loop cannot call it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch) -> Path:
+    """An agent home of our own, so nothing here reads the developer's serve.json."""
+    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    return tmp_path / "home"
+
+
+class TestTheStateFileFollowsTheAgentHome:
+    """`raven web` finds the engine through this file, so where it lands has to
+    be the one answer the rest of raven gives. Read inline, `RAVEN_HOME` was
+    resolved a second way that disagreed with the canonical one in three cases,
+    and in each of them the state file became cwd-relative while the engine ran
+    somewhere else -- which is a second engine on the next `raven web`."""
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_a_blank_setting_is_not_a_home(self, monkeypatch, value: str) -> None:
+        # os.environ.get(name, default) hands back the empty string rather than
+        # the default, so `RAVEN_HOME=` in a shell profile put serve.json in the
+        # working directory.
+        monkeypatch.setenv("RAVEN_HOME", value)
+        assert serve_commands._state_path() == Path.home() / ".raven" / "serve.json"
+
+    def test_a_tilde_is_expanded(self, monkeypatch) -> None:
+        monkeypatch.setenv("RAVEN_HOME", "~/alt-home")
+        assert serve_commands._state_path() == Path.home() / "alt-home" / "serve.json"
+
+    def test_it_lands_beside_the_config(self, monkeypatch, tmp_path: Path) -> None:
+        """The property that matters, stated once: same home, both files."""
+        from raven.config.loader import get_config_path
+
+        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+        assert serve_commands._state_path().parent == get_config_path().parent
+
+
+@pytest.fixture
+def a_built_page(two_candidates) -> None:
+    _packaged, source = two_candidates
+    _build(source, "page")
+
+
+@pytest.fixture
+def opened(monkeypatch) -> list[str]:
+    """Every URL `web` tried to open, instead of opening one."""
+    urls: list[str] = []
+    monkeypatch.setattr(serve_commands.webbrowser, "open", lambda url: urls.append(url) or True)
+    return urls
+
+
+@pytest.fixture
+def started(monkeypatch) -> list[int]:
+    """Every in-process serve stack these commands built.
+
+    Right for `raven serve`, which IS that stack, and wrong for `raven web`: that
+    engine is the one with no ChannelManager, so a `web` that reaches for it is a
+    page whose entrances cannot start an adapter. Kept apart from the foreground
+    launch below for exactly that reason -- one shared spy would let that
+    regression through.
+    """
+    ports: list[int] = []
+    monkeypatch.setattr(serve_commands, "_run", lambda port, open_browser, dev=False: ports.append(port))
+    return ports
+
+
+@pytest.fixture
+def foregrounded(monkeypatch) -> list[int]:
+    """Every engine `web --foreground` launched as its own process."""
+    ports: list[int] = []
+    monkeypatch.setattr(serve_commands, "_run_foreground", lambda port, dev=False: ports.append(port))
+    return ports
+
+
+async def _live_gateway(home: Path, *, token: str | None = None):
+    """A real gateway on a real port, recorded the way `serve` records it."""
+    from aiohttp.test_utils import TestServer
+
+    from raven.rpc.transports.ws import WsGateway, build_app
+
+    gateway = WsGateway()
+    server = TestServer(build_app(gateway, None))
+    await server.start_server()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "serve.json").write_text(
+        json.dumps({"port": server.port, "token": token or gateway.session_token, "pid": 1}), encoding="utf-8"
+    )
+    return server
+
+
+class TestAttaching:
+    """The probe, against a gateway that is really listening."""
+
+    async def test_it_returns_an_auth_url_the_gateway_will_honour(self, home: Path) -> None:
+        """End to end rather than asserting the string: the nonce has to have been
+        minted by that process, which is the only reason attaching authenticates
+        at all."""
+        import aiohttp
+
+        server = await _live_gateway(home)
+        try:
+            url = await serve_commands._attach(*serve_commands._read_serve_state())
+
+            assert url.startswith(f"http://127.0.0.1:{server.port}/auth#")
+            nonce = url.rsplit("#", 1)[1]
+            async with aiohttp.ClientSession() as session:
+                async with session.post(server.make_url("/auth/exchange"), json={"nonce": nonce}) as exchanged:
+                    assert exchanged.status == 200, await exchanged.text()
+        finally:
+            await server.close()
+
+    async def test_a_nonce_is_good_once(self, home: Path) -> None:
+        """Which is why `web` mints a fresh one per launch instead of reusing the
+        URL it printed last time."""
+        import aiohttp
+
+        server = await _live_gateway(home)
+        try:
+            url = await serve_commands._attach(*serve_commands._read_serve_state())
+            nonce = url.rsplit("#", 1)[1]
+            async with aiohttp.ClientSession() as session:
+                async with session.post(server.make_url("/auth/exchange"), json={"nonce": nonce}):
+                    pass
+                async with session.post(server.make_url("/auth/exchange"), json={"nonce": nonce}) as again:
+                    assert again.status != 200
+        finally:
+            await server.close()
+
+    async def test_nothing_listening_is_nothing_to_attach_to(self, home: Path) -> None:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 1, "token": "t", "pid": 9}), encoding="utf-8")
+
+        assert await serve_commands._attach(*serve_commands._read_serve_state()) is None
+
+    async def test_something_else_on_that_port_is_not_our_gateway(self, home: Path) -> None:
+        """Ports get reused. Handing the token to whatever answers would be worse
+        than starting a gateway of our own."""
+        from aiohttp import web as aiohttp_web
+        from aiohttp.test_utils import TestServer
+
+        app = aiohttp_web.Application()
+
+        async def _not_us(_request):
+            return aiohttp_web.json_response({"service": "something-else"})
+
+        app.router.add_get("/health", _not_us)
+        stranger = TestServer(app)
+        await stranger.start_server()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": stranger.port, "token": "t", "pid": 1}), encoding="utf-8")
+        try:
+            assert await serve_commands._attach(*serve_commands._read_serve_state()) is None
+        finally:
+            await stranger.close()
+
+    async def test_a_gateway_of_ours_that_refuses_the_token_is_raised_not_ignored(self, home: Path) -> None:
+        """Returning None here would start a second engine beside a live one."""
+        server = await _live_gateway(home, token="not-its-token")
+        try:
+            with pytest.raises(PermissionError):
+                await serve_commands._attach(*serve_commands._read_serve_state())
+        finally:
+            await server.close()
+
+
+@pytest.fixture
+def supervised(monkeypatch) -> list[int]:
+    """Every port a supervisor was left behind on, instead of leaving one."""
+    ports: list[int] = []
+    monkeypatch.setattr(serve_commands, "_spawn_supervisor", lambda port, dev=False: ports.append(port))
+    return ports
+
+
+class TestTheCommand:
+    """The orchestration, with the probe's answer supplied."""
+
+    def test_it_opens_what_the_probe_found_and_starts_nothing(
+        self, home: Path, a_built_page, opened: list[str], started: list[int], supervised: list[int], monkeypatch
+    ) -> None:
+        """Two engines on one agent home would race over the same sessions and the
+        same store, so a second `web` attaches instead."""
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: "http://127.0.0.1:31337/auth#abc")
+
+        serve_commands._web(port=18999)
+
+        assert opened == ["http://127.0.0.1:31337/auth#abc"]
+        assert started == [] and supervised == [], "it started a second gateway instead of attaching"
+
+    def test_nothing_to_attach_to_leaves_a_resident_gateway(
+        self,
+        home: Path,
+        a_built_page,
+        opened: list[str],
+        started: list[int],
+        foregrounded: list[int],
+        supervised: list[int],
+        monkeypatch,
+    ) -> None:
+        """The page outlives the terminal that opened it, so the engine behind it
+        must too: `web` leaves a supervised gateway rather than holding the
+        terminal itself."""
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+
+        serve_commands._web(port=18999)
+
+        assert supervised == [18999]
+        assert started == [] and foregrounded == [], "it held the terminal instead of leaving a resident gateway"
+        assert opened == ["http://127.0.0.1:18999/auth#z"]
+
+    def test_foreground_holds_the_terminal_and_supervises_nothing(
+        self,
+        home: Path,
+        a_built_page,
+        opened: list[str],
+        started: list[int],
+        foregrounded: list[int],
+        supervised: list[int],
+        monkeypatch,
+    ) -> None:
+        """The point of --foreground is Ctrl-C meaning what it says, which a
+        supervisor would undo by restarting what you just stopped.
+
+        And it launches the same child the supervisor does. Building the
+        standalone stack in this process left --foreground on the one engine with
+        no ChannelManager -- the inert entrances page -- with the fix applying
+        only to the detached path, which is not the one anybody debugging uses.
+        """
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+
+        serve_commands._web(port=18999, foreground=True)
+
+        assert foregrounded == [18999]
+        assert started == [], "it built a serve stack in this process instead of launching the engine"
+        assert supervised == []
+        assert opened == [], "the engine it starts opens the browser itself"
+
+    def test_it_waits_for_a_supervisor_that_is_between_restarts(
+        self, home: Path, a_built_page, opened: list[str], supervised: list[int], monkeypatch
+    ) -> None:
+        """A live supervisor with no gateway answering yet is a restart in flight.
+        Starting a second one would leave two racing for the same port."""
+        import os
+
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "web.json").write_text(json.dumps({"pid": os.getpid(), "port": 18999}), encoding="utf-8")
+        monkeypatch.setattr(serve_commands, "looks_like_raven", lambda _pid: True)
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+
+        serve_commands._web(port=18999)
+
+        assert supervised == [], "it started a second supervisor beside a live one"
+        assert opened == ["http://127.0.0.1:18999/auth#z"]
+
+    def test_a_dead_supervisor_s_leftover_file_is_a_first_launch(
+        self, home: Path, a_built_page, opened: list[str], supervised: list[int], monkeypatch
+    ) -> None:
+        """web.json is removed on a clean exit only, so a killed supervisor leaves
+        one behind. Reading it as live would leave the page with no engine at all."""
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "web.json").write_text(json.dumps({"pid": 999999, "port": 18999}), encoding="utf-8")
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+
+        serve_commands._web(port=18999)
+
+        assert supervised == [18999]
+        assert opened == ["http://127.0.0.1:18999/auth#z"]
+
+    def test_a_gateway_that_never_comes_up_is_reported_not_opened(
+        self, home: Path, a_built_page, opened: list[str], supervised: list[int], monkeypatch
+    ) -> None:
+        """An empty tab pointed at a dead port is the worst outcome available."""
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: None)
+
+        with pytest.raises(typer.Exit) as exit_info:
+            serve_commands._web(port=18999)
+
+        assert exit_info.value.exit_code == 1
+        assert opened == []
+
+    def test_a_live_gateway_that_will_not_answer_is_not_joined_by_a_second_supervisor(
+        self, home: Path, a_built_page, opened: list[str], supervised: list[int], monkeypatch, capsys
+    ) -> None:
+        """09-20: the supervisor had exited and removed web.json while its gateway,
+        tearing down, still held the lock. The next `web` saw no supervisor and
+        started one, whose gateway could only come up on `serve` -- no channels."""
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_read_serve_pid", lambda: 4321)
+        monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: 4321)
+        # So a regression that does spawn fails here, not after the attach ceiling.
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: None)
+
+        with pytest.raises(typer.Exit) as exit_info:
+            serve_commands._web(port=18999)
+
+        assert exit_info.value.exit_code == 1
+        assert supervised == [] and opened == []
+        said = capsys.readouterr().out
+        assert "pid 4321" in said and "raven web --stop" in said
+
+    def test_a_token_mismatch_stops_rather_than_doubling_up(
+        self, home: Path, a_built_page, opened: list[str], started: list[int], supervised: list[int], monkeypatch
+    ) -> None:
+        def _refused() -> str:
+            raise PermissionError("the gateway on port 31337 refused the recorded token")
+
+        monkeypatch.setattr(serve_commands, "_attached_url", _refused)
+
+        with pytest.raises(typer.Exit) as exit_info:
+            serve_commands._web(port=18999)
+
+        assert exit_info.value.exit_code == 1
+        assert started == [] and opened == [] and supervised == []
+
+    def test_no_page_built_refuses_instead_of_opening_the_placeholder(
+        self, two_candidates, home: Path, opened: list[str], started: list[int], supervised: list[int]
+    ) -> None:
+        """`serve` is still useful with no page -- the WebSocket is the point of it
+        -- but the page is the whole point of `web`."""
+        with pytest.raises(typer.Exit) as exit_info:
+            serve_commands._web(port=18999)
+
+        assert exit_info.value.exit_code == 1
+        assert started == [] and supervised == [] and opened == []
+
+
+class _FakeProc:
+    """A gateway run that ends with ``code``, without running one."""
+
+    def __init__(self, pid: int, code: int, *, port: int | None = None, state: Path | None = None) -> None:
+        self.pid, self._code = pid, code
+        # Written the way a real gateway writes it, so the supervisor's
+        # port-learning reads a file rather than a stub.
+        if port is not None and state is not None:
+            state.parent.mkdir(parents=True, exist_ok=True)
+            state.write_text(json.dumps({"port": port, "token": "t", "pid": pid}), encoding="utf-8")
+        self._alive = port is not None
+
+    def poll(self):
+        if self._alive:
+            self._alive = False
+            return None
+        return self._code
+
+    def wait(self) -> int:
+        return self._code
+
+
+@pytest.fixture
+def instant(monkeypatch):
+    """No real waiting, so a backoff schedule is a list rather than a minute."""
+    import time
+
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
+    return slept
+
+
+class TestTheSupervisor:
+    """What brings the gateway back, and what it refuses to bring back."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_group(self, monkeypatch):
+        """The fakes here carry made-up pids; a group read off one could name a
+        real process on this machine, and the stop would signal it."""
+        monkeypatch.setattr(serve_commands, "_owned_group", lambda _proc: None)
+
+    def _run(self, monkeypatch, codes: list[int], **kw) -> list[list[str]]:
+        """Supervise a gateway whose successive runs exit with ``codes``."""
+        import subprocess
+
+        argv_seen: list[list[str]] = []
+        remaining = list(codes)
+
+        def _popen(argv, *_a, **_k):
+            argv_seen.append(list(argv))
+            code = remaining.pop(0) if remaining else 0
+            return _FakeProc(4242 + len(argv_seen), code, **kw)
+
+        monkeypatch.setattr(subprocess, "Popen", _popen)
+        return argv_seen
+
+    def test_a_clean_exit_is_a_decision_not_a_fault(self, home: Path, instant, monkeypatch) -> None:
+        """`system.upgrade` stops the gateway on purpose after spawning its
+        replacement, and so does --stop. Restarting there fights the caller."""
+        argv = self._run(monkeypatch, [0])
+
+        serve_commands._supervise(18999)
+
+        assert len(argv) == 1, "it restarted a gateway that stopped on purpose"
+
+    def test_a_crash_is_undone(self, home: Path, instant, monkeypatch) -> None:
+        argv = self._run(monkeypatch, [1, 1, 0])
+
+        serve_commands._supervise(18999)
+
+        assert len(argv) == 3
+        assert instant[:2] == [2.0, 4.0], f"backoff did not climb: {instant}"
+
+    def test_a_gateway_that_never_stays_up_is_given_up_on(self, home: Path, instant, monkeypatch) -> None:
+        """A port it cannot bind or a config it cannot load is not fixed by trying
+        again, and a process respawning forever is worse than one that said why."""
+        argv = self._run(monkeypatch, [1] * 40)
+
+        serve_commands._supervise(18999)
+
+        assert len(argv) == serve_commands._CRASH_LOOP_GIVE_UP
+
+    def test_a_run_that_worked_resets_the_backoff(self, home: Path, instant, monkeypatch) -> None:
+        """Otherwise a gateway restarted once an hour would eventually be waiting
+        the ceiling before coming back, and would hit the give-up count."""
+        import time
+
+        clock = iter(range(0, 100_000, int(serve_commands._HEALTHY_RUN_S) + 1))
+        monkeypatch.setattr(time, "monotonic", lambda: float(next(clock)))
+        argv = self._run(monkeypatch, [1] * 10)
+
+        serve_commands._supervise(18999)
+
+        assert len(argv) == 10 + 1, "a long-lived run was counted as a crash loop"
+        assert set(instant) == {1.0}, f"backoff climbed across healthy runs: {instant}"
+
+    def test_it_restarts_on_the_port_the_gateway_actually_bound(self, home: Path, instant, monkeypatch) -> None:
+        """The first launch probes forward past whatever holds 18792, and the open
+        tab is pointed at what it landed on -- not at what it asked for."""
+        argv = self._run(monkeypatch, [1, 0], port=19100, state=home / "serve.json")
+
+        serve_commands._supervise(18999)
+
+        assert argv[0][-1] == "18999"
+        assert argv[1][-1] == "19100", f"the restart aimed at the wrong port: {argv[1]}"
+
+    def test_it_records_itself_and_then_stops_claiming_to_be_running(self, home: Path, instant, monkeypatch) -> None:
+        """`--stop` needs a pid to signal, and a pid left behind after the
+        supervisor is gone would make a later `web` wait for a restart that is
+        never coming."""
+        seen: list[bool] = []
+
+        import subprocess
+
+        def _popen(argv, *_a, **_k):
+            seen.append((home / "web.json").exists())
+            return _FakeProc(4242, 0)
+
+        monkeypatch.setattr(subprocess, "Popen", _popen)
+
+        serve_commands._supervise(18999)
+
+        assert seen == [True], "it did not record itself before running the gateway"
+        assert not (home / "web.json").exists(), "it left a pid behind that nothing is listening on"
+
+    def test_a_stopped_supervisor_ends_its_gateway_before_it_stops_claiming_to_run(
+        self, home: Path, instant, monkeypatch
+    ) -> None:
+        """Removing web.json while the gateway still held the lock is what let a
+        second supervisor start beside it. The gateway ignores a repeated SIGTERM
+        once its teardown begins, so one that outlives its grace is killed."""
+        import subprocess
+
+        calls: list[tuple[str, bool]] = []
+
+        class _Stubborn:
+            pid = 4242
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                if timeout is None:
+                    raise KeyboardInterrupt  # the SIGTERM `--stop` sent the supervisor
+                calls.append(("wait", (home / "web.json").exists()))
+                if len(calls) == 2:
+                    raise subprocess.TimeoutExpired("gateway", timeout)
+                return -9
+
+            def terminate(self):
+                calls.append(("terminate", (home / "web.json").exists()))
+
+            def kill(self):
+                calls.append(("kill", (home / "web.json").exists()))
+
+        monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: _Stubborn())
+        monkeypatch.setattr(serve_commands, "_bound_port_of", lambda _proc: None)
+
+        serve_commands._supervise(18999)
+
+        assert [name for name, _ in calls] == ["terminate", "wait", "kill", "wait"], calls
+        assert all(recorded for _, recorded in calls), "web.json went before the gateway did"
+        assert not (home / "web.json").exists()
+
+    def test_a_stop_while_it_learns_the_bound_port_still_exits_cleanly(self, home: Path, instant, monkeypatch) -> None:
+        """That poll runs for up to fifteen seconds after every launch, and a
+        SIGTERM there used to escape as a traceback with the gateway left up."""
+        import subprocess
+
+        stopped: list[str] = []
+
+        class _Running:
+            pid = 4242
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                stopped.append("terminate")
+
+            def wait(self, timeout=None):
+                return 0
+
+        def _interrupted(_proc):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: _Running())
+        monkeypatch.setattr(serve_commands, "_bound_port_of", _interrupted)
+
+        serve_commands._supervise(18999)
+
+        assert stopped == ["terminate"]
+        assert not (home / "web.json").exists()
+
+    def test_a_gateway_that_already_exited_is_not_signalled(self, home: Path, instant, monkeypatch) -> None:
+        import subprocess
+
+        proc = _FakeProc(4242, 0)
+        proc.terminate = lambda: pytest.fail("signalled a gateway that had already exited")  # type: ignore[attr-defined]
+        monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: proc)
+
+        serve_commands._supervise(18999)
+
+    def test_the_gateway_is_run_through_the_interpreter_with_a_safe_path(self, monkeypatch) -> None:
+        """The supervisor outlives the working directory it was started from, and
+        `raven` on PATH may be a relative path or a shim that only resolved there.
+        `-m` then puts that working directory first on sys.path, and `-P` is what
+        keeps a source checkout there from shadowing the installed raven."""
+        import sys
+
+        argv = serve_commands._gateway_argv(18999)
+
+        assert argv[:4] == [sys.executable, "-P", "-m", "raven"]
+
+    def test_a_checkout_under_the_working_directory_cannot_shadow_the_installed_raven(self, tmp_path: Path) -> None:
+        """The flags the child is given have to keep the working directory off
+        sys.path: a page started from inside a source checkout would otherwise
+        run that checkout's raven on the installed environment, and the
+        supervisor would do it again on every restart. A decoy package stands in
+        for the checkout, and the bare interpreter first shows that it does
+        shadow -- without that, a test that only ever passes proves nothing."""
+        import os
+        import subprocess
+        import sys
+
+        (tmp_path / "raven").mkdir()
+        (tmp_path / "raven" / "__init__.py").write_text("", encoding="utf-8")
+        probe = "import raven; print(raven.__file__)"
+        env = {**os.environ, "PYTHONSAFEPATH": ""}
+        argv = serve_commands._gateway_argv(18999)
+        flags = argv[1 : argv.index("-m")]
+
+        def imported_with(*options: str) -> Path:
+            run = subprocess.run(
+                [sys.executable, *options, "-c", probe],
+                cwd=tmp_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return Path(run.stdout.strip())
+
+        assert imported_with().is_relative_to(tmp_path), "the decoy has to shadow for the second half to mean anything"
+        assert not imported_with(*flags).is_relative_to(tmp_path)
+
+    def test_the_supervisor_itself_is_started_with_the_same_safe_path(self, home: Path, monkeypatch) -> None:
+        """The supervisor is the process that keeps the working directory for as
+        long as the page is up, so the guard has to be on its own launch too."""
+        import subprocess
+        import sys
+
+        launched: list[list[str]] = []
+        monkeypatch.setattr(subprocess, "Popen", lambda argv, **_k: launched.append(list(argv)))
+
+        serve_commands._spawn_supervisor(18999)
+
+        assert launched and launched[0][:4] == [sys.executable, "-P", "-m", "raven"]
+        assert "--supervise" in launched[0]
+
+    def test_a_dev_page_is_supervised_and_brought_back_with_its_view(self, home: Path, instant, monkeypatch) -> None:
+        import subprocess
+
+        argv = self._run(monkeypatch, [1, 0])
+        serve_commands._supervise(18999, dev=True)
+        assert len(argv) == 2 and all(run[-1] == "--dev" for run in argv)
+
+        launched: list[list[str]] = []
+        monkeypatch.setattr(subprocess, "Popen", lambda argv, **_k: launched.append(list(argv)))
+        serve_commands._spawn_supervisor(18999, dev=True)
+        serve_commands._spawn_supervisor(18999)
+        assert launched[0][-1] == "--dev" and "--dev" not in launched[1]
+
+    @pytest.mark.parametrize("held", [True, False])
+    def test_the_gateway_command_carries_dev_whichever_engine_it_runs(self, monkeypatch, held: bool) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_holds_the_lock", lambda: held)
+        assert serve_commands._gateway_argv(18999, dev=True)[-1] == "--dev"
+        assert "--dev" not in serve_commands._gateway_argv(18999)
+
+    def test_it_supervises_the_engine_that_has_the_channel_adapters(self) -> None:
+        """`serve` builds no ChannelManager, so a page behind it can never start an
+        adapter: no sign-in code is ever minted and every enabled entrance reads
+        "state unknown" for good. The gateway is the process that runs them, and it
+        serves the page on its own loop, so it is what the page's supervisor runs.
+
+        The port travels as ``--page-port``: the gateway's own ``--port`` is its
+        health endpoint, and passing the tab's port there would leave the page
+        wherever config happened to put it.
+        """
+        argv = self.argv_with_lock(None, 18999)
+
+        assert argv[argv.index("raven") + 1] == "gateway"
+        assert "--page-port" in argv
+        assert argv[argv.index("--page-port") + 1] == "18999"
+        assert "serve" not in argv
+
+    def argv_with_lock(self, holder: object, port: int, monkeypatch=None) -> list[str]:
+        """The page child chosen while `holder` answers for the gateway lock."""
+        from unittest.mock import patch
+
+        with patch.object(serve_commands, "_gateway_holds_the_lock", lambda: holder is not None):
+            return serve_commands._gateway_argv(port)
+
+    def test_the_foreground_run_launches_that_same_child(self, monkeypatch, home: Path, opened: list[str]) -> None:
+        """And it keeps foreground semantics while doing it: the child's output is
+        this terminal's, so stdio is inherited rather than piped, and the browser
+        is opened once the child has bound a port and written it down."""
+        import subprocess
+
+        launched: list[dict] = []
+
+        class _Child:
+            returncode = 0
+
+            def wait(self) -> int:
+                return 0
+
+        def _fake_popen(argv, **kwargs):
+            launched.append({"argv": argv, "kwargs": kwargs})
+            return _Child()
+
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+        monkeypatch.setattr(serve_commands, "_refuse_incomplete_install", lambda: None)
+        monkeypatch.setattr(serve_commands, "_gateway_argv", lambda port, dev=False: ["engine", str(port)])
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+
+        serve_commands._run_foreground(18999)
+
+        assert [c["argv"] for c in launched] == [["engine", "18999"]]
+        # Inherited, not captured: piping it would send the engine's own output
+        # somewhere nobody is reading, which is the whole point of --foreground.
+        assert "stdout" not in launched[0]["kwargs"] and "stderr" not in launched[0]["kwargs"]
+        assert opened == ["http://127.0.0.1:18999/auth#z"]
+
+    def test_the_wait_ends_when_the_foreground_child_dies(self, home: Path, monkeypatch) -> None:
+        """The child can fail before it writes serve.json -- a lost lock race, a
+        config it cannot load, an import that fails. Watching `web.json` cannot
+        see that: nothing supervises a foreground run, so the wait sat out its
+        whole 150s ceiling with the error already on screen.
+        """
+        import time
+
+        monkeypatch.setattr(serve_commands, "_read_serve_state", lambda: None)
+
+        began = time.monotonic()
+        url = serve_commands._await_attach(timeout_s=30.0, gone=lambda: True)
+        took = time.monotonic() - began
+
+        assert url is None
+        assert took < 2.0, f"it waited {took:.1f}s on a child that was already gone"
+
+    def test_the_foreground_run_propagates_a_child_that_failed_at_once(
+        self, home: Path, monkeypatch, opened: list[str]
+    ) -> None:
+        """What the reader gets for it: the exit code, now rather than in two and
+        a half minutes, and no claim that the engine did not come up on top of
+        the child's own error."""
+        import subprocess
+        import time
+
+        class _DeadChild:
+            returncode = 3
+
+            def poll(self) -> int:
+                return 3
+
+            def wait(self) -> int:
+                return 3
+
+        said: list[str] = []
+        monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _DeadChild())
+        monkeypatch.setattr(serve_commands, "_refuse_incomplete_install", lambda: None)
+        monkeypatch.setattr(serve_commands, "_gateway_argv", lambda port, dev=False: ["engine", str(port)])
+        monkeypatch.setattr(serve_commands, "_read_serve_state", lambda: None)
+        monkeypatch.setattr(serve_commands.typer, "echo", lambda message="", **_k: said.append(str(message)))
+
+        began = time.monotonic()
+        with pytest.raises(typer.Exit) as exit_info:
+            serve_commands._run_foreground(18999)
+        took = time.monotonic() - began
+
+        assert exit_info.value.exit_code == 3
+        assert took < 2.0, f"it waited {took:.1f}s on a child that had already exited"
+        assert opened == []
+        # The child has already said why on this same terminal. Adding "the
+        # engine did not come up" over its traceback is this function guessing
+        # out loud about something it can see the answer to.
+        assert not [line for line in said if "did not come up" in line], said
+
+    def test_it_falls_back_to_serve_where_a_gateway_already_holds_the_lock(self) -> None:
+        """`gateway.page.enabled = false` is a supported way to run: channels in
+        the gateway, page separate. A second gateway cannot start there -- it
+        exits on the lock -- and a supervisor would spend its whole crash budget
+        finding that out, leaving no page at all. Standalone serve is the only
+        child that CAN run, and it is not a downgrade: the page reaches the
+        incumbent's adapters over `gateway.live_probe`, which finds it through
+        that same lock.
+        """
+        argv = self.argv_with_lock(object(), 18999)
+
+        assert argv[argv.index("raven") + 1] == "serve"
+        assert argv[argv.index("--port") + 1] == "18999"
+        assert "gateway" not in argv
+
+    def test_a_lock_it_cannot_read_is_treated_as_held(self, monkeypatch) -> None:
+        """The two mistakes are not equal. Guessing "free" when it is held opens
+        no page at all; guessing "held" when it is free opens the page on an
+        engine without channels, which is where this surface already was and is
+        one `raven gateway` away from right.
+        """
+        from raven.gateway import lock as _gateway_lock
+
+        def _explode(now: float) -> None:
+            raise OSError("lock unreadable")
+
+        monkeypatch.setattr(_gateway_lock, "read_status", _explode)
+
+        assert serve_commands._gateway_holds_the_lock() is True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX")
+class TestStopping:
+    @pytest.fixture(autouse=True)
+    def _no_real_groups(self, monkeypatch) -> None:
+        """The pids here are made up, and a real process may hold one. Left to
+        the real calls, the escalation would read that process's group and
+        SIGKILL it, or fail on it and skip the wait being measured. The
+        identity probe is nulled for the same reason: these tests are about
+        signal choreography, and argv reads are this file's other class."""
+        import os
+
+        def _no_such_process(pid: int) -> int:
+            raise ProcessLookupError(pid)
+
+        monkeypatch.setattr(os, "getpgid", _no_such_process)
+        monkeypatch.setattr(os, "killpg", lambda *_a: pytest.fail("signalled a real process group"))
+        monkeypatch.setattr(serve_commands, "looks_like_raven", lambda _pid: True)
+
+    @staticmethod
+    def _resident(home: Path) -> None:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "web.json").write_text(json.dumps({"pid": 111, "port": 18999}), encoding="utf-8")
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+
+    @staticmethod
+    def _liveness(alive_for: dict[int, int], seen: list[int] | None = None):
+        """A ``_pid_alive`` whose first answer per pid is yes and whose next
+        ``alive_for[pid]`` answers are too.
+
+        The first yes is not the wait: ``_read_web_state`` and ``_read_serve_pid``
+        both probe liveness to decide whether a recorded pid counts as running, so
+        a fake that says no from the start reports nothing to stop at all.
+        """
+
+        def _alive(pid: int) -> bool:
+            if seen is not None:
+                seen.append(pid)
+            left = alive_for.get(pid)
+            if left is None:
+                alive_for[pid] = 0
+                return True
+            if left > 0:
+                alive_for[pid] = left - 1
+                return True
+            return False
+
+        return _alive
+
+    def test_it_stops_the_supervisor_before_the_gateway(self, home: Path, monkeypatch) -> None:
+        """The other order only proves the supervisor works: it would restart the
+        gateway between the two signals."""
+        import os
+        import signal
+
+        self._resident(home)
+        signalled: list[tuple[int, int]] = []
+        monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+        # Separately from os.kill, which the liveness probe also uses: leaving that
+        # to the fake would record the probe's own signal-0 as a stop.
+        monkeypatch.setattr(serve_commands, "_pid_alive", self._liveness({}))
+
+        assert serve_commands._stop_resident() is True
+        assert signalled == [(111, signal.SIGTERM), (222, signal.SIGTERM)]
+
+    def test_it_waits_for_each_signalled_process_to_actually_be_gone(self, home: Path, monkeypatch) -> None:
+        """A signal delivered is not a process gone, and the gateway's flock
+        outlives the signal by exactly that gap. ``raven web --stop && raven web``
+        would otherwise read the lock of the process it just killed and come up on
+        ``serve``, serving the page from an engine with no ChannelManager."""
+        import os
+        import time
+
+        self._resident(home)
+        monkeypatch.setattr(os, "kill", lambda _pid, _sig: None)
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        # Each pid lingers for two polls after its signal, the way a process
+        # handling SIGTERM does while its lock is still held.
+        lingering = {111: 2, 222: 2}
+        monkeypatch.setattr(serve_commands, "_pid_alive", self._liveness(lingering))
+
+        assert serve_commands._stop_resident() is True
+        assert lingering == {111: 0, 222: 0}, "returned while a signalled process was still alive"
+
+    def test_a_process_that_outlives_the_deadline_fails_the_stop(self, home: Path, monkeypatch) -> None:
+        """Refusing is the honest answer: a relaunch from here lands on ``serve``
+        and the page comes up without channels, which is worse than not starting.
+        The non-zero exit is what makes install.sh's ``--stop && --foreground``
+        short-circuit instead of launching into the wrong engine."""
+        import os
+        import time
+
+        self._resident(home)
+        monkeypatch.setattr(os, "kill", lambda _pid, _sig: None)
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+        monkeypatch.setattr(serve_commands, "_STOP_WAIT_S", 0.0)
+
+        with pytest.raises(typer.Exit) as excinfo:
+            serve_commands._stop_resident()
+        assert excinfo.value.exit_code == 1
+
+    class _Clock:
+        """A clock that moves only when the code under test sleeps.
+
+        Each wait here is twenty seconds by design, so a real clock would make
+        these tests take that long to measure what a fake one settles at once.
+        """
+
+        def __init__(self, monkeypatch) -> None:
+            import time
+
+            self.now = 0.0
+            monkeypatch.setattr(time, "monotonic", lambda: self.now)
+            monkeypatch.setattr(time, "sleep", self._advance)
+
+        def _advance(self, seconds: float) -> None:
+            self.now += seconds
+
+    def test_the_gateway_gets_a_wait_of_its_own(self, home: Path, monkeypatch) -> None:
+        """The two waits run in sequence -- the supervisor has to be gone before
+        the gateway is signalled, or it restarts it -- so one budget spanning both
+        is spent by whichever goes first. A supervisor that took nearly all of it
+        left the gateway too little to exit in, and the stop failed against a
+        process that was on its way out."""
+        import os
+
+        self._resident(home)
+        clock = self._Clock(monkeypatch)
+        monkeypatch.setattr(os, "kill", lambda _pid, _sig: None)
+        polls = round(serve_commands._STOP_WAIT_S / serve_commands._STOP_POLL_S)
+        # Each count is one higher than the polls that pid is waited out for:
+        # `_read_web_state` and `_read_serve_pid` each spend a probe deciding the
+        # recorded pid counts as running. The supervisor then takes all but one
+        # poll of a budget, and the gateway needs half a second it cannot have if
+        # the two are charged to the same one.
+        lingering = {111: polls, 222: 11}
+        monkeypatch.setattr(serve_commands, "_pid_alive", self._liveness(lingering))
+
+        assert serve_commands._stop_resident() is True
+        assert lingering == {111: 0, 222: 0}, "returned while a signalled process was still alive"
+        assert clock.now > serve_commands._STOP_WAIT_S, "the stop stayed inside one budget, so it proves nothing"
+
+    def test_both_processes_it_names_waited_the_time_it_reports(self, home: Path, monkeypatch, capsys) -> None:
+        """One number is printed for the whole list, which makes it a claim about
+        every name in it. Sharing a deadline made the second name a claim about a
+        wait that had already been spent on the first."""
+        import os
+
+        self._resident(home)
+        clock = self._Clock(monkeypatch)
+        monkeypatch.setattr(os, "kill", lambda _pid, _sig: None)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+
+        with pytest.raises(typer.Exit):
+            serve_commands._stop_resident()
+
+        reported = capsys.readouterr().out
+        assert "supervisor (pid 111)" in reported
+        assert "gateway (pid 222)" in reported
+        assert f"still running after {serve_commands._STOP_WAIT_S:.0f}s" in reported
+        assert "error: still running after SIGKILL" in reported
+        # Each process: the grace, then the wait after SIGKILL, each at most one
+        # poll over, since the poll that gives up is the first at or past it.
+        per_process = serve_commands._STOP_WAIT_S + serve_commands._KILL_WAIT_S
+        assert clock.now >= 2 * per_process
+        assert clock.now < 2 * (per_process + 2 * serve_commands._STOP_POLL_S)
+
+    @staticmethod
+    def _signals(monkeypatch, groups: dict[int, int], *, own_group: int = 1) -> tuple[list, set[int]]:
+        """Record every signal, and let a pid die only once it is SIGKILLed.
+
+        ``groups`` maps a pid to the group ``os.getpgid`` reports for it; a pid
+        stays alive through SIGTERM, which is the process this is about.
+        """
+        import os
+        import signal
+
+        sent: list[tuple[str, int, int]] = []
+        dead: set[int] = set()
+
+        def _kill(pid: int, sig: int) -> None:
+            sent.append(("kill", pid, sig))
+            if sig == signal.SIGKILL:
+                dead.add(pid)
+
+        def _killpg(group: int, sig: int) -> None:
+            sent.append(("killpg", group, sig))
+            dead.update(pid for pid, g in groups.items() if g == group)
+
+        monkeypatch.setattr(os, "kill", _kill)
+        monkeypatch.setattr(os, "killpg", _killpg)
+        monkeypatch.setattr(os, "getpgid", lambda pid: groups[pid])
+        monkeypatch.setattr(os, "getpgrp", lambda: own_group)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda pid: pid not in dead)
+        return sent, dead
+
+    def test_a_supervisor_that_ignores_sigterm_is_killed_with_its_whole_group(self, home: Path, monkeypatch) -> None:
+        """Its gateway is in its group; killing the supervisor's pid alone would
+        leave that gateway holding the lock with nothing supervising it."""
+        import signal
+
+        self._resident(home)
+        self._Clock(monkeypatch)
+        sent, _dead = self._signals(monkeypatch, {111: 111, 222: 111})
+
+        assert serve_commands._stop_resident() is True
+
+        assert sent == [("kill", 111, signal.SIGTERM), ("killpg", 111, signal.SIGKILL)], sent
+        assert not (home / "web.json").exists(), "a killed supervisor's web.json names a pid nothing answers on"
+
+    def test_a_gateway_that_leads_no_group_is_killed_alone(self, home: Path, monkeypatch) -> None:
+        """A gateway run from a terminal is in the shell's job group: signalling
+        that group would signal whatever else the shell put there."""
+        import signal
+
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+        self._Clock(monkeypatch)
+        sent, _dead = self._signals(monkeypatch, {222: 900})
+
+        assert serve_commands._stop_resident() is True
+        assert sent == [("kill", 222, signal.SIGTERM), ("kill", 222, signal.SIGKILL)], sent
+
+    def test_its_own_process_group_is_never_the_one_killed(self, home: Path, monkeypatch) -> None:
+        import signal
+
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+        self._Clock(monkeypatch)
+        sent, _dead = self._signals(monkeypatch, {222: 222}, own_group=222)
+
+        assert serve_commands._stop_resident() is True
+        assert ("killpg", 222, signal.SIGKILL) not in sent
+        assert sent[-1] == ("kill", 222, signal.SIGKILL)
+
+    def test_a_process_that_exits_within_the_grace_is_never_killed(self, home: Path, monkeypatch) -> None:
+        import signal
+
+        self._resident(home)
+        sent: list[tuple[int, int]] = []
+        import os
+
+        monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
+        monkeypatch.setattr(os, "killpg", lambda *_a: pytest.fail("killed a process that stopped on its own"))
+        monkeypatch.setattr(serve_commands, "_pid_alive", self._liveness({}))
+
+        assert serve_commands._stop_resident() is True
+        assert all(sig == signal.SIGTERM for _pid, sig in sent)
+
+    def test_nothing_running_is_not_an_error(self, home: Path) -> None:
+        assert serve_commands._stop_resident() is False
+
+
+class TestARecycledPid:
+    """The pid a killed gateway left in serve.json is the kernel's to give away.
+
+    A state file's pid can name a live process without naming raven at all.
+    """
+
+    @staticmethod
+    def _not_ours(monkeypatch) -> None:
+        """Every identity probe says the recorded pid belongs to somebody else."""
+        from raven.gateway import lock as _gateway_lock
+
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+        monkeypatch.setattr(_gateway_lock, "read_status", lambda _now: None)
+        monkeypatch.setattr(serve_commands, "looks_like_raven", lambda _pid: False)
+
+    def test_a_leftover_names_a_pid_but_blocks_nothing(self, home: Path, monkeypatch, capsys) -> None:
+        """The stale-file case the locking refusal used to trip on: remove the
+        record and say so, rather than refusing to start beside it."""
+        self._not_ours(monkeypatch)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+
+        assert serve_commands._read_serve_pid() is None
+
+        assert not (home / "serve.json").exists()
+        assert "pid 222" in capsys.readouterr().out
+
+    def test_the_lock_holder_s_pid_is_read_as_its_own_page(self, home: Path, monkeypatch) -> None:
+        from raven.gateway import lock as _gateway_lock
+
+        info = _gateway_lock.LockInfo(pid=222, started_at=0.0, config_path="")
+        monkeypatch.setattr(_gateway_lock, "read_status", lambda _now: info)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+
+        assert serve_commands._read_serve_pid() == 222
+
+    def test_a_stop_never_signals_a_pid_that_is_not_ours(self, home: Path, monkeypatch) -> None:
+        import os
+
+        self._not_ours(monkeypatch)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+        monkeypatch.setattr(os, "kill", lambda *_a: pytest.fail("signalled a pid that was never proven ours"))
+
+        assert serve_commands._stop_resident() is False
+
+    def test_a_foreign_pid_does_not_count_as_a_live_supervisor(self, home: Path, monkeypatch) -> None:
+        self._not_ours(monkeypatch)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "web.json").write_text(json.dumps({"pid": 111, "port": 18999}), encoding="utf-8")
+
+        assert serve_commands._read_web_state() is None
+
+    def test_a_stop_clears_a_leftover_with_nothing_to_signal(self, home: Path, monkeypatch) -> None:
+        """What makes the recovery instructions true: the `--stop` the refusal
+        sends the reader to must end the state that refused them."""
+        from raven.gateway import lock as _gateway_lock
+
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: False)
+        monkeypatch.setattr(_gateway_lock, "read_status", lambda _now: None)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "serve.json").write_text(json.dumps({"port": 18999, "token": "t", "pid": 222}), encoding="utf-8")
+
+        assert serve_commands._stop_resident() is False
+
+        assert not (home / "serve.json").exists()
+
+
+class TestAnUnreadableIdentity:
+    @pytest.fixture(autouse=True)
+    def _resident_without_argv(self, home: Path, monkeypatch) -> None:
+        from raven.utils import processes
+
+        TestStopping._resident(home)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+        monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: None)
+        monkeypatch.setattr(processes, "command_line", lambda _pid: None)
+
+    def test_the_live_serve_record_is_kept(self, home: Path) -> None:
+        assert serve_commands._read_serve_pid() == 222
+        assert json.loads((home / "serve.json").read_text(encoding="utf-8"))["pid"] == 222
+
+    def test_the_live_supervisor_still_counts(self, home: Path) -> None:
+        assert serve_commands._read_web_state() == 111
+        assert (home / "web.json").exists()
+
+    def test_a_stop_signals_neither_process_and_keeps_both_records(self, home: Path, monkeypatch, capsys) -> None:
+        monkeypatch.setattr("os.kill", lambda *_args: pytest.fail("signalled an unverified process"))
+
+        with pytest.raises(typer.Exit) as stopped:
+            serve_commands._stop_resident()
+
+        assert stopped.value.exit_code == 1
+        assert (home / "serve.json").exists()
+        assert (home / "web.json").exists()
+        said = capsys.readouterr().out
+        assert "not stopping the supervisor (pid 111)" in said
+        assert "not stopping the gateway (pid 222)" in said
+        assert str(home / "web.json") in said
+        assert str(home / "serve.json") in said
+        assert "after confirming the record is stale" in said
+        assert "Do not signal an unverified PID" in said
+
+    def test_a_start_waits_instead_of_spawning_another_supervisor(
+        self, home: Path, a_built_page, opened, supervised, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda: "http://127.0.0.1:18999/auth#t")
+
+        serve_commands._web(port=18999)
+
+        assert supervised == []
+        assert opened == ["http://127.0.0.1:18999/auth#t"]
+        assert (home / "web.json").exists()
+
+    def test_a_start_preserves_a_standalone_serve_and_refuses_a_second_engine(
+        self, home: Path, a_built_page, opened, supervised, monkeypatch, capsys
+    ) -> None:
+        (home / "web.json").unlink()
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda: None)
+
+        with pytest.raises(typer.Exit) as stopped:
+            serve_commands._web(port=18999)
+
+        assert stopped.value.exit_code == 1
+        assert supervised == []
+        assert opened == []
+        assert (home / "serve.json").exists()
+        said = capsys.readouterr().out
+        assert str(home / "serve.json") in said
+        assert "after confirming the record is stale" in said
+        assert "stop it manually" not in said
+        assert "web --stop" not in said
+
+    def test_the_lock_holder_can_still_be_stopped(self, home: Path, monkeypatch) -> None:
+        stopped: list[int] = []
+        monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: 222)
+        monkeypatch.setattr(serve_commands, "_stop_one", lambda _label, pid, _unresponsive: stopped.append(pid))
+
+        with pytest.raises(typer.Exit) as result:
+            serve_commands._stop_resident()
+        assert result.value.exit_code == 1
+        assert stopped == [222]
+        assert (home / "web.json").exists()
+
+
+def test_web_is_registered_as_its_own_command() -> None:
+    """A verb nobody can type is not a verb."""
+    app = typer.Typer()
+    serve_commands.register(app)
+
+    assert {c.name for c in app.registered_commands} == {"serve", "web"}
+
+
+@pytest.mark.parametrize("unreadable", [{111, 222}, {111}, {222}])
+def test_web_stop_reports_a_refused_or_partial_stop(home: Path, monkeypatch, unreadable: set[int]) -> None:
+    from typer.testing import CliRunner
+
+    from raven.utils import processes
+
+    TestStopping._resident(home)
+    alive = {111, 222}
+    stopped: list[int] = []
+    monkeypatch.setattr(serve_commands, "_pid_alive", lambda pid: pid in alive)
+    monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: None)
+    monkeypatch.setattr(processes, "command_line", lambda pid: None if pid in unreadable else "python -m raven serve")
+
+    def stop(_label, pid, _unresponsive):
+        stopped.append(pid)
+        alive.remove(pid)
+
+    monkeypatch.setattr(serve_commands, "_stop_one", stop)
+    app = typer.Typer()
+    serve_commands.register(app)
+
+    result = CliRunner().invoke(app, ["web", "--stop"])
+
+    assert result.exit_code == 1
+    assert "not fully stopped" in result.output
+    assert "nothing to stop" not in result.output
+    assert set(stopped) == {111, 222} - unreadable
+    for pid, name in [(111, "web.json"), (222, "serve.json")]:
+        if pid in unreadable:
+            assert (home / name).exists()
+
+
+def test_a_resident_below_a_raven_named_directory_keeps_its_record(home: Path, monkeypatch) -> None:
+    from raven.utils import processes
+
+    TestStopping._resident(home)
+    monkeypatch.setattr(serve_commands, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: None)
+    monkeypatch.setattr(processes, "command_line", lambda _pid: "/Users/x/Raven copy/.venv/bin/raven serve --port 8765")
+
+    assert serve_commands._read_serve_pid() == 222
+    assert serve_commands._read_web_state() == 111
+    assert (home / "serve.json").exists()
+    assert (home / "web.json").exists()
+
+
+class TestTheSessionSurvivesARestart:
+    """A restart must not sign out the tabs that are open.
+
+    `raven web` runs a supervisor whose whole job is restarting the gateway, and
+    the gateway used to mint a fresh session cookie on every start -- so the
+    supervisor doing its job logged the user out. The tab showed "not
+    authenticated" against a gateway that was up and healthy, which is the one
+    reading that sends a person to restart a service that is already running.
+    """
+
+    @pytest.fixture
+    def home(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(serve_commands, "_state_path", lambda: tmp_path / "serve.json")
+        monkeypatch.delenv("RAVEN_SERVE_COOKIE", raising=False)
+        return tmp_path
+
+    class _Gateway:
+        def __init__(self, cookie: str) -> None:
+            self.session_cookie = cookie
+
+    def test_the_cookie_is_written_and_read_back(self, home: Path) -> None:
+        serve_commands._write_serve_state(18792, "tok-1", "cookie-1")
+
+        gw = self._Gateway("freshly-minted")
+        serve_commands.adopt_stored_cookie(gw)
+
+        assert gw.session_cookie == "cookie-1"
+
+    def test_the_env_override_still_wins(self, home: Path, monkeypatch) -> None:
+        """`system.upgrade` hands the exact session to its replacement this way,
+        so a stored value must not overrule it."""
+        serve_commands._write_serve_state(18792, "tok-1", "cookie-1")
+        monkeypatch.setenv("RAVEN_SERVE_COOKIE", "from-env")
+
+        gw = self._Gateway("from-env")
+        serve_commands.adopt_stored_cookie(gw)
+
+        assert gw.session_cookie == "from-env"
+
+    def test_a_first_launch_keeps_the_freshly_minted_one(self, home: Path) -> None:
+        gw = self._Gateway("freshly-minted")
+        serve_commands.adopt_stored_cookie(gw)
+        assert gw.session_cookie == "freshly-minted"
+
+    @pytest.mark.parametrize("body", ["not json at all", '{"port": 1}', '{"cookie": ""}', '{"cookie": 5}'])
+    def test_an_unusable_state_file_is_not_adopted(self, home: Path, body: str) -> None:
+        """Anything unreadable means "no previous session", never a crash on the
+        startup path -- a gateway that will not boot is worse than a sign-in."""
+        (home / "serve.json").write_text(body, encoding="utf-8")
+
+        gw = self._Gateway("freshly-minted")
+        serve_commands.adopt_stored_cookie(gw)
+
+        assert gw.session_cookie == "freshly-minted"
+
+    def test_the_state_file_stays_owner_only(self, home: Path) -> None:
+        """It now carries two credentials rather than one."""
+        path = serve_commands._write_serve_state(18792, "tok-1", "cookie-1")
+        assert path is not None
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert json.loads(path.read_text(encoding="utf-8"))["cookie"] == "cookie-1"
+
+
+class TestAFirstRunIsGivenTimeToCompile:
+    """A fresh install byte-compiles its whole dependency set before the gateway
+    can bind. Measured at 28 seconds against a window that used to be 25, which
+    told the first-run reader that a gateway seconds from listening had failed
+    -- and left them a supervisor they did not know was running."""
+
+    @pytest.fixture
+    def poll(self, monkeypatch):
+        """A clock that only moves when the poll loop sleeps.
+
+        ``_await_attach`` imports ``time`` inside itself, so patching the real
+        module is what reaches it -- and it keeps the test off the wall clock,
+        which a 150-second ceiling would otherwise make unrunnable.
+        """
+        import time as _time
+
+        now = [0.0]
+        monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+        monkeypatch.setattr(_time, "sleep", lambda s: now.__setitem__(0, now[0] + s))
+        return now
+
+    def test_a_gateway_that_binds_after_the_old_window_still_attaches(self, poll, monkeypatch) -> None:
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: 4242)
+        monkeypatch.setattr(
+            serve_commands,
+            "_read_serve_state",
+            lambda: (18792, "tok") if poll[0] >= 28.0 else None,
+        )
+        # Stubbed as a plain call so the loop never builds a real coroutine
+        # for asyncio.run to leave unawaited.
+        monkeypatch.setattr(serve_commands, "_attach", lambda *_a: "coro")
+        monkeypatch.setattr(serve_commands.asyncio, "run", lambda coro: "http://127.0.0.1:18792/auth#n")
+
+        assert serve_commands._await_attach() == "http://127.0.0.1:18792/auth#n"
+        assert poll[0] >= 28.0, "it answered before the gateway could have bound"
+
+    def test_a_dead_supervisor_ends_the_wait_instead_of_burning_the_ceiling(self, poll, monkeypatch) -> None:
+        # Nothing is coming: a process that already exited will not start a
+        # gateway by being waited on, so the reader hears about it now.
+        seen = {"n": 0}
+
+        def _web_state():
+            seen["n"] += 1
+            return 4242 if seen["n"] < 3 else None
+
+        monkeypatch.setattr(serve_commands, "_read_web_state", _web_state)
+        monkeypatch.setattr(serve_commands, "_read_serve_state", lambda: None)
+
+        assert serve_commands._await_attach() is None
+        assert poll[0] < serve_commands._ATTACH_PATIENCE_S, "it waited out the full ceiling for a dead supervisor"
+
+    def test_a_supervisor_that_has_not_recorded_itself_yet_is_not_read_as_dead(self, poll, monkeypatch) -> None:
+        # The supervisor writes its own pid after it starts, so its absence in
+        # the first instants means "not yet", not "never".
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: 4242 if poll[0] >= 5.0 else None)
+        monkeypatch.setattr(
+            serve_commands,
+            "_read_serve_state",
+            lambda: (18792, "tok") if poll[0] >= 9.0 else None,
+        )
+        monkeypatch.setattr(serve_commands, "_attach", lambda *_a: "coro")
+        monkeypatch.setattr(serve_commands.asyncio, "run", lambda coro: "http://127.0.0.1:18792/auth#n")
+
+        assert serve_commands._await_attach() == "http://127.0.0.1:18792/auth#n"
+
+
+class TestAResidentGatewayAnnouncesUpdatesItself:
+    """The page learns about updates from system.version, asked once at boot --
+    correct for a process that restarts, invisible for one that stays up for
+    days. The announcer pushes the same fact over the socket instead."""
+
+    @pytest.fixture
+    def fast_clock(self, monkeypatch):
+        """Collapse the poll delays so the loop runs its ticks immediately."""
+        monkeypatch.setattr(serve_commands, "_UPDATE_FIRST_CHECK_S", 0.001)
+        monkeypatch.setattr(serve_commands, "_UPDATE_POLL_BETA_S", 0.001)
+        monkeypatch.setattr(serve_commands, "_UPDATE_POLL_STABLE_S", 0.001)
+        monkeypatch.setattr(serve_commands, "_UPDATE_BACKOFF_CEILING_S", 0.001)
+
+    async def test_a_new_version_is_broadcast_once_not_every_poll(self, fast_clock, monkeypatch) -> None:
+        frames: list[dict] = []
+        checks = {"n": 0}
+
+        def _check(current):
+            checks["n"] += 1
+            return update_notice.Checked("0.1.12b9", reached=True)
+
+        from raven.updates import update_notice
+
+        monkeypatch.setattr(update_notice, "check_now", _check)
+
+        async def _broadcast(frame):
+            frames.append(frame)
+
+        stop = serve_commands.asyncio.Event()
+
+        async def _bounded():
+            task = serve_commands.asyncio.get_event_loop().create_task(
+                serve_commands._announce_updates(_broadcast, stop)
+            )
+            while checks["n"] < 4:
+                await serve_commands.asyncio.sleep(0.002)
+            stop.set()
+            await task
+
+        await serve_commands.asyncio.wait_for(_bounded(), timeout=5)
+
+        assert checks["n"] >= 4, "the loop stopped polling"
+        assert frames == [{"method": "system.update_available", "params": {"latest_version": "0.1.12b9"}}], (
+            "one version must be announced exactly once"
+        )
+
+    async def test_nothing_newer_means_silence(self, fast_clock, monkeypatch) -> None:
+        frames: list[dict] = []
+        checks = {"n": 0}
+
+        def _check(current):
+            checks["n"] += 1
+            return update_notice.Checked(None, reached=True)
+
+        from raven.updates import update_notice
+
+        monkeypatch.setattr(update_notice, "check_now", _check)
+
+        async def _broadcast(frame):
+            frames.append(frame)
+
+        stop = serve_commands.asyncio.Event()
+        task = serve_commands.asyncio.get_event_loop().create_task(serve_commands._announce_updates(_broadcast, stop))
+        while checks["n"] < 3:
+            await serve_commands.asyncio.sleep(0.002)
+        stop.set()
+        await serve_commands.asyncio.wait_for(task, timeout=5)
+
+        assert frames == []
+
+    async def test_a_check_that_blows_up_does_not_kill_the_loop(self, fast_clock, monkeypatch) -> None:
+        checks = {"n": 0}
+
+        def _check(current):
+            checks["n"] += 1
+            raise RuntimeError("offline")
+
+        from raven.updates import update_notice
+
+        monkeypatch.setattr(update_notice, "check_now", _check)
+
+        async def _broadcast(frame):
+            pass
+
+        stop = serve_commands.asyncio.Event()
+        task = serve_commands.asyncio.get_event_loop().create_task(serve_commands._announce_updates(_broadcast, stop))
+        while checks["n"] < 3:
+            await serve_commands.asyncio.sleep(0.002)
+        stop.set()
+        await serve_commands.asyncio.wait_for(task, timeout=5)
+
+        assert checks["n"] >= 3, "one failed fetch ended the announcer"
+
+
+class TestThePollFollowsTheChannelItIsWatching:
+    """A beta reaches its testers by this poll and no other route, so it runs on
+    a minute. Stable does not: those releases land days apart and the check reads
+    GitHub's release page rather than our own registry, where a minute from every
+    install behind one egress would buy nothing."""
+
+    @pytest.fixture
+    def channel(self, monkeypatch):
+        """Put the install on, or off, the beta channel."""
+        from raven.updates import beta_channel
+
+        def _set(active: bool) -> None:
+            monkeypatch.setattr(beta_channel, "is_active", lambda: active)
+
+        return _set
+
+    def test_the_beta_channel_is_watched_every_minute(self, channel) -> None:
+        channel(True)
+        assert serve_commands._update_poll_seconds() == 60.0
+
+    def test_stable_keeps_its_half_hour(self, channel) -> None:
+        channel(False)
+        assert serve_commands._update_poll_seconds() == 30 * 60.0
+
+    def test_the_cadence_is_read_per_tick_not_at_startup(self, channel) -> None:
+        """Joining the channel is a file appearing; a resident gateway that
+        outlives that should follow it without a restart."""
+        channel(False)
+        assert serve_commands._update_poll_seconds() == 30 * 60.0
+        channel(True)
+        assert serve_commands._update_poll_seconds() == 60.0
+
+    def test_failures_double_the_wait_up_to_a_half_hour_ceiling(self, channel) -> None:
+        channel(True)
+        grown = [serve_commands._update_delay(n) for n in range(7)]
+
+        assert grown[:5] == [60.0, 120.0, 240.0, 480.0, 960.0]
+        assert grown[5] == 1800.0, "the ceiling is where an offline gateway settles"
+        assert grown[6] == 1800.0, "and it stops there"
+
+    def test_stable_is_already_at_the_ceiling_so_it_never_grows(self, channel) -> None:
+        channel(False)
+        assert serve_commands._update_delay(0) == serve_commands._update_delay(4) == 30 * 60.0
+
+    async def test_consecutive_failures_back_off_and_one_answer_resets(self, monkeypatch) -> None:
+        """The loop's own bookkeeping, read off what it asks to wait for next."""
+        from raven.updates import update_notice
+
+        monkeypatch.setattr(serve_commands, "_UPDATE_FIRST_CHECK_S", 0.001)
+        asked: list[int] = []
+        monkeypatch.setattr(serve_commands, "_update_delay", lambda failures: asked.append(failures) or 0.001)
+
+        answers = [
+            update_notice.Checked(None, reached=False),
+            update_notice.Checked(None, reached=False),
+            update_notice.Checked(None, reached=True),
+            update_notice.Checked(None, reached=False),
+        ]
+        checks = {"n": 0}
+
+        def _check(current):
+            checks["n"] += 1
+            if not answers:
+                return update_notice.Checked(None, reached=True)
+            return answers.pop(0)
+
+        monkeypatch.setattr(update_notice, "check_now", _check)
+
+        async def _broadcast(frame):
+            pass
+
+        stop = serve_commands.asyncio.Event()
+        task = serve_commands.asyncio.get_event_loop().create_task(serve_commands._announce_updates(_broadcast, stop))
+        while checks["n"] < 4:
+            await serve_commands.asyncio.sleep(0.002)
+        stop.set()
+        await serve_commands.asyncio.wait_for(task, timeout=5)
+
+        assert asked[:4] == [1, 2, 0, 1], f"backoff did not grow then reset: {asked[:4]}"
+
+    async def test_a_check_that_raises_counts_as_a_failure(self, monkeypatch) -> None:
+        """An exception out of the check is the offline case arriving by a second
+        route, so it has to slow the loop down the same way a reported one does."""
+        from raven.updates import update_notice
+
+        monkeypatch.setattr(serve_commands, "_UPDATE_FIRST_CHECK_S", 0.001)
+        asked: list[int] = []
+        monkeypatch.setattr(serve_commands, "_update_delay", lambda failures: asked.append(failures) or 0.001)
+
+        checks = {"n": 0}
+
+        def _check(current):
+            checks["n"] += 1
+            raise RuntimeError("offline")
+
+        monkeypatch.setattr(update_notice, "check_now", _check)
+
+        async def _broadcast(frame):
+            pass
+
+        stop = serve_commands.asyncio.Event()
+        task = serve_commands.asyncio.get_event_loop().create_task(serve_commands._announce_updates(_broadcast, stop))
+        while checks["n"] < 3:
+            await serve_commands.asyncio.sleep(0.002)
+        stop.set()
+        await serve_commands.asyncio.wait_for(task, timeout=5)
+
+        assert asked[:3] == [1, 2, 3]
+
+
+class TestTheSupervisorCleansUpOnTheSignalThatStopsIt:
+    """`raven web --stop` sends SIGTERM. Python's default disposition kills the
+    process where it stands, so the `finally` that removes `web.json` never ran
+    and the file was left behind pointing at a dead pid."""
+
+    def test_sigterm_removes_the_state_file(self, tmp_path, monkeypatch) -> None:
+        import os
+        import subprocess
+        import sys
+        import time
+
+        home = tmp_path / "home"
+        home.mkdir()
+        state = home / "web.json"
+        script = (
+            "from raven.cli import serve_commands as s\n"
+            "s._gateway_argv = lambda p, dev=False: ['sleep', '600']\n"
+            "s._bound_port_of = lambda p: None\n"
+            "s._supervise(18999)\n"
+        )
+        env = {**os.environ, "RAVEN_HOME": str(home)}
+        proc = subprocess.Popen([sys.executable, "-c", script], env=env)  # noqa: S603
+        try:
+            deadline = time.monotonic() + 15
+            while not state.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert state.exists(), "the supervisor never recorded itself"
+            proc.terminate()
+            proc.wait(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+        deadline = time.monotonic() + 5
+        while state.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not state.exists(), "SIGTERM left web.json behind on a dead pid"
+
+    def test_sigterm_during_the_prologue_still_removes_the_state_file(self, tmp_path) -> None:
+        """The signal that arrives before the loop does.
+
+        The test above sends SIGTERM once the file exists, which is a real
+        moment but a fleeting one: the supervisor is past it within microseconds,
+        so a regression here shows up as a rare red pipeline rather than a
+        failure. This holds the process in that moment on purpose -- the state
+        write is wrapped so it takes three seconds to return -- and terminates
+        it there. Then a handler armed outside the guard fails every run instead
+        of one in several hundred.
+        """
+        import os
+        import subprocess
+        import sys
+        import time
+
+        home = tmp_path / "home"
+        home.mkdir()
+        state = home / "web.json"
+        script = (
+            "import time\n"
+            "from raven.cli import serve_commands as s\n"
+            "s._gateway_argv = lambda p, dev=False: ['sleep', '600']\n"
+            "s._bound_port_of = lambda p: None\n"
+            "_recorded = s._write_web_state\n"
+            "def _linger(port):\n"
+            "    _recorded(port)\n"
+            "    time.sleep(3)\n"
+            "s._write_web_state = _linger\n"
+            "s._supervise(18999)\n"
+        )
+        env = {**os.environ, "RAVEN_HOME": str(home)}
+        proc = subprocess.Popen([sys.executable, "-c", script], env=env)  # noqa: S603
+        try:
+            deadline = time.monotonic() + 15
+            while not state.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert state.exists(), "the supervisor never recorded itself"
+            # Still inside the lingering write, which is the window.
+            proc.terminate()
+            proc.wait(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+        deadline = time.monotonic() + 5
+        while state.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not state.exists(), "a SIGTERM before the loop left web.json on a dead pid"
+
+
+# ---------------------------------------------------------------------------
+# `raven serve` -- attach to a gateway that already hosts the page, instead of
+# starting a second engine on the same agent home.
+# ---------------------------------------------------------------------------
+
+
+def _record_hosted(home: Path, *, pid: int, port: int = 18792, token: str = "tok") -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "serve.json").write_text(json.dumps({"port": port, "token": token, "pid": pid}), encoding="utf-8")
+
+
+class TestAGatewayHostedPage:
+    """The probe: a page is "gateway-hosted" only when the lock's pid and
+    serve.json's pid are the same process."""
+
+    def _lock_says(self, monkeypatch, pid: int | None) -> None:
+        from raven.gateway import lock as _gateway_lock
+
+        info = None if pid is None else _gateway_lock.LockInfo(pid=pid, started_at=0.0, config_path="")
+        monkeypatch.setattr(_gateway_lock, "read_status", lambda now: info)
+
+    def test_matching_pids_name_the_hosted_page(self, home: Path, monkeypatch) -> None:
+        _record_hosted(home, pid=4321)
+        self._lock_says(monkeypatch, 4321)
+        assert serve_commands._gateway_hosted_page() == (18792, "tok")
+
+    def test_a_stale_serve_json_is_not_the_gateway_s(self, home: Path, monkeypatch) -> None:
+        """A serve.json left by a killed standalone serve must not make a
+        page-less gateway read as "already hosting" -- starting is correct."""
+        _record_hosted(home, pid=4321)
+        self._lock_says(monkeypatch, 9999)
+        assert serve_commands._gateway_hosted_page() is None
+
+    def test_no_gateway_running_reads_as_nothing_hosted(self, home: Path, monkeypatch) -> None:
+        _record_hosted(home, pid=4321)
+        self._lock_says(monkeypatch, None)
+        assert serve_commands._gateway_hosted_page() is None
+
+
+class TestServeAgainstAHostedPage:
+    """The command: attach and stop, or fall through to a normal start."""
+
+    def _invoke(self, args: list[str] | None = None):
+        from typer.testing import CliRunner
+
+        from raven.cli.commands import app
+
+        return CliRunner().invoke(app, ["serve", *(args or [])])
+
+    def test_a_live_hosted_page_is_attached_not_doubled(self, monkeypatch, started, opened) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: (18792, "tok"))
+
+        async def _minted(port: int, token: str):
+            return f"http://127.0.0.1:{port}/auth#nonce"
+
+        monkeypatch.setattr(serve_commands, "_attach", _minted)
+        result = self._invoke()
+        assert result.exit_code == 0
+        assert "already hosts the page" in result.output
+        assert started == []
+
+    def test_open_opens_the_hosted_page(self, monkeypatch, started, opened) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: (18792, "tok"))
+
+        async def _minted(port: int, token: str):
+            return f"http://127.0.0.1:{port}/auth#nonce"
+
+        monkeypatch.setattr(serve_commands, "_attach", _minted)
+        result = self._invoke(["--open"])
+        assert result.exit_code == 0
+        assert opened == ["http://127.0.0.1:18792/auth#nonce"]
+        assert started == []
+
+    def test_an_unreachable_hosted_record_starts_normally(self, monkeypatch, started) -> None:
+        """The gateway is recorded but its page does not answer: nothing to
+        attach to, so standalone serve starts exactly as before."""
+        monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: (18792, "tok"))
+
+        async def _gone(port: int, token: str):
+            return None
+
+        monkeypatch.setattr(serve_commands, "_attach", _gone)
+        result = self._invoke()
+        assert result.exit_code == 0
+        assert started == [18792]
+
+    def test_a_refused_token_is_reported_not_worked_around(self, monkeypatch, started) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: (18792, "tok"))
+
+        async def _refused(port: int, token: str):
+            raise PermissionError(f"the gateway on port {port} refused the recorded token")
+
+        monkeypatch.setattr(serve_commands, "_attach", _refused)
+        result = self._invoke()
+        assert result.exit_code == 1
+        assert started == []
+
+    def test_nothing_hosted_starts_normally(self, monkeypatch, started) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: None)
+        result = self._invoke()
+        assert result.exit_code == 0
+        assert started == [18792]
+
+
+class TestRefusingAnIncompleteInstall:
+    """`system.upgrade` makes serve exit on purpose, so a supervisor respawns it
+    straight into the window where uv has deleted the old environment and not
+    yet written the new one. A serve that starts there binds the port and
+    answers `/` with the placeholder for the rest of its life, because
+    `build_app` picks the page route once."""
+
+    def test_a_sound_install_is_let_through(self, monkeypatch) -> None:
+        from raven.updates import install_guard as _install_guard
+
+        monkeypatch.setattr(_install_guard, "inspect_install", lambda: None)
+        serve_commands._refuse_incomplete_install()
+
+    def test_a_half_written_install_refuses_before_the_port_is_bound(self, monkeypatch) -> None:
+        from raven.updates import install_guard as _install_guard
+
+        def unreachable(*_args, **_kwargs):
+            raise AssertionError("the gateway must not start on a half-written installation")
+
+        monkeypatch.setattr(
+            _install_guard,
+            "inspect_install",
+            lambda: _install_guard.InstallFault("incomplete", "this installation is missing the packaged page"),
+        )
+        monkeypatch.setattr(serve_commands, "_serve_main", unreachable)
+
+        with pytest.raises(typer.Exit) as excinfo:
+            serve_commands._run(18999, False)
+
+        assert excinfo.value.exit_code == serve_commands.INCOMPLETE_INSTALL_EXIT
+
+    def test_it_names_the_repair_a_reader_can_run(self, monkeypatch, capsys) -> None:
+        from raven.updates import install_guard as _install_guard
+
+        monkeypatch.setattr(
+            _install_guard,
+            "inspect_install",
+            lambda: _install_guard.InstallFault("incomplete", "this installation is missing the packaged page"),
+        )
+        with pytest.raises(typer.Exit):
+            serve_commands._refuse_incomplete_install()
+
+        assert "install.sh" in capsys.readouterr().err
+
+    def test_a_running_upgrade_is_waited_out_rather_than_failed_fast(self, monkeypatch) -> None:
+        """`_supervise` gives up after `_CRASH_LOOP_GIVE_UP` failures faster than
+        `_HEALTHY_RUN_S`, and an install window is short enough to burn through
+        all five. Spending the window asleep in one process is what keeps the
+        supervisor trying."""
+        from raven.updates import install_guard as _install_guard
+
+        running = _install_guard.InstallFault("upgrading", "an upgrade to 9.9.9 is replacing this installation")
+        verdicts = [running, running, None]
+        monkeypatch.setattr(_install_guard, "inspect_install", lambda: verdicts.pop(0))
+        monkeypatch.setattr(serve_commands, "_UPGRADE_POLL_S", 0.0)
+
+        with pytest.raises(typer.Exit) as excinfo:
+            serve_commands._refuse_incomplete_install()
+
+        assert verdicts == []
+        # Even a finished upgrade ends in a refusal: this process already holds
+        # half of the build that was replaced, and the rest would load off disk
+        # from the new one.
+        assert excinfo.value.exit_code == serve_commands.INCOMPLETE_INSTALL_EXIT
+
+    def test_it_gives_up_on_an_upgrade_that_never_ends(self, monkeypatch) -> None:
+        from raven.updates import install_guard as _install_guard
+
+        fault = _install_guard.InstallFault("upgrading", "an upgrade is replacing this installation")
+        monkeypatch.setattr(_install_guard, "inspect_install", lambda: fault)
+        monkeypatch.setattr(serve_commands, "_UPGRADE_POLL_S", 0.0)
+        monkeypatch.setattr(serve_commands, "_UPGRADE_WAIT_S", 0.05)
+
+        with pytest.raises(typer.Exit) as excinfo:
+            serve_commands._refuse_incomplete_install()
+
+        assert excinfo.value.exit_code == serve_commands.INCOMPLETE_INSTALL_EXIT
+
+    def test_the_refusal_does_not_read_as_a_clean_stop(self) -> None:
+        """`_supervise` stops supervising on a zero exit, because that is how
+        `system.upgrade` asks it to stand down. A refusal must not be mistaken
+        for that, or the environment never gets started again once it is whole."""
+        assert serve_commands.INCOMPLETE_INSTALL_EXIT != 0
+
+
+def test_serve_starts_the_litellm_warm_up_at_boot() -> None:
+    """The served page's first key save used to wait on the LiteLLM import;
+    the boot coroutine starts it in the background. ``_serve_main`` binds a
+    port and serves forever, so its source is pinned rather than executed."""
+    import inspect
+
+    assert "warm_up_in_background()" in inspect.getsource(serve_commands._serve_main)
+
+
+def test_serve_warms_the_deck_template_covers_at_boot() -> None:
+    """The template gallery's covers are drawn once the gateway is up, not on the
+    click that opens the gallery; pinned by source for the same reason as above."""
+    import inspect
+
+    assert "deck_templates.warm_covers_in_background()" in inspect.getsource(serve_commands._serve_main)
+
+
+def test_serve_stops_the_cover_warm_up_when_it_shuts_down() -> None:
+    """What the warm-up started outlives the loop unless something stops it, and
+    a conversion left running holds the process open; pinned by source."""
+    import inspect
+
+    src = inspect.getsource(serve_commands._serve_main)
+    assert "_deck_templates.stop_warming()" in src.split('logger.info("serve: shutting down")', 1)[1]
+
+
+# ---------------------------------------------------------------------------
+# _ServedStack -- the stack a loop-less start still owes
+# ---------------------------------------------------------------------------
+
+
+class _FakeGateway:
+    """The two things the holder touches on the transport."""
+
+    def __init__(self) -> None:
+        self.dispatcher = None
+
+    async def broadcast(self, frame: dict) -> None:  # pragma: no cover - never called here
+        pass
+
+
+def _stack(*, loop: object | None, emitter: object | None = None):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        agent_loop=loop,
+        dispatcher=object(),
+        emitter=emitter if emitter is not None else object(),
+        deliverables=None,
+        build_error=None,
+    )
+
+
+def _stub_builds(monkeypatch, *stacks):
+    """Hand ``build_rpc_stack`` out one stack per call, recording the kwargs."""
+    calls: list[dict] = []
+    remaining = list(stacks)
+
+    async def _build(send_frame, **kwargs):
+        # A real assembly suspends; without that the two callers in
+        # ``test_two_writes_at_once_assemble_once`` never overlap and the
+        # second check under the lock is never the one that answers.
+        await asyncio.sleep(0)
+        calls.append(kwargs)
+        return remaining.pop(0)
+
+    monkeypatch.setattr("raven.rpc.bootstrap.build_rpc_stack", _build)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_the_first_stack_is_bound_to_the_transport(monkeypatch) -> None:
+    first = _stack(loop=None)
+    _stub_builds(monkeypatch, first)
+    gateway = _FakeGateway()
+    served = serve_commands._ServedStack(gateway)
+
+    assert await served.start() is first
+    assert served.current is first
+    assert gateway.dispatcher is first.dispatcher
+
+
+@pytest.mark.asyncio
+async def test_a_process_that_has_a_loop_does_not_build_a_second(monkeypatch) -> None:
+    """The seam is reached through the answer that says this process has none,
+    so an ordinary settings write must not pay for an assembly."""
+    running = _stack(loop=object())
+    calls = _stub_builds(monkeypatch, running)
+    served = serve_commands._ServedStack(_FakeGateway())
+    await served.start()
+
+    assert await served.ensure() is True
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_loop_less_process_assembles_and_rebinds(monkeypatch) -> None:
+    """The dispatcher has to move with the stack: the registered handlers hold
+    the build error and the scheduler by value, so the old one keeps answering
+    with the state that had no loop."""
+    first = _stack(loop=None)
+    second = _stack(loop=object())
+    calls = _stub_builds(monkeypatch, first, second)
+    gateway = _FakeGateway()
+    served = serve_commands._ServedStack(gateway)
+    await served.start()
+
+    assert await served.ensure() is True
+    assert served.current is second
+    assert gateway.dispatcher is second.dispatcher
+    # The emitter is carried: a subscription lives there and the page
+    # re-subscribes only when its socket reconnects.
+    assert calls[1]["emitter"] is first.emitter
+    # The replacement can assemble again in turn.
+    assert calls[1]["ensure_stack"] == served.ensure
+
+
+@pytest.mark.asyncio
+async def test_a_build_that_still_has_no_loop_leaves_the_old_one_serving(monkeypatch) -> None:
+    """The config was written and still does not support a loop. Nothing is
+    torn down: a first-run stack's teardown ends by closing the browser and the
+    ACP pool, which the next attempt still needs."""
+    first = _stack(loop=None)
+    second = _stack(loop=None)
+    _stub_builds(monkeypatch, first, second)
+    gateway = _FakeGateway()
+    served = serve_commands._ServedStack(gateway)
+    await served.start()
+
+    assert await served.ensure() is False
+    assert served.current is first
+    assert gateway.dispatcher is first.dispatcher
+
+
+@pytest.mark.asyncio
+async def test_two_writes_at_once_assemble_once(monkeypatch) -> None:
+    """Two callers can both see no loop. Only one build may happen, or the
+    process ends up with two cron services on one partition."""
+    first = _stack(loop=None)
+    second = _stack(loop=object())
+    calls = _stub_builds(monkeypatch, first, second)
+    served = serve_commands._ServedStack(_FakeGateway())
+    await served.start()
+
+    both = await asyncio.gather(served.ensure(), served.ensure())
+
+    assert both == [True, True]
+    assert len(calls) == 2  # the first start, then one assembly
+    assert served.current is second
+
+
+class TestPageBehindSources:
+    """A source-tree page is behind when something it is built from is newer.
+
+    The wheel's copy never is: it ships beside the code it was built with, so
+    nothing newer exists for it to be behind. The comparison is by mtime, the
+    way make judges a target, and it skips tests and snapshots because those
+    change without changing the page.
+    """
+
+    @staticmethod
+    def _stamp(path: Path, when: float) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("x", encoding="utf-8")
+        import os
+
+        os.utime(path, (when, when))
+
+    def test_a_page_built_after_its_last_source_edit_is_current(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(ui / "src" / "main.tsx", 1_000.0)
+        self._stamp(ui.parent / "i18n" / "messages.json", 1_500.0)
+        self._stamp(source / "index.html", 2_000.0)
+
+        assert serve_commands.page_behind_sources(source) is False
+
+    def test_a_newer_source_file_puts_the_page_behind(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(source / "index.html", 2_000.0)
+        self._stamp(ui / "src" / "features" / "rail" / "RailPage.tsx", 3_000.0)
+
+        assert serve_commands.page_behind_sources(source) is True
+
+    def test_a_newer_catalogue_puts_the_page_behind(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(source / "index.html", 2_000.0)
+        self._stamp(ui / "src" / "main.tsx", 1_000.0)
+        self._stamp(ui.parent / "i18n" / "messages.json", 3_000.0)
+
+        assert serve_commands.page_behind_sources(source) is True
+
+    def test_tests_harnesses_and_snapshots_do_not_count(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(source / "index.html", 2_000.0)
+        self._stamp(ui / "src" / "app" / "updates.test.ts", 3_000.0)
+        self._stamp(ui / "src" / "test" / "settingsHarness.ts", 3_000.0)
+        self._stamp(ui / "src" / "features" / "rail" / "__snapshots__" / "RailPage.test.tsx.snap", 3_000.0)
+        self._stamp(ui / "scripts" / "__golden__" / "boot-stub.txt", 3_000.0)
+
+        assert serve_commands.page_behind_sources(source) is False
+
+    def test_a_dependency_bump_or_build_script_edit_puts_the_page_behind(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(source / "index.html", 2_000.0)
+        self._stamp(ui / "src" / "main.tsx", 1_000.0)
+        self._stamp(ui / "package-lock.json", 3_000.0)
+
+        assert serve_commands.page_behind_sources(source) is True
+
+        self._stamp(ui / "package-lock.json", 1_000.0)
+        self._stamp(ui / "build.py", 3_000.0)
+
+        assert serve_commands.page_behind_sources(source) is True
+
+    def test_the_packaged_copy_is_never_behind(self, two_candidates) -> None:
+        packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(packaged / "index.html", 1_000.0)
+        self._stamp(ui / "src" / "main.tsx", 3_000.0)
+
+        assert serve_commands.page_behind_sources(packaged) is False
+
+    def test_no_page_is_not_behind(self, two_candidates) -> None:
+        _packaged, source = two_candidates
+
+        assert serve_commands.page_behind_sources(None) is False
+        assert serve_commands.page_behind_sources(source) is False
+
+    def test_the_resolver_warns_where_the_page_is_behind(self, two_candidates, monkeypatch) -> None:
+        """Every path that serves or opens the page resolves it here once, and
+        the terminal that resolver prints to is where the rebuild happens."""
+        _packaged, source = two_candidates
+        ui = source.parent
+        self._stamp(source / "index.html", 2_000.0)
+        self._stamp(ui / "src" / "main.tsx", 3_000.0)
+        said: list[str] = []
+        from loguru import logger
+
+        token = logger.add(lambda m: said.append(m.record["message"]), level="WARNING")
+        try:
+            assert serve_commands.resolve_ui_dist() == source
+        finally:
+            logger.remove(token)
+
+        assert [m for m in said if "make build-ui" in m], said
+
+
+_STUBBORN = """
+import json, os, signal, sys, time
+home = sys.argv[1]
+signal.signal(signal.SIGTERM, lambda *_: open(os.path.join(home, "gw-sigterm"), "w").write(
+    str(os.path.exists(os.path.join(home, "web.json")))))
+with open(os.path.join(home, "serve.json"), "w") as f:
+    json.dump({"port": 18999, "token": "t", "pid": os.getpid()}, f)
+while True:
+    time.sleep(0.05)
+"""
+
+
+_STUBBORN_WITH_CHILD = """
+import json, os, signal, subprocess, sys, time
+home = sys.argv[1]
+grandchild = subprocess.Popen([sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)"])
+with open(os.path.join(home, "gc-pid"), "w") as f:
+    f.write(str(grandchild.pid))
+if sys.argv[2] == "ignores":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(os.path.join(home, "serve.json"), "w") as f:
+    json.dump({"port": 18999, "token": "t", "pid": os.getpid()}, f)
+while True:
+    time.sleep(0.05)
+"""
+
+
+def _wait_for(path: Path, timeout_s: float = 20.0) -> None:
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while not path.exists():
+        assert time.monotonic() < deadline, f"{path.name} never appeared"
+        time.sleep(0.02)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups and SIGKILL are POSIX")
+class TestStoppingARealTree:
+    """The fakes above say what is signalled; these say it actually ends.
+
+    The supervisor and gateway these tests start are real processes - they run
+    as ``python -c`` sleepers rather than ``python -m raven ...``, and the
+    gateway's pid only reaches us inside the state files its supervisor wrote.
+    Identifying them by argv is what the production check does, so it is what
+    the fake processes are made to satisfy: each sleeper's argv ends with the
+    home directory it was told to record, and ``looks_like_raven`` is patched
+    to accept a pid whose command line names that home.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _sleepers_carry_their_home(self, home: Path, monkeypatch) -> None:
+        from raven.cli import serve_commands
+        from raven.utils import processes
+
+        real = processes.command_line
+
+        def _looks(pid: int) -> bool:
+            line = real(pid)
+            return line is not None and str(home) in line
+
+        monkeypatch.setattr(serve_commands, "looks_like_raven", _looks)
+
+    def test_stop_ends_a_supervisor_and_gateway_that_both_ignore_sigterm(self, home: Path, monkeypatch) -> None:
+        """Detached the way `_spawn_supervisor` detaches it -- its own session,
+        with the launcher gone -- so nothing here is left a zombie of the test."""
+        import os
+        import signal
+        import subprocess
+
+        from raven.utils.pid import pid_alive
+
+        home.mkdir(parents=True, exist_ok=True)
+        supervisor = (
+            "import json, os, signal, subprocess, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"subprocess.Popen([sys.executable, '-c', {_STUBBORN!r}, sys.argv[1]])\n"
+            "json.dump({'pid': os.getpid(), 'port': 18999}, open(os.path.join(sys.argv[1], 'web.json'), 'w'))\n"
+            "while True:\n    time.sleep(0.05)\n"
+        )
+        launcher = (
+            "import subprocess, sys\n"
+            f"subprocess.Popen([sys.executable, '-c', {supervisor!r}, sys.argv[1]], start_new_session=True)\n"
+        )
+        subprocess.run([sys.executable, "-c", launcher, str(home)], check=True, timeout=30)
+        _wait_for(home / "web.json")
+        _wait_for(home / "serve.json")
+        sup = json.loads((home / "web.json").read_text())["pid"]
+        gw = json.loads((home / "serve.json").read_text())["pid"]
+        monkeypatch.setattr(serve_commands, "_STOP_WAIT_S", 0.5)
+        try:
+            assert serve_commands._stop_resident() is True
+            assert not pid_alive(sup) and not pid_alive(gw)
+            assert not (home / "web.json").exists()
+        finally:
+            with suppress(OSError):
+                os.killpg(sup, signal.SIGKILL)
+            with suppress(OSError):
+                os.kill(gw, signal.SIGKILL)
+
+    def test_a_second_sigterm_does_not_cut_the_supervisor_s_cleanup_short(self, home: Path) -> None:
+        """`--stop` signals the supervisor and then the gateway, and a person may
+        send another; one landing while the supervisor waits on its gateway used
+        to raise out of that wait, leaving the gateway up and web.json behind."""
+        import os
+        import signal
+        import subprocess
+        import time
+
+        from raven.utils.pid import pid_alive
+
+        home.mkdir(parents=True, exist_ok=True)
+        script = (
+            "import sys\n"
+            "from raven.cli import serve_commands as sc\n"
+            f"sc._gateway_argv = lambda port, dev=False: [sys.executable, '-c', {_STUBBORN!r}, {str(home)!r}]\n"
+            "sc._CHILD_STOP_S = 2.0\n"
+            "sc._supervise(18999)\n"
+        )
+        proc = subprocess.Popen([sys.executable, "-c", script], env={**os.environ, "RAVEN_HOME": str(home)})
+        try:
+            _wait_for(home / "serve.json")
+            gw = json.loads((home / "serve.json").read_text())["pid"]
+            _wait_for(home / "web.json")
+            proc.send_signal(signal.SIGTERM)
+            _wait_for(home / "gw-sigterm")  # the supervisor is now inside its cleanup
+            time.sleep(0.2)
+            proc.send_signal(signal.SIGTERM)
+            assert proc.wait(timeout=20) == 0
+            assert not pid_alive(gw)
+            assert not (home / "web.json").exists()
+        finally:
+            with suppress(OSError):
+                proc.kill()
+
+    def test_a_real_supervisor_kills_its_stubborn_gateway_before_removing_web_json(self, home: Path) -> None:
+        import os
+        import signal
+        import subprocess
+
+        from raven.utils.pid import pid_alive
+
+        home.mkdir(parents=True, exist_ok=True)
+        script = (
+            "import sys\n"
+            "from raven.cli import serve_commands as sc\n"
+            f"sc._gateway_argv = lambda port, dev=False: [sys.executable, '-c', {_STUBBORN!r}, {str(home)!r}]\n"
+            "sc._CHILD_STOP_S = 0.5\n"
+            "sc._supervise(18999)\n"
+        )
+        env = {**os.environ, "RAVEN_HOME": str(home)}
+        proc = subprocess.Popen([sys.executable, "-c", script], env=env)
+        try:
+            # Signalled as soon as the gateway is up, so usually while the
+            # supervisor still polls serve.json for the port it bound; the unit
+            # test above pins that window, this one that the tree really ends.
+            _wait_for(home / "serve.json")
+            gw = json.loads((home / "serve.json").read_text())["pid"]
+            _wait_for(home / "web.json")
+            proc.send_signal(signal.SIGTERM)
+            assert proc.wait(timeout=20) == 0
+            assert not pid_alive(gw), "the supervisor exited and left its gateway running"
+            assert not (home / "web.json").exists()
+            assert (home / "gw-sigterm").read_text() == "True", "web.json was gone before the gateway was"
+        finally:
+            with suppress(OSError):
+                proc.kill()
+
+    @pytest.mark.parametrize("gateway", ["ignores", "honours"])
+    def test_the_gateways_own_children_are_killed_before_web_json_goes(self, home: Path, gateway: str) -> None:
+        """The gateway is not the only process the supervisor owns: anything it
+        started without a session of its own is in its group. Killing its pid
+        alone let a grandchild that ignores SIGTERM outlive the stop, with
+        `web.json` already gone and the command reporting success -- and so did
+        a gateway that honoured SIGTERM, since its prompt exit ended the stop
+        before the group was ever signalled (reviewer 2026-09-23)."""
+        import os
+        import signal
+        import subprocess
+
+        from raven.utils.pid import pid_alive
+
+        home.mkdir(parents=True, exist_ok=True)
+        script = (
+            "import sys\n"
+            "from raven.cli import serve_commands as sc\n"
+            f"sc._gateway_argv = lambda port, dev=False: [sys.executable, '-c', {_STUBBORN_WITH_CHILD!r}, {str(home)!r}, {gateway!r}]\n"
+            "sc._CHILD_STOP_S = 0.5\n"
+            "sc._supervise(18999)\n"
+        )
+        env = {**os.environ, "RAVEN_HOME": str(home)}
+        proc = subprocess.Popen([sys.executable, "-c", script], env=env)
+        try:
+            _wait_for(home / "gc-pid")
+            gc = int((home / "gc-pid").read_text())
+            _wait_for(home / "web.json")
+            proc.send_signal(signal.SIGTERM)
+            assert proc.wait(timeout=20) == 0
+            assert not (home / "web.json").exists()
+            assert not pid_alive(gc), "the gateway's own child outlived the stop"
+        finally:
+            with suppress(OSError):
+                proc.kill()
+            with suppress(OSError, ValueError):
+                os.kill(int((home / "gc-pid").read_text()), signal.SIGKILL)
+
+
+_IGNORES_SIGTERM = (
+    "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(300)"
+)
+_HONOURS_SIGTERM = "import time; print('ready', flush=True); time.sleep(300)"
+
+
+def _child(code: str, *, own_group: bool = True):
+    """A child that has finished starting: its handlers are in place before any
+    signal a test sends, which a bare ``Popen`` cannot promise."""
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code], start_new_session=own_group, stdout=subprocess.PIPE, text=True
+    )
+    assert proc.stdout.readline().strip() == "ready"
+    return proc
+
+
+def _gone_soon(pid: int, timeout_s: float = 5.0) -> bool:
+    """Whether ``pid`` is gone shortly: a killed orphan is reaped by init, not at once."""
+    import time
+
+    from raven.utils.pid import pid_alive
+
+    deadline = time.monotonic() + timeout_s
+    while pid_alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _settled(proc) -> None:
+    """Leave nothing behind whatever a test did to ``proc`` and its group."""
+    import os
+    import signal
+
+    with suppress(OSError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with suppress(OSError):
+        proc.kill()
+    with suppress(Exception):
+        proc.wait(timeout=5)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups and SIGKILL are POSIX")
+class TestTheSupervisorsStopOfItsGateway:
+    """The supervisor's half of a stop, run in this process: the real-tree tests
+    above drive the same code from a child interpreter, where it is exercised
+    but never measured."""
+
+    @pytest.fixture(autouse=True)
+    def quick(self, monkeypatch):
+        monkeypatch.setattr(serve_commands, "_CHILD_STOP_S", 0.5)
+        monkeypatch.setattr(serve_commands, "_KILL_WAIT_S", 2.0)
+
+    def test_a_group_is_read_only_from_a_child_that_leads_its_own(self) -> None:
+        leader = _child(_HONOURS_SIGTERM)
+        member = _child(_HONOURS_SIGTERM, own_group=False)
+        try:
+            assert serve_commands._owned_group(leader) == leader.pid
+            assert serve_commands._owned_group(member) is None, "this process's own group is never named"
+            assert serve_commands._owned_group(object()) is None
+        finally:
+            _settled(leader)
+            _settled(member)
+
+    def test_a_child_already_reaped_names_no_group(self) -> None:
+        proc = _child("print('ready', flush=True)")
+        proc.wait(timeout=10)
+        assert serve_commands._owned_group(proc) is None
+
+    def test_a_group_that_cannot_be_probed_is_not_reported_gone(self, monkeypatch) -> None:
+        def refuse(group, sig):
+            raise PermissionError(1, "not permitted")
+
+        monkeypatch.setattr("os.killpg", refuse)
+        assert serve_commands._group_gone(12345, 0.0) is False
+
+    def test_nothing_to_stop_is_a_no_op(self) -> None:
+        serve_commands._stop_child(None)
+
+    def test_a_gateway_that_honours_sigterm_goes_with_its_group(self) -> None:
+        proc = _child(_HONOURS_SIGTERM)
+        group = serve_commands._owned_group(proc)
+        try:
+            serve_commands._stop_child(proc, group)
+            assert proc.poll() is not None
+            assert serve_commands._group_gone(proc.pid, 0.0)
+        finally:
+            _settled(proc)
+
+    def test_a_gateway_that_ignores_sigterm_is_killed_with_its_group(self, capsys) -> None:
+        proc = _child(_IGNORES_SIGTERM)
+        group = serve_commands._owned_group(proc)
+        try:
+            serve_commands._stop_child(proc, group)
+            assert proc.returncode == -9
+            assert "ignored SIGTERM" in capsys.readouterr().out
+        finally:
+            _settled(proc)
+
+    def test_a_stubborn_gateway_with_no_group_is_killed_alone(self, capsys) -> None:
+        proc = _child(_IGNORES_SIGTERM)
+        try:
+            serve_commands._stop_child(proc, None)
+            assert proc.returncode == -9
+            assert "killing it" in capsys.readouterr().out
+        finally:
+            _settled(proc)
+
+    def test_a_group_member_that_ignores_sigterm_is_killed_after_its_gateway(self, tmp_path, capsys) -> None:
+        """The gateway exits on SIGTERM; the child it left in its group does not."""
+        import os
+        import signal
+
+        pid_file = tmp_path / "gc-pid"
+        gateway = (
+            "import subprocess, sys, time\n"
+            f"gc = subprocess.Popen([sys.executable, '-c', {_IGNORES_SIGTERM!r}], stdout=subprocess.PIPE, text=True)\n"
+            "gc.stdout.readline()\n"
+            f"open({str(pid_file)!r}, 'w').write(str(gc.pid))\n"
+            "print('ready', flush=True)\n"
+            "time.sleep(300)\n"
+        )
+        proc = _child(gateway)
+        try:
+            grandchild = int(pid_file.read_text())
+            serve_commands._stop_child(proc, serve_commands._owned_group(proc))
+            assert _gone_soon(grandchild), "the gateway's own child outlived the stop"
+            assert "own processes ignored SIGTERM" in capsys.readouterr().out
+        finally:
+            _settled(proc)
+            with suppress(OSError, ValueError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+    def test_a_stubborn_gateway_is_killed_with_its_group_in_one_step(self, tmp_path, capsys) -> None:
+        """Past the grace the kill goes to the whole group at once, so nothing is
+        left for the group's own SIGTERM round to report."""
+        import os
+        import signal
+
+        pid_file = tmp_path / "gc-pid"
+        gateway = (
+            "import signal, subprocess, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"gc = subprocess.Popen([sys.executable, '-c', {_IGNORES_SIGTERM!r}], stdout=subprocess.PIPE, text=True)\n"
+            "gc.stdout.readline()\n"
+            f"open({str(pid_file)!r}, 'w').write(str(gc.pid))\n"
+            "print('ready', flush=True)\n"
+            "time.sleep(300)\n"
+        )
+        proc = _child(gateway)
+        try:
+            grandchild = int(pid_file.read_text())
+            serve_commands._stop_child(proc, serve_commands._owned_group(proc))
+            assert _gone_soon(grandchild)
+            out = capsys.readouterr().out
+            assert "ignored SIGTERM" in out
+            assert "own processes" not in out, "the gateway's child was left for a second round"
+        finally:
+            _settled(proc)
+            with suppress(OSError, ValueError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+    def test_a_killed_group_still_being_reaped_is_waited_out_not_reported(self, monkeypatch, capsys) -> None:
+        """A member the killed gateway orphaned stays in the group until init
+        reaps it, which on a CI runner outlasted the spent budget. The first
+        probe after the kill reports it present, the way that zombie does."""
+        import os
+        import signal
+
+        real_killpg = os.killpg
+        killed: list[int] = []
+
+        def _killpg(group: int, sig: int) -> None:
+            if sig == signal.SIGKILL:
+                killed.append(group)
+            elif sig == 0 and len(killed) == 1:
+                killed.append(group)
+                return
+            real_killpg(group, sig)
+
+        monkeypatch.setattr(os, "killpg", _killpg)
+        proc = _child(_IGNORES_SIGTERM)
+        try:
+            serve_commands._stop_child(proc, serve_commands._owned_group(proc))
+            assert proc.returncode == -9
+            assert len(killed) == 2, "the probe that stands in for the zombie never ran"
+            assert "own processes" not in capsys.readouterr().out
+        finally:
+            _settled(proc)
+
+    def test_a_gateway_already_gone_still_has_its_group_settled(self) -> None:
+        proc = _child(_HONOURS_SIGTERM)
+        group = serve_commands._owned_group(proc)
+        proc.kill()
+        proc.wait(timeout=10)
+        serve_commands._stop_child(proc, group)
+
+
+class TestAStopThatLosesItsTarget:
+    def test_a_process_that_vanishes_before_the_kill_is_not_reported(self, monkeypatch) -> None:
+        monkeypatch.setattr("os.kill", lambda pid, sig: None)
+        monkeypatch.setattr(serve_commands, "_await_exit", lambda pid, timeout: False)
+
+        def gone(pid):
+            raise ProcessLookupError(pid)
+
+        monkeypatch.setattr(serve_commands, "_force_kill", gone)
+        unresponsive: list[str] = []
+        serve_commands._stop_one("gateway", 4242, unresponsive)
+        assert unresponsive == []
+
+    @pytest.mark.parametrize("label", ["supervisor", "gateway"])
+    def test_a_resident_that_cannot_be_signalled_is_warned_about(self, home: Path, monkeypatch, capsys, label) -> None:
+        def refuse(label, pid, unresponsive):
+            raise PermissionError(1, "not permitted")
+
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: 4242 if label == "supervisor" else None)
+        monkeypatch.setattr(serve_commands, "_read_serve_pid", lambda: 4242 if label == "gateway" else None)
+        monkeypatch.setattr(serve_commands, "looks_like_raven", lambda _pid: True)
+        monkeypatch.setattr(serve_commands, "_stop_one", refuse)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda pid: True)
+        with pytest.raises(typer.Exit) as result:
+            serve_commands._stop_resident()
+        assert result.value.exit_code == 1
+        assert f"could not stop the {label} (pid 4242)" in capsys.readouterr().out
+
+    def test_a_supervisor_gone_before_its_signal_is_a_quiet_stop(self, home: Path, monkeypatch, capsys) -> None:
+        def gone(label, pid, unresponsive):
+            raise ProcessLookupError(pid)
+
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: 4242)
+        monkeypatch.setattr(serve_commands, "_read_serve_pid", lambda: None)
+        monkeypatch.setattr(serve_commands, "looks_like_raven", lambda _pid: True)
+        monkeypatch.setattr(serve_commands, "_stop_one", gone)
+        monkeypatch.setattr(serve_commands, "_pid_alive", lambda pid: False)
+        assert serve_commands._stop_resident() is True
+        assert "could not stop" not in capsys.readouterr().out
+
+
+class TestTheDevFlag:
+    """`--dev` has to reach the process that serves the page, and a page must
+    not be opened against a service that cannot do what the flag asked for."""
+
+    def test_the_child_argv_carries_the_flag_in_both_shapes(self, monkeypatch) -> None:
+        monkeypatch.setattr(serve_commands, "_gateway_holds_the_lock", lambda: False)
+        assert serve_commands._gateway_argv(18999, dev=True)[-3:] == ["--page-port", "18999", "--dev"]
+        assert "--dev" not in serve_commands._gateway_argv(18999)
+        monkeypatch.setattr(serve_commands, "_gateway_holds_the_lock", lambda: True)
+        assert serve_commands._gateway_argv(18999, dev=True)[-3:] == ["--port", "18999", "--dev"]
+        assert "--dev" not in serve_commands._gateway_argv(18999, dev=False)
+
+    def test_the_supervisor_and_the_foreground_child_carry_the_flag(self, home: Path, monkeypatch) -> None:
+        import subprocess
+
+        argvs: list[list[str]] = []
+
+        class _Proc:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def wait(self):
+                return 0
+
+        def record(argv, **_kwargs):
+            argvs.append(list(argv))
+            return _Proc()
+
+        monkeypatch.setattr(subprocess, "Popen", record)
+        serve_commands._spawn_supervisor(18999, dev=True)
+        assert argvs[-1][-4:] == ["--supervise", "--port", "18999", "--dev"]
+        serve_commands._spawn_supervisor(18999)
+        assert "--dev" not in argvs[-1]
+        monkeypatch.setattr(serve_commands, "_refuse_incomplete_install", lambda *_a, **_k: None)
+        monkeypatch.setattr(serve_commands, "_gateway_holds_the_lock", lambda: False)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: None)
+        serve_commands._run_foreground(18999, dev=True)
+        assert argvs[-1][-3:] == ["--page-port", "18999", "--dev"]
+
+    def test_health_facts_ask_the_host_in_the_url(self, monkeypatch) -> None:
+        asked: list[str] = []
+
+        async def fake_health(base: str):
+            asked.append(base)
+            return {"trajectory_view": True}
+
+        monkeypatch.setattr(serve_commands, "_health", fake_health)
+        assert serve_commands._health_facts("http://127.0.0.1:18799/auth#x") == {"trajectory_view": True}
+        assert asked == ["http://127.0.0.1:18799"]
+
+    @pytest.mark.parametrize(
+        "dev, facts, refused, noted",
+        [
+            (True, {"trajectory_view": False}, True, False),
+            (True, {}, True, False),
+            (True, None, False, False),
+            (True, {"trajectory_view": True}, False, False),
+            (False, {"trajectory_view": True}, False, True),
+            (False, {"trajectory_view": False}, False, False),
+            (False, None, False, False),
+        ],
+    )
+    def test_attaching_checks_the_running_service(
+        self,
+        home: Path,
+        a_built_page,
+        opened: list[str],
+        supervised: list[int],
+        monkeypatch,
+        capsys,
+        dev,
+        facts,
+        refused,
+        noted,
+    ) -> None:
+        stopped: list[bool] = []
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: "http://127.0.0.1:31337/auth#abc")
+        monkeypatch.setattr(serve_commands, "_health_facts", lambda url: facts)
+        monkeypatch.setattr(serve_commands, "_stop_resident", lambda: stopped.append(True) or True)
+        if refused:
+            with pytest.raises(typer.Exit) as excinfo:
+                serve_commands._web(port=18999, dev=dev)
+            assert excinfo.value.exit_code == 1
+            assert opened == [] and supervised == [] and stopped == []
+            assert "raven web --stop" in capsys.readouterr().out
+        else:
+            serve_commands._web(port=18999, dev=dev)
+            assert opened == ["http://127.0.0.1:31337/auth#abc"] and stopped == []
+            out = capsys.readouterr().out
+            assert ("trajectory view enabled" in out) is noted
+            # An unreadable health answer is not a "no": the page opens, with a warning when --dev asked.
+            assert ("could not read http://127.0.0.1:31337/health" in out) is (dev and facts is None)
+
+    def test_a_recovering_supervisor_without_the_view_is_refused_too(
+        self, home: Path, a_built_page, opened: list[str], supervised: list[int], monkeypatch, capsys
+    ) -> None:
+        """First probe fails, an old supervisor is alive, its gateway comes back
+        without the view: the user asked for --dev, so the page is not opened
+        and nothing is stopped or started."""
+        stopped: list[bool] = []
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: 4242)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+        monkeypatch.setattr(serve_commands, "_health_facts", lambda url: {"trajectory_view": False})
+        monkeypatch.setattr(serve_commands, "_stop_resident", lambda: stopped.append(True) or True)
+        with pytest.raises(typer.Exit) as excinfo:
+            serve_commands._web(port=18999, dev=True)
+        assert excinfo.value.exit_code == 1
+        assert opened == [] and supervised == [] and stopped == []
+        assert "raven web --stop" in capsys.readouterr().out
+
+    def test_a_fresh_launch_with_the_flag_supervises_with_the_flag(
+        self, home: Path, a_built_page, opened: list[str], monkeypatch
+    ) -> None:
+        spawned: list[tuple[int, bool]] = []
+        monkeypatch.setattr(serve_commands, "_attached_url", lambda: None)
+        monkeypatch.setattr(serve_commands, "_read_web_state", lambda: None)
+        monkeypatch.setattr(serve_commands, "_read_serve_pid", lambda: None)
+        monkeypatch.setattr(serve_commands, "_spawn_supervisor", lambda port, dev=False: spawned.append((port, dev)))
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+        monkeypatch.setattr(serve_commands, "_health_facts", lambda url: {"trajectory_view": True})
+        serve_commands._web(port=18999, dev=True)
+        assert spawned == [(18999, True)] and opened == ["http://127.0.0.1:18999/auth#z"]
+
+    def test_the_supervise_branch_forwards_the_flag(self, home: Path, a_built_page, monkeypatch) -> None:
+        seen: list[tuple[int, bool]] = []
+        monkeypatch.setattr(serve_commands, "_supervise", lambda port, dev=False: seen.append((port, dev)))
+        serve_commands._web(port=18999, supervise=True, dev=True)
+        assert seen == [(18999, True)]
+
+    def test_the_foreground_wait_checks_the_service_but_keeps_the_child(self, home: Path, monkeypatch, capsys) -> None:
+        import subprocess
+
+        waited: list[bool] = []
+
+        class _Proc:
+            returncode = 0
+
+            def poll(self):
+                return None
+
+            def wait(self):
+                waited.append(True)
+                return 0
+
+        monkeypatch.setattr(subprocess, "Popen", lambda argv, **_k: _Proc())
+        monkeypatch.setattr(serve_commands, "_refuse_incomplete_install", lambda *_a, **_k: None)
+        monkeypatch.setattr(serve_commands, "_gateway_holds_the_lock", lambda: False)
+        monkeypatch.setattr(serve_commands, "_await_attach", lambda *_a, **_k: "http://127.0.0.1:18999/auth#z")
+        monkeypatch.setattr(serve_commands, "_health_facts", lambda url: {"trajectory_view": False})
+        opened: list[str] = []
+        monkeypatch.setattr(serve_commands, "_open", lambda url: opened.append(url))
+        with pytest.raises(typer.Exit):
+            serve_commands._run_foreground(18999, dev=True)
+        assert opened == [] and waited == [True]
+        assert "raven web --stop" in capsys.readouterr().out
+
+    def test_serve_arms_the_policy_before_serving(self, monkeypatch) -> None:
+        from raven.trajectory import policy
+
+        policy._reset_for_tests()
+        monkeypatch.setattr(serve_commands, "_refuse_incomplete_install", lambda *_a, **_k: None)
+        monkeypatch.setattr(serve_commands.bounded_asyncio, "run", lambda coro: coro.close())
+        try:
+            serve_commands._run(18999, False, dev=True)
+            assert policy.current().enabled() is True
+            serve_commands._run(18999, False)
+            assert policy.current().enabled() is False
+        finally:
+            policy._reset_for_tests()
+
+
+@pytest.mark.parametrize(("argv", "dev"), [(["web", "--dev"], True), (["web"], False)])
+def test_the_web_command_hands_dev_on(monkeypatch, argv: list[str], dev: bool) -> None:
+    from typer.testing import CliRunner
+
+    from raven.cli.commands import app
+
+    seen: list[bool] = []
+    monkeypatch.setattr(serve_commands, "_web", lambda port, **kw: seen.append(kw.get("dev")))
+    assert CliRunner().invoke(app, argv).exit_code == 0
+    assert seen == [dev]
+
+
+@pytest.mark.parametrize(("argv", "dev"), [(["serve", "--dev"], True), (["serve"], False)])
+def test_the_serve_command_hands_dev_on(monkeypatch, argv: list[str], dev: bool) -> None:
+    from typer.testing import CliRunner
+
+    from raven.cli.commands import app
+
+    seen: list[bool] = []
+    monkeypatch.setattr(serve_commands, "_gateway_hosted_page", lambda: None)
+    monkeypatch.setattr(serve_commands, "_run", lambda port, open_browser, dev=False: seen.append(dev))
+    assert CliRunner().invoke(app, argv).exit_code == 0
+    assert seen == [dev]

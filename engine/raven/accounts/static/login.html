@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Raven</title>
+<link rel="stylesheet" href="/_hub/static/hub.css" />
+</head>
+<body>
+<main class="hub-card">
+  <h1 data-i18n="title">Raven</h1>
+
+  <section id="setup" hidden>
+    <h2 data-i18n="setupTitle">Set up this server</h2>
+    <p class="hub-muted" data-i18n="setupText"></p>
+    <form id="setup-form">
+      <label for="s-user" data-i18n="username">Username</label>
+      <input id="s-user" autocomplete="username" required />
+      <label for="s-pass" data-i18n="password">Password</label>
+      <input id="s-pass" type="password" autocomplete="new-password" minlength="8" required />
+      <div class="hub-actions"><button class="hub-primary" type="submit" data-i18n="create">Create</button></div>
+    </form>
+  </section>
+
+  <section id="remote-setup" hidden>
+    <p class="hub-muted" data-i18n="setupRemote"></p>
+  </section>
+
+  <section id="signin" hidden>
+    <form id="login-form">
+      <label for="l-user" data-i18n="username">Username</label>
+      <input id="l-user" autocomplete="username" required />
+      <label for="l-pass" data-i18n="password">Password</label>
+      <input id="l-pass" type="password" autocomplete="current-password" required />
+      <div class="hub-actions">
+        <button class="hub-primary" type="submit" data-i18n="signin">Sign in</button>
+        <button type="button" id="show-register" data-i18n="register" hidden>Create an account</button>
+      </div>
+    </form>
+    <div id="google-block" hidden>
+      <div class="hub-divider" data-i18n="or">or</div>
+      <div class="hub-actions"><a href="/_hub/google/start"><button type="button" data-i18n="google">Sign in with Google</button></a></div>
+    </div>
+    <p class="hub-muted" id="closed" data-i18n="registrationClosed" hidden></p>
+  </section>
+
+  <section id="register" hidden>
+    <h2 data-i18n="register">Create an account</h2>
+    <form id="register-form">
+      <label for="r-user" data-i18n="username">Username</label>
+      <input id="r-user" autocomplete="username" required />
+      <label for="r-mail" data-i18n="email">E-mail</label>
+      <input id="r-mail" type="email" autocomplete="email" />
+      <label for="r-pass" data-i18n="password">Password</label>
+      <input id="r-pass" type="password" autocomplete="new-password" minlength="8" required />
+      <div class="hub-actions">
+        <button class="hub-primary" type="submit" data-i18n="create">Create</button>
+        <button type="button" id="show-signin" data-i18n="signin">Sign in</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="hub-error" id="error" role="alert"></div>
+</main>
+<script src="/_hub/static/hub.js"></script>
+<script>
+(function () {
+  "use strict";
+  var H = window.RavenHub;
+  var $ = function (id) { return document.getElementById(id); };
+  function show(id) { ["setup", "remote-setup", "signin", "register"].forEach(function (s) { $(s).hidden = s !== id; }); }
+  function fail(error) { $("error").textContent = error.message || String(error); }
+  function done() { window.location.href = "/"; }
+  function submit(form, path, fields) {
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      $("error").textContent = "";
+      var body = {};
+      Object.keys(fields).forEach(function (k) { body[k] = $(fields[k]).value; });
+      H.api(path, body).then(done, fail);
+    });
+  }
+  submit($("setup-form"), "/_hub/api/setup", { username: "s-user", password: "s-pass" });
+  submit($("login-form"), "/_hub/api/login", { username: "l-user", password: "l-pass" });
+  submit($("register-form"), "/_hub/api/register", { username: "r-user", password: "r-pass", email: "r-mail" });
+  $("show-register").onclick = function () { show("register"); };
+  $("show-signin").onclick = function () { show("signin"); };
+  H.api("/_hub/api/state").then(function (state) {
+    if (state.me) { return done(); }
+    if (state.setupNeeded) { return show(state.local ? "setup" : "remote-setup"); }
+    show("signin");
+    $("show-register").hidden = !state.registrationOpen;
+    $("closed").hidden = state.registrationOpen;
+    $("google-block").hidden = !state.google;
+  }, fail);
+})();
+</script>
+</body>
+</html>

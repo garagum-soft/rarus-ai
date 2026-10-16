@@ -1,0 +1,95 @@
+{
+  "language": "zh",
+  "agents": {
+    "defaults": {
+      "contextWindowTokens": 262144,
+      "maxToolIterations": 400,
+      "llmCallTimeout": 1800,
+      "llmRetryAfterOutput": true,
+      "compaction": {
+        "enabled": true,
+        "triggerRatio": 0.8,
+        "reservedTokens": 8192,
+        "preserveRecentTokens": 52429
+      },
+      "temperature": 0.95
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": false,
+    "sandbox": {
+      "backend": "none"
+    },
+    "exec": {
+      "timeout": 600
+    },
+    "media": {
+      "outputSubdir": "generated"
+    },
+    "disabledTools": [
+      "create_playbook",
+      "cron",
+      "deep_research",
+      "deliver_files",
+      "hub",
+      "load_playbook",
+      "message",
+      "plugin",
+      "raven_config",
+      "run_subagent_dag",
+      "spawn",
+      "text_to_speech",
+      "video_generate",
+      "browser_click",
+      "browser_navigate",
+      "browser_press",
+      "browser_screenshot",
+      "browser_scroll",
+      "browser_snapshot",
+      "browser_tabs",
+      "browser_type"
+    ],
+    "toolSearch": {
+      "enabled": true
+    }
+  },
+  "context": {
+    "curator_model": ""
+  },
+  "memory": {
+    "backend": "everos",
+    "userId": "raven-design",
+    "agentId": "raven-design",
+    "memoryTopK": 5
+  },
+  "plugins": {
+    "config": {
+      "everos-memory": {
+        "base_url": "http://localhost:18791"
+      },
+      "design-engine": {
+        "enabled": true,
+        "visualDomainSelector": {
+          "enabled": true,
+          "preferredMax": 2,
+          "alternativesMax": 3,
+          "maxTokens": 8192
+        },
+        "render": {
+          "enabled": true,
+          "restrictToWorkspace": false,
+          "backend": "direct",
+          "defaultPreviewCount": 6,
+          "maxPreviewCount": 12,
+          "timeoutSeconds": 240,
+          "rasterDpi": 300,
+          "maxSidePixels": 16384
+        }
+      }
+    }
+  },
+  "gateway": {
+    "userPool": 0,
+    "systemPool": 0
+  }
+}

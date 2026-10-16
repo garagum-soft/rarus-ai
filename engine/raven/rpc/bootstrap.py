@@ -1,0 +1,641 @@
+"""Reusable RPC stack assembly for headless transports (`raven serve`).
+
+Extracted shape of the wiring in ``tui_commands._run_rpc_server_until_done``:
+AgentLoop + brokers + SubscriptionEmitter + spine scheduler + method
+registration, minus any transport. The caller supplies a ``send_frame``
+sink (the TUI hands it a single socket writer; ``raven serve`` hands it a
+WebSocket broadcast), so the same engine assembly serves both transports.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import itertools
+import json
+import sys
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from loguru import logger
+
+from raven.rpc import LOCAL_CHANNEL
+
+SendFrame = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+@dataclass
+class RpcStack:
+    dispatcher: Any
+    emitter: Any
+    agent_loop: Any
+    build_error: Any
+    teardown: Callable[[], Awaitable[None]]
+    # The direct-chat map turn.send writes into and the outlet reads back. A
+    # host that mounts this stack beside its own spines needs it to build a
+    # second outlet over the same emitter (see raven/cli/_gateway_page.py).
+    direct_targets: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The page's ask_user broker. A host with a question
+    # surface of its own (the gateway's IM channels) needs the handle to build
+    # a per-conversation routing shim over both (see RoutingQuestionBroker).
+    question_broker: Any = None
+    deliverables: Any = None
+    # This stack's turn spine, for a host that runs the engine and needs a turn
+    # of its own -- a sub-agent's result relay into a page session -- to queue
+    # on the same lane as the page's turns rather than beside it. None on a
+    # stack built without an engine.
+    turn_scheduler: Any = None
+
+
+_TUI_INIT_CRASH_TYPES: tuple[type[BaseException], ...] = (
+    TypeError,
+    AttributeError,
+    ImportError,
+    FileNotFoundError,
+    OSError,
+)
+
+
+def _turn_pools() -> tuple[int, int]:
+    """The turn pools this stack schedules with: ``gateway.userPool`` and
+    ``gateway.systemPool`` from the config the loop is built from, 0 meaning
+    unbounded.
+
+    The channel gateway has always read these; serve, the page and every ACP
+    worker went through here and got the spine's built-in 1/1, so a second
+    conversation -- or a second task handed to a pooled sub-agent -- waited for
+    the first to finish with nothing on screen saying so. Read raw rather than
+    through ``load_config`` because that path creates a default file when none
+    exists, which a factory must not do as a side effect.
+    """
+    from raven.config.loader import get_config_path
+    from raven.config.schema import GatewayConfig
+
+    gateway = GatewayConfig()
+    path = get_config_path()
+    try:
+        if path.exists():
+            section = json.loads(path.read_text(encoding="utf-8")).get("gateway") or {}
+            gateway = GatewayConfig.model_validate(section)
+    except Exception as exc:  # noqa: BLE001 - a bad section must not take the stack down with it
+        logger.warning("rpc: gateway pool sizes unreadable in {} ({}); using the defaults", path, exc)
+    return gateway.user_pool, gateway.system_pool
+
+
+def build_agent_loop(workspace: str | None = None, home: str | None = None, channel: str = LOCAL_CHANNEL):
+    """The rpc stack's loop factory: :func:`raven.core.engine_stack.build_engine`
+    with every construction failure translated to the ``-32603`` the transport
+    can carry.
+
+    ``InternalError`` for an unfinished install names which provider needs what
+    (where the generic path once reported ``exception_message: "1"`` -- a
+    ``typer.Exit`` stringified -- and buried the real sentence in a log).
+    """
+    from pydantic import ValidationError
+
+    from raven.core.engine_stack import build_engine
+    from raven.providers.auth import MissingCredentialsError
+    from raven.rpc.errors import InternalError
+
+    try:
+        return build_engine(
+            workspace=workspace, home=home, channel=channel, notify=lambda m: print(m, file=sys.stderr)
+        ).loop
+    except MissingCredentialsError as e:
+        from loguru import logger as _logger
+
+        _logger.warning("rpc: provider not usable: {}", e.summary)
+        raise InternalError(
+            e.summary,
+            data={"reason": "missing_credentials", "provider": e.provider, "remedy": e.remedy},
+        ) from e
+    except (*_TUI_INIT_CRASH_TYPES, ValidationError) as e:
+        from loguru import logger as _logger
+
+        _logger.exception("rpc: engine init crash ({}); surfacing as -32603 internal_error", type(e).__name__)
+        raise InternalError(
+            detail=str(e),
+            data={
+                "reason": "tui_init_crash",
+                "exception_type": type(e).__name__,
+                "exception_message": str(e),
+                "log_path": "~/.raven/logs/tui.log",
+            },
+        ) from e
+    except Exception as e:
+        from loguru import logger as _logger
+
+        _logger.exception("rpc: engine init uncaught exception; surfacing as -32603 internal_error")
+        raise InternalError(
+            detail=str(e),
+            data={
+                "reason": "uncaught",
+                "exception_type": type(e).__name__,
+                "exception_message": str(e),
+                "log_path": "~/.raven/logs/tui.log",
+            },
+        ) from e
+
+
+#: The only methods ``raven_config`` may reach through the dispatcher it is lent.
+SELF_CONFIG_METHODS = frozenset(
+    {
+        "settings.set",
+        "config.set",
+        "model.set_fields",
+        "model.fetch_models",
+        "channels.configure",
+        "channels.status",
+        "settings.everos",
+        "settings.everos_set",
+        "subagents.list",
+        "subagents.add",
+        "subagents.update",
+        "subagents.toggle",
+        # raven_config's `test` action, behind the same confirmation as a write:
+        # it spends one call of that agent's quota.
+        "subagents.test",
+    }
+)
+
+
+def _lend_settings_writers(agent_loop: Any, dispatcher: Any) -> None:
+    """Give the loop's ``raven_config`` tool this stack's settings methods.
+
+    The tool changes a setting the way the settings page does -- the same
+    handler, the same validation, the same apply -- rather than through a
+    second writer of its own. A later stack on the same loop (another
+    connection) lends its dispatcher again; the handlers carry no connection
+    state for these methods, so whichever lent last serves.
+    """
+    tool = agent_loop.tools.get("raven_config") if getattr(agent_loop, "tools", None) is not None else None
+    if tool is None or not hasattr(tool, "set_rpc_caller"):
+        return
+    ids = itertools.count(1)
+
+    async def _call(method: str, params: dict[str, Any]) -> Any:
+        if method not in SELF_CONFIG_METHODS:
+            raise PermissionError(f"raven_config may not call {method}")
+        reply = await dispatcher.dispatch(
+            {"jsonrpc": "2.0", "id": f"raven_config-{next(ids)}", "method": method, "params": params}
+        )
+        error = reply.get("error") if isinstance(reply, dict) else None
+        if error:
+            data = error.get("data") if isinstance(error, dict) else None
+            detail = data.get("detail") if isinstance(data, dict) else None
+            raise _RefusedError(detail or (error.get("message") if isinstance(error, dict) else str(error)), data)
+        return reply.get("result") if isinstance(reply, dict) else None
+
+    tool.set_rpc_caller(_call)
+
+
+class _RefusedError(RuntimeError):
+    """A settings method's refusal, with the error's ``data`` kept: a sub-agent's ``remedy`` rides there."""
+
+    def __init__(self, text: str, data: Any) -> None:
+        super().__init__(text)
+        self.data = data if isinstance(data, dict) else {}
+
+
+#: What a credential card may write through, and nothing else.
+CREDENTIAL_METHODS = frozenset({"settings.set", "model.save_key", "channels.configure"})
+
+
+def _arm_credential_sinks(broker: Any, dispatcher: Any) -> None:
+    """The places a typed credential can land, each through the settings handler that owns it.
+
+    ``config:<path>`` is a secret setting of the catalog (a web or media vendor's
+    key through ``settings.set``, a model provider's through ``model.save_key``);
+    ``channel:<name>.<field>`` a channel's secret field, rebuilt when the channel
+    is running. A target no sink names is never shown a card.
+    """
+    from raven.config import self_surface as surface
+    from raven.rpc.credential_broker import CredentialRefusedError
+
+    ids = itertools.count(1)
+
+    async def _call(method: str, params: dict[str, Any]) -> Any:
+        if method not in CREDENTIAL_METHODS:
+            raise PermissionError(f"a credential may not be written through {method}")
+        reply = await dispatcher.dispatch(
+            {"jsonrpc": "2.0", "id": f"credential-{next(ids)}", "method": method, "params": params}
+        )
+        error = reply.get("error") if isinstance(reply, dict) else None
+        if error:
+            data = error.get("data") if isinstance(error, dict) else None
+            detail = data.get("detail") if isinstance(data, dict) else None
+            raise CredentialRefusedError(detail or (error.get("message") if isinstance(error, dict) else "refused"))
+        return reply.get("result") if isinstance(reply, dict) else None
+
+    async def _config(path: str, value: str) -> None:
+        field = surface.secret_input(path)
+        if field is None:
+            raise CredentialRefusedError(f"{path} cannot be saved from here; enter it in Settings.")
+        if field["via"] == "model.save_key":
+            await _call("model.save_key", {"slug": field["slug"], "api_key": value})
+        else:
+            await _call("settings.set", {"key": path, "value": value})
+
+    async def _channel(reference: str, value: str) -> None:
+        name, _, field_name = reference.partition(".")
+        _, running = surface.lookup(await asyncio.to_thread(surface.read_raw), f"channels.{name}.enabled")
+        params: dict[str, Any] = {"name": name, "fields": {field_name: value}}
+        if running:
+            params["enabled"] = True
+        await _call("channels.configure", params)
+
+    broker.add_sink("config", _config)
+    broker.add_sink("channel", _channel)
+
+
+async def build_rpc_stack(
+    send_frame: SendFrame,
+    *,
+    agent_loop: Any = None,
+    channel: str = "tui",
+    approval_responder: Any = None,
+    credential_cards: bool = False,
+    emitter: Any = None,
+    ensure_stack: Callable[[], Awaitable[bool]] | None = None,
+) -> RpcStack:
+    """Assemble dispatcher + engine wired to ``send_frame``.
+
+    Must run inside the event loop that will serve requests (cron start and
+    the spine scheduler bind to the running loop).
+
+    ``agent_loop`` mounts this stack over an engine somebody else owns (the
+    gateway hosting the page in its own process) instead of building one here.
+    The host keeps every process-lifecycle responsibility: it started cron and
+    the memory backend and will stop them, it owns ``subagents.set_submit``
+    (a subagent's result turn into an IM conversation must run on the host
+    spine, whose hubs can route any channel's delivery -- this stack's hub only
+    knows the page's; the host routes the relays that belong to page sessions
+    back to this stack's scheduler, exposed as ``RpcStack.turn_scheduler``, so
+    they queue behind the page's own turns instead of running beside them),
+    and this stack's teardown then stops only what it built (its brokers and
+    its turn spine). The page-facing sinks and brokers are applied either way; a host
+    with a question surface of its own then re-binds ask_user through a
+    per-conversation routing shim over this stack's broker (exposed
+    as ``RpcStack.question_broker``) and its own, so the page answers its own
+    sessions' questions without swallowing the host's -- see
+    ``RoutingQuestionBroker`` and the gateway's page mount.
+
+    ``channel`` names the delivery channel this stack's turns run on, and it must
+    reach *both* collaborators or nothing is delivered at all: ``build_rpc_spine``
+    registers its outlet under this name, and ``register_turn_methods`` stamps it
+    on every turn it submits as ``source.channel``. ``spine/turn.py`` states the
+    consequence outright -- the default channel MUST match the channel the outlet
+    was registered under, or the reply is dropped -- so passing it to one and not
+    the other loses every turn silently. Defaulted to ``"tui"``, which is what
+    both sides already used, so existing callers are unchanged.
+
+    ``approval_responder`` replaces the shell-approval transport for this stack's
+    watched turns (a USER turn, or a SUBAGENT relay into a conversation a surface
+    is watching). The broker built here emits ``approval.request`` on the same
+    ``send_frame``, which is right for a client that implements that method and
+    useless for one that does not -- an ACP client speaks
+    ``session/request_permission`` instead. Only the transport is replaced:
+    classification, the one-command scope and the absence of any always-allow
+    state all stay where they are. ``None`` keeps this stack's own broker, so
+    existing callers are unchanged.
+
+    ``credential_cards`` lends this stack's turns the credential card: a secret a
+    tool needs is typed into a masked field on the page (``credential.request``)
+    rather than sent anywhere near the model. Only a surface that draws that card
+    may turn it on -- the served page does -- because a card nobody can see holds
+    its turn until the broker's deadline. Off by default, so the ACP server and
+    any other caller keep telling the user where to enter a key instead.
+
+    ``emitter`` and ``ensure_stack`` belong to a host that can assemble this
+    stack a second time -- ``raven serve``, whose first run comes up without a
+    loop because no model is configured yet and builds one once the page writes
+    the config. ``ensure_stack`` is what ``config.set`` asks to do that: the
+    handler decides whether the moment calls for it, the host owns the
+    assembly. ``emitter`` hands the replacement stack the subscriptions the
+    live one already holds; built fresh, every stream open on the socket would
+    go quiet.
+    """
+    from raven.rpc.approval_broker import ApprovalBroker
+    from raven.rpc.confirm_broker import ConfirmBroker
+    from raven.rpc.connection import conversation_scoped
+    from raven.rpc.credential_broker import CredentialBroker
+    from raven.rpc.cron_events import build_cron_callback_spine, fanout_cron_missed
+    from raven.rpc.dispatcher import Dispatcher
+    from raven.rpc.errors import RpcError
+    from raven.rpc.methods import (
+        register_aligned_methods_except_system,
+    )
+    from raven.rpc.methods import (
+        turn as turn_module,
+    )
+    from raven.rpc.methods.system import register_system_methods
+    from raven.rpc.question_broker import QuestionBroker
+    from raven.rpc.spine import build_rpc_spine, make_dag_progress_sink
+    from raven.rpc.subscriptions import SubscriptionEmitter
+
+    dispatcher = Dispatcher()
+    # Carried across a rebuild rather than re-created: a subscription lives in
+    # the emitter, and the page re-subscribes only when the socket reconnects
+    # (ui-web state/session/registry.ts). A fresh emitter under a live socket
+    # would leave every open stream silently unfed.
+    emitter = emitter if emitter is not None else SubscriptionEmitter(send_frame=send_frame)
+    # ``confirm.request`` now names the conversation the dispatch was asked for
+    # (slash.exec threads its session_id down; see cli_dispatch), so the same
+    # scoping as the question broker applies: a destructive command's yes/no
+    # sheet reaches the surface that conversation speaks through instead of every
+    # terminal attached here. A dispatch that names no conversation -- a bare
+    # cli.dispatch -- still broadcasts, which is what it did before.
+    confirm_broker = ConfirmBroker(send_frame=conversation_scoped(send_frame))
+    # approval.request / approval.closed both carry conversation_id, so the same
+    # scoping as the question broker below keeps a protected-command overlay on
+    # the surface that sent the turn instead of every attached terminal.
+    approval_broker = ApprovalBroker(send_frame=conversation_scoped(send_frame))
+    # The card a credential is typed into, scoped like the approval sheet: it
+    # opens on the surface the conversation speaks through and nowhere else.
+    credential_broker = CredentialBroker(send_frame=conversation_scoped(send_frame))
+    _arm_credential_sinks(credential_broker, dispatcher)
+    # A question is not a stream: ``clarify.request`` carries no subscription_id
+    # for a client to filter on, so a broadcast one opens the sheet on every
+    # surface attached to this transport. Scoped to the connection that sent the
+    # turn instead, with the broadcast kept as the fallback for a conversation
+    # no connection owns (a cron or IM turn) -- see connection.conversation_scoped.
+    question_broker = QuestionBroker(send_frame=conversation_scoped(send_frame))
+    # Requests a process that died left in the attention queue can never be
+    # answered: close them before this stack starts raising its own.
+    from raven.proactive_engine.attention import queue as attention_queue
+
+    try:
+        attention_queue().reap()
+    except Exception as exc:  # noqa: BLE001 - the queue is a view; a stack must still come up
+        logger.debug("attention queue could not be reaped: {}", exc)
+    # Agent processes a dead raven left running, and the instances they served:
+    # found by owner and tree, ended in two phases, once per process.
+    from raven.agent.subagent.orphans import sweep_once_in_background
+
+    sweep_once_in_background()
+
+    owns_loop = agent_loop is None
+    build_error: RpcError | None = None
+    if owns_loop:
+        try:
+            # Built for the channel this stack serves, so the engine's cron
+            # partition covers the wakes this stack's own turns schedule. Built
+            # for the default instead, an acp-served process refused every wake
+            # its on-call agent armed -- "channel 'acp' is outside this runner's
+            # partition", logged once, then silence while the job sat unclaimed
+            # (measured 2026-09-03/04: seven wakes over two runs, none fired; the
+            # main agent re-prompted the agent by hand each time).
+            agent_loop = build_agent_loop(channel=channel)
+        except RpcError as e:
+            build_error = e
+
+    if agent_loop is not None:
+        if (ask_tool := agent_loop.tools.get("ask_user")) is not None and hasattr(ask_tool, "set_broker"):
+            ask_tool.set_broker(question_broker)
+        # The TUI path wires this too. Without it a DAG run streams nothing
+        # while it works, which reads as a hang rather than as progress.
+        agent_loop.set_dag_progress_sink(make_dag_progress_sink(emitter))
+        # The seam a delegated result re-enters its conversation at. Same
+        # emitter, same routing; without it the announce's reply arrives as an
+        # assistant turn nobody visibly asked.
+        agent_loop.subagents.set_delivery_sink(emitter.emit)
+
+        # Backfill the acp capability snapshots at startup: an acp row's
+        # statefulness comes from its snapshot, and before this the only writers
+        # were the UI Test button and a probe=true listing -- so a fresh install
+        # reported every acp agent stateless and the instance picker hid them.
+        # Skipped on the acp channel, where this stack is itself a subagent
+        # child: verifying there would cascade (each child verifying its own
+        # row launching another child), and the host's own stack does it.
+        if channel != "acp":
+            from raven.agent.subagent.probe import schedule_snapshot_verification
+
+            schedule_snapshot_verification(agent_loop.subagents)
+
+        # Per-server MCP events, broadcast rather than conversation-scoped: a
+        # server connecting is not part of anybody's turn. Clients already listen
+        # for these three, and an OAuth connect is not completable without them --
+        # the authorization URL would only ever reach the gateway host's own
+        # browser, which for `raven serve` is not where the user is.
+        async def _mcp_event(method: str, params: dict) -> None:
+            await send_frame({"jsonrpc": "2.0", "method": method, "params": params})
+
+        agent_loop.set_mcp_event_sink(_mcp_event)
+
+        # Contributed background services: every host of this stack is
+        # resident (the served page, an acp connection, a tui mounting its
+        # own loop), so this is where they start. Idempotent, so a host that
+        # already started them pays nothing; loud on failure, never fatal.
+        try:
+            await agent_loop.start_plugin_services()
+        except Exception:
+            from loguru import logger as _logger
+
+            _logger.exception("rpc: plugin services failed to start; continuing without them")
+
+    def _agent_loop_factory():
+        if agent_loop is not None:
+            return agent_loop
+        if build_error is not None:
+            raise build_error
+        return None
+
+    turn_scheduler = None
+    turn_ids: dict[str, str] = {}
+    # Owned here, not by the spine, because two collaborators need the same map:
+    # turn.send binds a turn's addressee into it and the spine's outlet/sink read
+    # it back to tag that turn's events (see build_rpc_spine).
+    direct_targets: dict[str, dict[str, str]] = {}
+    turn_teardown = None
+    if agent_loop is not None:
+        from raven.core.cron_stack import make_on_cron_job, make_on_session_wake
+
+        cron_readback: dict[str, str] = {}
+        user_pool, system_pool = _turn_pools()
+        turn_scheduler, _turn_hub, turn_ids, turn_teardown = build_rpc_spine(
+            agent_loop,
+            emitter,
+            channel=channel,
+            user_pool=user_pool,
+            system_pool=system_pool,
+            on_turn_end=turn_module.clear_active,
+            on_turn_start=turn_module.promote_pending_inject,
+            direct_targets=direct_targets,
+            readback_texts=cron_readback,
+            # The caller's transport when it brought one. The locally built
+            # broker is still constructed either way: ``approval.respond`` is
+            # registered from it below, and a caller that overrides the responder
+            # is not necessarily removing that method.
+            approval_responder=approval_responder or approval_broker,
+            credential_asker=credential_broker if credential_cards else None,
+        )
+        if owns_loop:
+            agent_loop.subagents.set_submit(turn_scheduler.submit)
+        if owns_loop and agent_loop.cron_service is not None:
+            if channel == LOCAL_CHANNEL:
+                base_on_cron = make_on_cron_job(
+                    submit=turn_scheduler.submit,
+                    readback_texts=cron_readback,
+                    default_channel=LOCAL_CHANNEL,
+                    cron_service=agent_loop.cron_service,
+                )
+                agent_loop.cron_service.on_job = build_cron_callback_spine(
+                    base_on_cron, emitter, direct_targets=direct_targets
+                )
+            else:
+                # An ACP client watches one session's update stream and nothing
+                # else: no fan-out reaches it and the reminder shape addresses
+                # the wrong agent. A wake runs on the session that armed it
+                # (measured 2026-09-04: two wakes, a whole campaign, no frame
+                # delivered until this was here).
+                agent_loop.cron_service.on_job = make_on_session_wake(submit=turn_scheduler.submit, channel=channel)
+            await agent_loop.cron_service.start()
+            # start() dropped past-due one-shot reminders on this runner's
+            # partition. The served page reaches the runtime through here rather
+            # than through tui_commands, so without this the drops are collected
+            # and never told to anyone.
+            if agent_loop.cron_service.last_startup_drops:
+                await fanout_cron_missed(emitter, drops=agent_loop.cron_service.last_startup_drops)
+
+    # The sink is what makes an explicit version check visible to tabs other than
+    # the one that asked: two windows on one gateway, one settings button, and
+    # both banners update.
+    register_system_methods(dispatcher, send_frame=send_frame)
+    register_aligned_methods_except_system(
+        dispatcher,
+        emitter=emitter,
+        agent_loop_factory=_agent_loop_factory,
+        approval_broker=approval_broker,
+        credential_broker=credential_broker,
+        confirm_broker=confirm_broker,
+        question_broker=question_broker,
+        scheduler=turn_scheduler,
+        turn_ids=turn_ids,
+        direct_targets=direct_targets,
+        build_error=build_error,
+        send_frame=send_frame,
+        default_channel=channel,
+        ensure_stack=ensure_stack,
+    )
+    if agent_loop is not None:
+        _lend_settings_writers(agent_loop, dispatcher)
+
+    if owns_loop and agent_loop is not None:
+        # A one-time runtime preparation belongs to whoever assembles the engine.
+        # ``run()`` does this in its own startup sequence, which is why the
+        # gateway's first turn never paid for it -- this stack never starts
+        # ``run()``, so without this line the cost landed on the first turn a
+        # user sent (measured: 4.52s of handshake before the turn began, bounded
+        # only by the turn-side timeout). Guarded on ``owns_loop``: a mounted
+        # stack's engine is the host's, and the host already connected it.
+        agent_loop.prewarm_mcp()
+
+    if owns_loop and agent_loop is not None and agent_loop.backend is not None:
+
+        async def _start_backend() -> None:
+            try:
+                await agent_loop.backend.start()
+            except Exception:
+                logger.exception("serve: memory backend start failed; continuing with degraded memory path")
+
+        asyncio.create_task(_start_backend())
+
+    async def teardown() -> None:
+        confirm_broker.cancel_all()
+        approval_broker.cancel_all()
+        credential_broker.cancel_all()
+        if owns_loop and agent_loop is not None and agent_loop.cron_service is not None:
+            try:
+                agent_loop.cron_service.stop()
+            except Exception:
+                pass
+        # Sub-agents go before the spine seals, and sealing is the first thing
+        # the turn teardown does: a run that finishes after it announces its
+        # result into a submit that refuses new turns, and that announce is the
+        # only route the result has back to its conversation. Cancelled first,
+        # those runs end as the stops they are. Same order every host follows:
+        # drain, cancel, then close -- cancelling after the pool closed would
+        # report each in-flight turn as a connection failure instead of as the
+        # stop it is, and sub-agents also go before the memory backend, whose
+        # adapter a run still going can hand another write. A mounted stack
+        # leaves this to its host, which owns the sub-agents and cancels them
+        # before tearing the mount down.
+        if owns_loop:
+            try:
+                from raven.acp_client.client import begin_drain
+
+                begin_drain()
+                if agent_loop is not None:
+                    await agent_loop.subagents.cancel_all(reason="the server stopped")
+            except Exception:
+                logger.exception("serve: cancelling in-flight sub-agents failed; continuing shutdown")
+        if turn_teardown is not None:
+            try:
+                await turn_teardown()
+            except Exception:
+                pass
+        # A mounted stack stops here: the engine, its backend, the browser and
+        # the ACP pool are the host process's to close, not this stack's.
+        if not owns_loop:
+            return
+        # Contributed services stop before the stores drain -- producers before
+        # drains, the same order dispose follows.
+        if agent_loop is not None:
+            try:
+                await agent_loop.stop_plugin_services()
+            except Exception:
+                logger.exception("plugin services stop failed; continuing shutdown")
+            try:
+                agent_loop.context.skills.stop_file_watcher()
+            except Exception:
+                logger.exception("serve: skill watcher stop failed; continuing shutdown")
+        if agent_loop is not None and agent_loop.backend is not None:
+            try:
+                # Drain before stop, the same order the CLI hosts follow:
+                # stopping the backend closes the HTTP client the queued
+                # writes still need, and this stack owns turns too.
+                await agent_loop.drain_backend_stores()
+                await agent_loop.backend.stop()
+            except Exception:
+                logger.exception("serve: memory backend stop failed; continuing shutdown")
+        # Last of the engine's own resources, and after the sub-agents that run
+        # tools through the same executor this closes. Newly required rather than
+        # newly correct: assembly now opens MCP transports (and stdio children,
+        # and the sandbox) even when no turn was ever served, so a stack stopped
+        # before its first turn used to have nothing of this to release.
+        if agent_loop is not None:
+            try:
+                await agent_loop.close_mcp()
+            except Exception:
+                logger.exception("serve: closing MCP failed; continuing shutdown")
+        # Chromium is a child process too, and a persistent-profile one: leaving
+        # it running holds the profile lock the next launch needs.
+        try:
+            from raven.browser import get_browser
+
+            await get_browser().close()
+        except Exception:
+            logger.exception("serve: browser close failed; continuing shutdown")
+        # ACP agents are launched with start_new_session, so they do not get the
+        # terminal's signals and outlive this process unless the pool is closed.
+        try:
+            from raven.acp_client.pool import close_pool
+
+            await close_pool()
+        except Exception:
+            logger.exception("serve: acp pool close failed; continuing shutdown")
+
+    return RpcStack(
+        dispatcher=dispatcher,
+        emitter=emitter,
+        agent_loop=agent_loop,
+        build_error=build_error,
+        teardown=teardown,
+        direct_targets=direct_targets,
+        question_broker=question_broker,
+        deliverables=getattr(agent_loop, "_deliverables", None),
+        turn_scheduler=turn_scheduler,
+    )
+
+
+__all__ = ["RpcStack", "SendFrame", "build_rpc_stack"]

@@ -1,0 +1,109 @@
+import { describe, expect, it } from 'vitest'
+
+import { resetCapabilities, serves } from './capabilities'
+import { FixtureTransport } from './fixtureTransport'
+import { RpcError } from './transport'
+
+import type { Fixtures } from './fixtureTransport'
+import type { ConnectionState } from './transport'
+
+describe('FixtureTransport', () => {
+  it('answers a value responder as-is', async () => {
+    const t = new FixtureTransport({ 'cron.list': { jobs: [] } })
+    await expect(t.call('cron.list', {})).resolves.toEqual({ jobs: [] })
+  })
+
+  it('hands a function responder the params the caller sent', async () => {
+    const seen: unknown[] = []
+    const t = new FixtureTransport({
+      'session.list': (params) => {
+        seen.push(params)
+        return { sessions: [] }
+      },
+    })
+    await t.call('session.list', { limit: 3 })
+    expect(seen).toEqual([{ limit: 3 }])
+  })
+
+  it('awaits an async function responder', async () => {
+    const t = new FixtureTransport({
+      'session.list': async () => ({ sessions: [] }),
+    })
+    await expect(t.call('session.list', {})).resolves.toEqual({ sessions: [] })
+  })
+
+  it('records the handshake\'s capabilities the way the socket does', async () => {
+    resetCapabilities()
+    const t = new FixtureTransport({
+      'system.hello': {
+        server_version: '0.1.0',
+        server_capabilities: ['jsonrpc-2.0', 'trajectory-v1'],
+        session: { default_channel: 'gui', default_session_key: 'gui:demo' },
+      },
+    })
+    expect(serves('trajectory-v1')).toBe(false)
+    await t.call('system.hello', { client_version: '0.1.0' })
+    expect(serves('trajectory-v1')).toBe(true)
+    resetCapabilities()
+  })
+
+  it('rejects an unrecorded method with the -32601 an engine would send', async () => {
+    const t = new FixtureTransport({})
+    const err = await t.call('cron.list', {}).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(-32601)
+  })
+
+  it('records every call in order, for traffic assertions', async () => {
+    const t = new FixtureTransport({
+      'cron.list': { jobs: [] },
+      'session.list': { sessions: [] },
+    })
+    await t.call('session.list', { limit: 1 })
+    await t.call('cron.list', {})
+    expect(t.calls.map((c) => c.method)).toEqual(['session.list', 'cron.list'])
+  })
+
+  it('fans a pushed notification out to handlers, and detach removes one', () => {
+    const t = new FixtureTransport({})
+    const got: unknown[] = []
+    const detach = t.on('memory.health', (p) => got.push(p))
+    t.on('memory.health', (p) => got.push(p))
+    t.emit('memory.health', { text: 'x' })
+    detach()
+    t.emit('memory.health', { text: 'y' })
+    expect(got).toEqual([{ text: 'x' }, { text: 'x' }, { text: 'y' }])
+  })
+
+  it('answers an undeclared method name recorded by string', async () => {
+    const t = new FixtureTransport({ 'raven.mcp.list': { servers: [] } } as Fixtures)
+    await expect(t.callUnchecked('raven.mcp.list', {})).resolves.toEqual({ servers: [] })
+    expect(t.calls.map((c) => c.method)).toEqual(['raven.mcp.list'])
+  })
+
+  it('rejects an unrecorded undeclared method with -32601, the way the gateway does', async () => {
+    const t = new FixtureTransport({})
+    const err = await t.callUnchecked('raven.mcp.set', { on: true }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(-32601)
+  })
+
+  it('fans a binary frame out to handlers, and detach removes one', () => {
+    const t = new FixtureTransport({})
+    const got: number[] = []
+    const detach = t.binary((buf) => got.push(buf.byteLength))
+    t.emitBinary(new ArrayBuffer(4))
+    detach()
+    t.emitBinary(new ArrayBuffer(8))
+    expect(got).toEqual([4])
+  })
+
+  it('reports the current state immediately, then each transition', async () => {
+    const t = new FixtureTransport({})
+    const states: ConnectionState[] = []
+    t.onState((s) => states.push(s))
+    await t.connect()
+    t.close()
+    expect(states).toEqual(['closed', 'open', 'closed'])
+  })
+})

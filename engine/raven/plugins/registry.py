@@ -1,0 +1,722 @@
+"""Plugin registry — turns discovered manifests into callable factories.
+
+Two responsibilities, split deliberately:
+
+1. **Activation** (:meth:`activate`) — for each discovered plugin
+   admitted by the user's config (``plugins.disabled`` opt-out list),
+   resolve each contributed factory reference (``module.path:callable``)
+   into an actual callable and record it in the factory table. This is
+   where plugin Python code is first imported — manifests up to this
+   point have been pure data.
+
+2. **Lookup** (:meth:`get_memory_backend_factory` etc.) — the synchronous
+   lookups the assembly root builds a backend through.
+
+Activation is per plugin. A plugin whose factory will not import, or that
+contributes a name another activated plugin already holds (two plugins both
+contributing a memory_backend named ``"everos"``), is rolled back as a whole
+and recorded in :meth:`PluginRegistry.activation_failures`; every other
+plugin still activates. The discovery layer already deduplicated *plugins*
+by id; the registry adds the second layer of deduplication on *contribution
+names*, and in a conflict the plugin activated first keeps the name.
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from raven.observability import semconv
+from raven.plugins.context import PluginContext, ServiceLocator
+from raven.plugins.discover import DiscoveredPlugin, ManifestOrigin
+from raven.plugins.manifest import PluginManifest
+from raven.tracing import trace
+
+logger = logging.getLogger(__name__)
+
+
+# A memory-backend factory is a callable that consumes a PluginContext and
+# returns a MemoryBackend implementation; typed as Any so this module does
+# not import the paper at load time.
+MemoryBackendFactory = Callable[[Any], Any]
+
+# A tool factory consumes a PluginContext and returns a single
+# ``raven.contracts.tool.Tool``. Typed as Any here so the plugin
+# layer stays import-light (no dependency on the agent package).
+ToolFactory = Callable[[Any], Any]
+HookFactory = Callable[[Any], Any]
+ToolGateFactory = Callable[[Any], Any]
+SessionObserverFactory = Callable[[Any], Any]
+OnboardFactory = Callable[[Any], Any]
+
+
+class PluginError(Exception):
+    """Base for plugin-system errors. Catchable as a single class so
+    CLI / host startup can render a unified diagnostic banner."""
+
+
+class PluginConflictError(PluginError):
+    """Two activated plugins contributed the same name into one slot."""
+
+
+class PluginFactoryImportError(PluginError):
+    """A manifest pointed at ``module.path:callable`` we couldn't import
+    or resolve."""
+
+
+class PluginNotFoundError(PluginError):
+    """The user asked for a backend name no activated plugin contributes."""
+
+
+@dataclass(frozen=True)
+class PluginActivationFailure:
+    """One admitted plugin that did not activate, and why."""
+
+    plugin_id: str
+    reason: str
+    manifest: PluginManifest
+
+
+@dataclass(frozen=True)
+class _ActivatedFactory:
+    """Resolved factory + provenance for diagnostics."""
+
+    plugin_id: str
+    name: str
+    factory: MemoryBackendFactory
+
+
+def _location_dir(location: Path | None) -> str | None:
+    """The directory a file-based plugin's manifest sits in, as ``sys.path`` spells it."""
+    return None if location is None else str(location.parent)
+
+
+class PluginRegistry:
+    """Single registration center for activated contribution factories."""
+
+    def __init__(self) -> None:
+        self._manifests: dict[str, PluginManifest] = {}
+        self._memory_backends: dict[str, _ActivatedFactory] = {}
+        self._tools: dict[str, _ActivatedFactory] = {}
+        self._hooks: dict[str, _ActivatedFactory] = {}
+        self._services: dict[str, _ActivatedFactory] = {}
+        self._tool_gates: dict[str, _ActivatedFactory] = {}
+        self._session_observers: dict[str, _ActivatedFactory] = {}
+        self._onboard: dict[str, _ActivatedFactory] = {}
+        self._scheduled: dict[str, _ActivatedFactory] = {}
+        self._scheduled_specs: dict[str, Any] = {}
+        self._failures: dict[str, PluginActivationFailure] = {}
+
+    # ── Activation ───────────────────────────────────────────────
+
+    def activate(
+        self,
+        discovered: list[DiscoveredPlugin],
+        *,
+        disabled: frozenset[str] = frozenset(),
+        access: Any = None,
+    ) -> None:
+        """Resolve and register every contribution from every admitted plugin.
+
+        A plugin is admitted iff its id is not in ``disabled``. An admitted
+        plugin that fails leaves no contribution and no ``sys.path`` entry
+        behind, is recorded in :meth:`activation_failures`, and does not stop
+        the plugins after it.
+
+        ``access`` (a ``raven.plugins.access.AccessPolicy``) is asked first,
+        before any of the plugin's code is imported: a plugin its role and
+        grants do not cover fails activation with the reason, and nothing of
+        it runs.
+        """
+        for d in discovered:
+            mf = d.manifest
+            if mf.id in disabled:
+                logger.info("plugin %s disabled by user config", mf.id)
+                continue
+            tables = self._tables()
+            snapshot = [dict(t) for t in tables]
+            path_len = len(sys.path)
+            try:
+                if access is not None:
+                    access.check(d)
+                self._activate_one(mf, source=d.source, location=d.location)
+            except PluginError as e:
+                for table, before in zip(tables, snapshot):
+                    table.clear()
+                    table.update(before)
+                # Only the entry _ensure_importable appended; a plugin's import
+                # may itself have grown sys.path, and that is not ours to undo.
+                if len(sys.path) > path_len and _location_dir(d.location) == sys.path[path_len]:
+                    del sys.path[path_len]
+                self._failures[mf.id] = PluginActivationFailure(plugin_id=mf.id, reason=str(e), manifest=mf)
+                logger.warning("plugin %s was not activated: %s", mf.id, e)
+
+    def _tables(self) -> list[dict[str, Any]]:
+        return [
+            self._manifests,
+            self._memory_backends,
+            self._tools,
+            self._hooks,
+            self._services,
+            self._tool_gates,
+            self._session_observers,
+            self._onboard,
+            self._scheduled,
+            self._scheduled_specs,
+        ]
+
+    def _activate_one(
+        self,
+        mf: PluginManifest,
+        *,
+        source: ManifestOrigin,
+        location: Path | None,
+    ) -> None:
+        if mf.id in self._manifests:
+            # Discovery should have deduped this already; defensive.
+            raise PluginConflictError(
+                f"plugin id {mf.id!r} activated twice",
+            )
+        self._manifests[mf.id] = mf
+
+        # Call-order sensitive: a file-based USER/PROJECT plugin ships its
+        # factory module inside the plugin directory, which nothing puts on
+        # sys.path — make it importable before _resolve_factory runs below.
+        self._ensure_importable(source, location)
+
+        for contribution in mf.contributes.memory_backends:
+            if contribution.name in self._memory_backends:
+                prev = self._memory_backends[contribution.name]
+                raise PluginConflictError(
+                    f"memory_backend {contribution.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, contribution.factory)
+            self._memory_backends[contribution.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=contribution.name,
+                factory=factory,
+            )
+            logger.debug(
+                "registered memory_backend %s from %s",
+                contribution.name,
+                mf.id,
+            )
+
+        for tool in mf.contributes.tools:
+            if tool.name in self._tools:
+                prev = self._tools[tool.name]
+                raise PluginConflictError(
+                    f"tool {tool.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, tool.factory)
+            self._tools[tool.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=tool.name,
+                factory=factory,
+            )
+            logger.debug("registered tool %s from %s", tool.name, mf.id)
+        for hook in mf.contributes.hooks:
+            if hook.name in self._hooks:
+                prev = self._hooks[hook.name]
+                raise PluginConflictError(
+                    f"hook {hook.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, hook.factory)
+            self._hooks[hook.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=hook.name,
+                factory=factory,
+            )
+            logger.debug("registered hook %s from %s", hook.name, mf.id)
+        for service in mf.contributes.services:
+            if service.name in self._services:
+                prev = self._services[service.name]
+                raise PluginConflictError(
+                    f"service {service.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, service.factory)
+            self._services[service.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=service.name,
+                factory=factory,
+            )
+            logger.debug("registered service %s from %s", service.name, mf.id)
+        for gate in mf.contributes.tool_gates:
+            if gate.name in self._tool_gates:
+                prev = self._tool_gates[gate.name]
+                raise PluginConflictError(
+                    f"tool_gate {gate.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, gate.factory)
+            self._tool_gates[gate.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=gate.name,
+                factory=factory,
+            )
+            logger.debug("registered tool_gate %s from %s", gate.name, mf.id)
+        for observer in mf.contributes.session_observers:
+            if observer.name in self._session_observers:
+                prev = self._session_observers[observer.name]
+                raise PluginConflictError(
+                    f"session_observer {observer.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, observer.factory)
+            self._session_observers[observer.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=observer.name,
+                factory=factory,
+            )
+            logger.debug("registered session_observer %s from %s", observer.name, mf.id)
+        for step in mf.contributes.onboard:
+            if step.name in self._onboard:
+                prev = self._onboard[step.name]
+                raise PluginConflictError(
+                    f"onboard {step.name!r} contributed by both {prev.plugin_id!r} and {mf.id!r}",
+                )
+            factory = self._resolve_factory(mf.id, step.factory)
+            self._onboard[step.name] = _ActivatedFactory(
+                plugin_id=mf.id,
+                name=step.name,
+                factory=factory,
+            )
+            logger.debug("registered onboard %s from %s", step.name, mf.id)
+        for hook in mf.contributes.scheduled:
+            # Keyed by plugin as well as name: two plugins may each have a
+            # "nightly", and the key is what a schedule's state is filed under.
+            key = f"{mf.id}:{hook.name}"
+            factory = self._resolve_factory(mf.id, hook.factory)
+            self._scheduled[key] = _ActivatedFactory(plugin_id=mf.id, name=hook.name, factory=factory)
+            self._scheduled_specs[key] = hook
+            logger.debug("registered scheduled hook %s", key)
+
+    @staticmethod
+    def _ensure_importable(source: ManifestOrigin, location: Path | None) -> None:
+        """Put a file-based plugin's directory on ``sys.path`` so its
+        factory module imports.
+
+        Only USER / PROJECT / CHECKOUT plugins need this: their Python package lives
+        in the plugin directory (``<root>/<id>/``) that nothing else adds
+        to the path. BUNDLED code ships inside the raven package and
+        ENTRY_POINTS plugins are installed into site-packages, so both
+        already import without help.
+
+        Appended (not prepended) so an installed package of the same name
+        keeps priority, and guarded so repeated activations don't grow the
+        path. This widens the process-wide import surface for the lifetime
+        of the process: every module under that directory becomes
+        importable, not just the referenced factory.
+        """
+        if source not in (ManifestOrigin.USER, ManifestOrigin.PROJECT, ManifestOrigin.CHECKOUT) or location is None:
+            return
+        plugin_dir = _location_dir(location)
+        if plugin_dir not in sys.path:
+            sys.path.append(plugin_dir)
+
+    @staticmethod
+    def _resolve_factory(plugin_id: str, ref: str) -> MemoryBackendFactory:
+        """Import ``module`` and grab ``callable`` from it.
+
+        Manifest validation already enforced the ``module.path:callable``
+        shape, so this just splits and imports.
+        """
+        module_path, _, attr = ref.partition(":")
+        try:
+            mod = importlib.import_module(module_path)
+        except Exception as e:
+            raise PluginFactoryImportError(
+                f"plugin {plugin_id!r}: importing {module_path!r} failed: {e}",
+            ) from e
+        try:
+            obj = getattr(mod, attr)
+        except AttributeError as e:
+            raise PluginFactoryImportError(
+                f"plugin {plugin_id!r}: {module_path!r} has no attribute {attr!r}",
+            ) from e
+        except Exception as e:
+            raise PluginFactoryImportError(
+                f"plugin {plugin_id!r}: reading {attr!r} from {module_path!r} failed: {e}",
+            ) from e
+        if not callable(obj):
+            raise PluginFactoryImportError(
+                f"plugin {plugin_id!r}: {ref} resolved to a non-callable {type(obj).__name__}",
+            )
+        return obj  # type: ignore[return-value]
+
+    # ── Introspection ────────────────────────────────────────────
+
+    def activated_ids(self) -> list[str]:
+        """Stable-ordered list of activated plugin ids."""
+        return sorted(self._manifests)
+
+    def activation_failures(self) -> list[PluginActivationFailure]:
+        """Admitted plugins that did not activate, ordered by plugin id."""
+        return [self._failures[pid] for pid in sorted(self._failures)]
+
+    def memory_backend_names(self) -> list[str]:
+        """Stable-ordered list of registered memory-backend names."""
+        return sorted(self._memory_backends)
+
+    def get_memory_backend_factory(self, name: str) -> MemoryBackendFactory:
+        """Look up the factory for ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._memory_backends[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no memory_backend named {name!r} (registered: {self.memory_backend_names()})",
+            ) from e
+
+    def tool_names(self) -> list[str]:
+        """Stable-ordered list of registered plugin-tool names."""
+        return sorted(self._tools)
+
+    def tool_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed tool ``name``, or ``None``."""
+        entry = self._tools.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def get_tool_factory(self, name: str) -> ToolFactory:
+        """Look up the factory for tool ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._tools[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no tool named {name!r} (registered: {self.tool_names()})",
+            ) from e
+
+    def hook_names(self) -> list[str]:
+        """Stable-ordered list of registered plugin-hook names."""
+        return sorted(self._hooks)
+
+    def service_names(self) -> list[str]:
+        """Stable-ordered list of registered plugin-service names."""
+        return sorted(self._services)
+
+    def service_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed service ``name``, or ``None``."""
+        entry = self._services.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def hook_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed hook ``name``, or ``None``."""
+        entry = self._hooks.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def tool_gate_names(self) -> list[str]:
+        """Stable-ordered list of registered tool-gate names."""
+        return sorted(self._tool_gates)
+
+    def tool_gate_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed tool_gate ``name``, or ``None``."""
+        entry = self._tool_gates.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def get_tool_gate_factory(self, name: str) -> ToolGateFactory:
+        """Look up the factory for tool_gate ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._tool_gates[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no tool_gate named {name!r} (registered: {self.tool_gate_names()})",
+            ) from e
+
+    def session_observer_names(self) -> list[str]:
+        """Stable-ordered list of registered session-observer names."""
+        return sorted(self._session_observers)
+
+    def session_observer_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed session_observer ``name``, or ``None``."""
+        entry = self._session_observers.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def get_session_observer_factory(self, name: str) -> SessionObserverFactory:
+        """Look up the factory for session_observer ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._session_observers[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no session_observer named {name!r} (registered: {self.session_observer_names()})",
+            ) from e
+
+    def onboard_names(self) -> list[str]:
+        """Stable-ordered list of registered onboard-step names."""
+        return sorted(self._onboard)
+
+    def onboard_plugin_id(self, name: str) -> str | None:
+        """Plugin id that contributed onboard step ``name``, or ``None``."""
+        entry = self._onboard.get(name)
+        return entry.plugin_id if entry is not None else None
+
+    def get_onboard_factory(self, name: str) -> OnboardFactory:
+        """Look up the factory for onboard step ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._onboard[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no onboard step named {name!r} (registered: {self.onboard_names()})",
+            ) from e
+
+    def get_hook_factory(self, name: str) -> HookFactory:
+        """Look up the factory for hook ``name``. Raises ``PluginNotFoundError``."""
+        try:
+            return self._hooks[name].factory
+        except KeyError as e:
+            raise PluginNotFoundError(
+                f"no hook named {name!r} (registered: {self.hook_names()})",
+            ) from e
+
+    def manifest_for(self, plugin_id: str) -> PluginManifest | None:
+        """Return the manifest of an activated plugin, or None."""
+        return self._manifests.get(plugin_id)
+
+    def scheduled_keys(self) -> list[str]:
+        """Stable-ordered ``<plugin id>:<name>`` keys of activated scheduled hooks."""
+        return sorted(self._scheduled)
+
+    def scheduled_spec(self, key: str) -> Any:
+        """The manifest entry (cron, timezone, missed, timeout) of scheduled hook ``key``."""
+        try:
+            return self._scheduled_specs[key]
+        except KeyError as e:
+            raise PluginNotFoundError(f"no scheduled hook {key!r} (registered: {self.scheduled_keys()})") from e
+
+    def scheduled_plugin_id(self, key: str) -> str | None:
+        entry = self._scheduled.get(key)
+        return entry.plugin_id if entry is not None else None
+
+    def build_scheduled(
+        self,
+        key: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Construct scheduled hook ``key`` with a fresh ``PluginContext``; exceptions propagate."""
+        try:
+            entry = self._scheduled[key]
+        except KeyError as e:
+            raise PluginNotFoundError(f"no scheduled hook {key!r} (registered: {self.scheduled_keys()})") from e
+        config = self._admit(entry, config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{key}"),
+        )
+        return entry.factory(ctx)
+
+    # ── Build (PG-3 entry point) ──────────────────────────────────
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("memory_backend"))
+    def build_memory_backend(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named factory and call it with a fresh ``PluginContext``.
+
+        Construction is synchronous — factories that need async setup
+        return a backend whose ``start()`` will be awaited later by the
+        host. Any exception from the factory propagates so the host
+        sees the real cause rather than a wrapped one.
+        """
+
+        factory = self.get_memory_backend_factory(name)
+        config = self._admit(self._memory_backends[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("tool"))
+    def build_tool(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named tool factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``Tool``.
+
+        Symmetric with :meth:`build_memory_backend`: synchronous
+        construction, exceptions propagate so the host sees the real
+        cause. The host registers the returned tool into the agent's
+        :class:`ToolRegistry`.
+        """
+
+        factory = self.get_tool_factory(name)
+        config = self._admit(self._tools[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("hook"))
+    def build_hook(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named hook factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``AgentHook``.
+
+        Symmetric with :meth:`build_tool`: synchronous construction,
+        exceptions propagate so the host sees the real cause. The host
+        appends the returned hook to the loop's chain.
+        """
+        factory = self.get_hook_factory(name)
+        config = self._admit(self._hooks[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    def build_service(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named service factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``PluginService``.
+
+        Symmetric with :meth:`build_hook`. The host starts the returned
+        service only when it is resident, and owns its lifecycle.
+        """
+        try:
+            entry = self._services[name]
+        except KeyError as e:
+            raise PluginNotFoundError(f"no plugin service named {name!r}") from e
+        config = self._admit(entry, config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return entry.factory(ctx)
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("tool_gate"))
+    def build_tool_gate(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named tool-gate factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``ToolGate``.
+
+        Symmetric with :meth:`build_hook`: synchronous construction,
+        exceptions propagate so the host sees the real cause. The host casts
+        the returned gate over the agent's tool registry at assembly
+        (paper: contracts/tool_gate.py).
+        """
+        factory = self.get_tool_gate_factory(name)
+        config = self._admit(self._tool_gates[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("session_observer"))
+    def build_session_observer(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named session-observer factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``SessionObserver``.
+
+        Symmetric with :meth:`build_tool_gate`: synchronous construction,
+        exceptions propagate so the host sees the real cause. A resident host
+        attaches the returned observer to the session store for the
+        generation (paper: contracts/session_events.py).
+        """
+        factory = self.get_session_observer_factory(name)
+        config = self._admit(self._session_observers[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    @trace.instrument("plugin.load", extract=semconv.plugin_load("onboard"))
+    def build_onboard_step(
+        self,
+        name: str,
+        *,
+        config: dict[str, Any],
+        services: "ServiceLocator",
+        logger: logging.Logger | None = None,
+    ) -> Any:
+        """Resolve the named onboard factory and call it with a fresh
+        ``PluginContext``, returning the constructed ``OnboardStep``.
+
+        Symmetric with :meth:`build_session_observer`: synchronous
+        construction, exceptions propagate so the host sees the real cause.
+        ``raven onboard`` runs the returned step with the wizard shell it
+        lends (paper: contracts/onboard.py).
+        """
+        factory = self.get_onboard_factory(name)
+        config = self._admit(self._onboard[name], config)
+        ctx = PluginContext(
+            config=config,
+            services=services,
+            logger=logger or logging.getLogger(f"raven.plugins.{name}"),
+        )
+        return factory(ctx)
+
+    def _admit(self, entry: "_ActivatedFactory", config: dict[str, Any]) -> dict[str, Any]:
+        """Admit a config slice against the owning manifest's declaration.
+
+        A manifest with no ``config_schema`` keeps the verbatim pass-through
+        this registry always had; a declaring manifest gets defaults applied
+        and declared keys type-checked before its factory boards.
+        """
+        from raven.config.admission import admit_slice
+
+        mf = self._manifests.get(entry.plugin_id)
+        schema = mf.config_schema if mf is not None else {}
+        return admit_slice(schema, config, plugin_id=entry.plugin_id)
+
+
+__all__ = [
+    "HookFactory",
+    "MemoryBackendFactory",
+    "OnboardFactory",
+    "PluginConflictError",
+    "PluginError",
+    "PluginFactoryImportError",
+    "PluginNotFoundError",
+    "PluginRegistry",
+    "SessionObserverFactory",
+    "ToolFactory",
+    "ToolGateFactory",
+]

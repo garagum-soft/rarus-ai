@@ -1,0 +1,109 @@
+const fs = require("fs");
+const path = require("path");
+
+const TYPES = [
+  "build",
+  "chore",
+  "ci",
+  "docs",
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "revert",
+  "test",
+];
+
+// The canonical scope set mirrors the documentation site's repo-layout
+// table (docs-site/docs/repo-layout.md): every top-level package under
+// raven/ and every module beside them, computed from the tree at
+// config-load time so the enum cannot rot behind a refactor.
+//
+// The modules are read rather than listed. They were a single hardcoded
+// "home", which is the same thing as not reading them: the second module to
+// arrive was a scope the table accepted and this enum rejected, and the two
+// are meant to be the same set (tests/test_scope_canon.py derives it this
+// way, from packages and modules both).
+function ravenPackages() {
+  const root = path.join(__dirname, "raven");
+  const SKIP = ["__init__.py", "__main__.py"];
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        (entry.isDirectory() &&
+          fs.existsSync(path.join(root, entry.name, "__init__.py"))) ||
+        (entry.isFile() &&
+          entry.name.endsWith(".py") &&
+          !SKIP.includes(entry.name)),
+    )
+    .map((entry) => entry.name.replace(/\.py$/, ""));
+}
+
+// A change living wholly in a top-level tree outside raven/ uses that tree
+// as its scope (see that page's preamble).
+const TOP_LEVEL_TREES = [
+  "agents",
+  "benchmarks",
+  "bridge",
+  "docs",
+  "evolver",
+  "plugins-dist",
+  "schemas",
+  "scripts",
+  "tests",
+  "ui-tui",
+  "ui-web",
+];
+
+// Two files at the repository root rather than a tree, so no directory scan
+// reaches them -- but a change confined to install.sh and install.ps1 is as
+// scoped as one confined to ui-web/, and `*` says less than the truth about it.
+const ROOT_SURFACES = ["installer"];
+
+const PRODUCTS = ["raven-code", "raven-design", "raven-oncall", "raven-ppt", "raven-research"];
+
+// The plugin distributions beside the host wheel: each is its own package
+// with its own version, so a change confined to one scopes by its wheel name.
+const WHEEL_DISTRIBUTIONS = ["design-engine", "everos-memory", "ppt-engine"];
+
+// Scopes already used on refactor/raven_v0_2_0 before the enum existed; a PR
+// from that branch lints its whole history, so they stay legal until the
+// branch merges. Retire this list afterwards.
+const LEGACY_SCOPES = [
+  "changelog",
+  "context",
+  "integration",
+  "plans",
+  "subagent",
+  "subagents",
+  "ui",
+  "web_rpc",
+];
+
+const SCOPES = [
+  ...new Set([
+    ...ravenPackages(),
+    ...TOP_LEVEL_TREES,
+    ...ROOT_SURFACES,
+    ...PRODUCTS,
+    ...WHEEL_DISTRIBUTIONS,
+    ...LEGACY_SCOPES,
+    "*",
+    "deps",
+    "deps-dev",
+  ]),
+].sort();
+
+module.exports = {
+  rules: {
+    "header-max-length": [2, "always", 100],
+    "scope-enum": [2, "always", SCOPES],
+    "subject-case": [2, "never", ["sentence-case", "start-case", "pascal-case", "upper-case"]],
+    "subject-empty": [2, "never"],
+    "subject-full-stop": [2, "never", "."],
+    "type-case": [2, "always", "lower-case"],
+    "type-empty": [2, "never"],
+    "type-enum": [2, "always", TYPES],
+  },
+};

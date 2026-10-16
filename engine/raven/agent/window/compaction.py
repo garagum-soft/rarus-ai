@@ -1,0 +1,307 @@
+"""In-turn transcript compaction helpers for long agentic turns.
+
+A tool-heavy turn appends results for tens of iterations while the context is
+assembled only once, so the working transcript grows until it hits the model's
+window. The reactive half of that problem -- on a provider's overflow error,
+elide older tool-result bodies and retry (``shrink.emergency_shrink``) -- and
+the proactive half below are both decided by the Memory role; this module
+carries the pure pieces of the proactive half, read only when
+``agents.defaults.compaction.enabled`` is on:
+
+- trigger arithmetic: when the last observed context size crosses the line
+  (``should_compact`` / ``reserved_tokens``), act before the next call instead
+  of waiting for the overflow;
+- head summary: replace everything between the first user message and a
+  recent verbatim tail with one LLM-written handoff brief (``select_split`` /
+  ``render_transcript`` / ``build_compacted``); the tail budget comes from
+  ``tail_budget``.
+
+The MemoryConsolidator operates at turn boundaries and never runs inside a
+turn; this module, ``shrink.emergency_shrink`` and the standing image window
+(``shrink.window_images``, which retires pictures the model has already looked at
+before every call) are the only in-turn mechanisms.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+
+from raven.contracts.llm_provider import REASONING_EFFORT_LADDER
+
+SUMMARY_MARKER = "[Context summary — earlier steps were compacted to fit the context window]"
+
+# Room the trigger leaves for the model's reply: the configured reserve, else
+# the resolved output budget capped at 20k.
+_RESERVED_CAP = 20_000
+
+# Verbatim tail kept through a summary compaction: 25% of the usable window,
+# clamped to [2k, 8k] tokens.
+_TAIL_CAP = 8_000
+_TAIL_FLOOR = 2_000
+_TAIL_FRACTION = 0.25
+
+# Output budget for the summary call: a ceiling on what the model may write,
+# not a length it aims at. Generous on purpose -- the failure being fixed is a
+# summary that had no room at all, and headroom costs nothing unless a summary
+# actually runs into it.
+#
+# It was 2000, which is a fair size for the brief and no size at all for a
+# thinking model: a reasoning model spends its thinking from this same budget,
+# and two measured summary calls (107 head messages / 45264 chars, then 112 /
+# 54248) came back with an empty body having spent all of it before the brief
+# began. Measured against a real head in that same band -- 158 messages, 46860
+# chars -- the brief this produces is 1466 completion tokens behind 25
+# reasoning tokens, so the model's own stopping point decides the length and
+# 32000 is about twenty times what it reaches for.
+#
+# The other thing headroom buys is that a brief is never cut mid-sentence,
+# which is worse than an empty one: a cut brief is non-empty, so it is accepted
+# and replaces the head it was meant to summarize. That is now checked on the
+# way back (the caller reads ``finish_reason``) rather than only bought here.
+#
+# This is a ceiling on a request that has room. What the request may actually
+# ask for is ``summary_output_budget`` below, because at the compaction trigger
+# there is no room by construction.
+SUMMARY_MAX_TOKENS = 32_000
+
+# Slack the summary request leaves below the window. Its prompt side is a local
+# tiktoken estimate while the provider counts with its own tokenizer, so a
+# budget computed to the last token goes over on a disagreement of one; 5% of
+# the prompt is what the bound gives up to that. Being under costs the brief
+# nothing until the room falls near what a brief actually reaches for, which was
+# measured at 1466 tokens.
+_SUMMARY_ESTIMATE_SLACK = 0.05
+
+# A handoff brief is mechanical: read the transcript, list what it says. The
+# floor of ``REASONING_EFFORT_LADDER`` rather than the turn's own
+# effort, which is what the two failures above were run at.
+SUMMARY_REASONING_EFFORT = REASONING_EFFORT_LADDER[-1]
+
+# Per-message ceiling when rendering the head into the summary request. The
+# head already fits the window (the trigger fires below it), this only guards
+# against pathological single messages.
+_TRANSCRIPT_MSG_CAP = 8_000
+
+SUMMARY_INSTRUCTIONS = (
+    "You are compacting an agent's working context. Summarize the transcript "
+    "below into a handoff brief for the same agent to continue the task. "
+    "Preserve, with exact names, paths and values:\n"
+    "1. The task goal and any acceptance criteria or output contract.\n"
+    "2. Confirmed facts about the code and environment (files read, entry "
+    "points, interfaces, data formats).\n"
+    "3. What has been done so far: files created or edited and how, commands "
+    "run and their outcomes.\n"
+    "4. Test or verification results, quoting failing output verbatim when "
+    "short.\n"
+    "5. What remains to do, the current plan, and unresolved errors or open "
+    "questions.\n"
+    "Be dense and factual. Do not invent anything that is not in the "
+    "transcript."
+)
+
+
+def reserved_tokens(configured: int | None, max_output_tokens: int) -> int:
+    """Output headroom the trigger keeps free below the window."""
+    if configured is not None:
+        return configured
+    return min(_RESERVED_CAP, max_output_tokens)
+
+
+def tail_budget(configured: int | None, limit: int, reserved: int) -> int:
+    """Token budget for the verbatim tail preserved through a summary."""
+    if configured is not None:
+        return configured
+    usable = max(0, limit - reserved)
+    return min(_TAIL_CAP, max(_TAIL_FLOOR, int(usable * _TAIL_FRACTION)))
+
+
+def should_compact(context_used: int, limit: int, reserved: int, trigger_ratio: float | None = None) -> bool:
+    """True when the last observed context size crosses the trigger line.
+
+    The base trigger is ``limit - reserved`` (just below overflow). A
+    ``trigger_ratio`` in (0, 1) lowers the line to ``trigger_ratio * limit``
+    when that is smaller, so compaction fires proactively instead of at the
+    brink.
+    """
+    if limit <= 0:
+        return False
+    threshold = max(0, limit - reserved)
+    if trigger_ratio is not None and 0 < trigger_ratio < 1:
+        threshold = min(threshold, int(trigger_ratio * limit))
+    return context_used >= threshold
+
+
+def summary_output_budget(limit: int, prompt_tokens: int, ceiling: int) -> int:
+    """What the summary call may ask for, given the request it is about to send.
+
+    ``SUMMARY_MAX_TOKENS`` is a ceiling on a request with room, and ``ceiling``
+    guards the other case the caller already handled -- a small model refusing a
+    large ``max_tokens``. Neither is the constraint that binds at the compaction
+    trigger: the head being summarized is precisely what did not fit, so the
+    request already sits near the window, and what a provider measures against
+    the window is ``prompt + max_tokens``. With compaction left at its derived
+    defaults that came to 4000 over -- a 400000 window, a trigger at 380000, an
+    8000 tail that the request drops, and 32000 asked for on top of the 372000
+    that remained. Over by the same amount for any window, since both sides of
+    the subtraction move with it.
+
+    Measured from the request rather than derived from the trigger, because the
+    two differ by more than the tail: ``render_transcript`` caps each message at
+    ``_TRANSCRIPT_MSG_CAP``, so a head of large tool results renders far smaller
+    than it counted in the window it overflowed, and the room is correspondingly
+    larger. Zero means the request cannot be made at all, and the caller skips
+    rather than paying for a call the provider can only refuse.
+    """
+    if limit <= 0:
+        return min(SUMMARY_MAX_TOKENS, ceiling)
+    room = limit - int(prompt_tokens * (1 + _SUMMARY_ESTIMATE_SLACK))
+    return max(0, min(SUMMARY_MAX_TOKENS, ceiling, room))
+
+
+def protected_prefix_end(messages: list[dict]) -> int | None:
+    """Index just past the first user message; the system prefix and the task
+    statement never enter the summarized head."""
+    for i, m in enumerate(messages):
+        if m.get("role") == "user":
+            return i + 1
+    return None
+
+
+def select_split(
+    messages: list[dict],
+    budget: int,
+    estimate: Callable[[list[dict]], int],
+) -> int | None:
+    """Pick where the verbatim tail starts.
+
+    Walks backward from the end accumulating estimated tokens until ``budget``
+    is spent (the last message is always kept), then backs up so the tail
+    never opens on a ``role=="tool"`` message — that would orphan it from the
+    assistant tool_call it answers. Returns ``None`` when the remaining head
+    is too small to be worth a summary call.
+    """
+    protect_end = protected_prefix_end(messages)
+    if protect_end is None:
+        return None
+    total = 0
+    split = len(messages)
+    for i in range(len(messages) - 1, protect_end - 1, -1):
+        cost = estimate([messages[i]])
+        if split < len(messages) and total + cost > budget:
+            break
+        total += cost
+        split = i
+    while protect_end < split < len(messages) and messages[split].get("role") == "tool":
+        split -= 1
+    if split - protect_end < 2:
+        return None
+    return split
+
+
+def render_transcript(messages: list[dict]) -> str:
+    """Flatten the head into role-labeled text for the summary request."""
+    lines: list[str] = []
+    for m in messages:
+        role = m.get("role", "?")
+        parts: list[str] = []
+        content = m.get("content")
+        if content:
+            text = str(content)
+            if len(text) > _TRANSCRIPT_MSG_CAP:
+                text = text[:_TRANSCRIPT_MSG_CAP] + " …[truncated]"
+            parts.append(text)
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+            name = fn.get("name") or (tc.get("name") if isinstance(tc, dict) else "")
+            args = fn.get("arguments") or ""
+            parts.append(f"→ called {name}({str(args)[:300]})")
+        if parts:
+            lines.append(f"[{role}] " + "\n".join(parts))
+    return "\n\n".join(lines)
+
+
+def build_compacted(messages: list[dict], split: int, summary: str, appendix: str = "") -> list[dict]:
+    """Rebuild the transcript as [protected prefix, summary, verbatim tail].
+
+    ``appendix`` is copied in after the summary verbatim: facts the summary model
+    must not be trusted to restate, such as which sub-agents are running now.
+    """
+    protect_end = protected_prefix_end(messages)
+    if protect_end is None:
+        return messages
+    body = f"{SUMMARY_MARKER}\n\n{summary}" + (f"\n\n{appendix}" if appendix else "")
+    summary_msg = {"role": "user", "content": body}
+    return [*messages[:protect_end], summary_msg, *messages[split:]]
+
+
+RESTART_MARKER = (
+    "[Working context restarted: it filled the model's window and could not be summarized. "
+    "The brief below is a mechanical record of the steps so far, not a summary]"
+)
+
+# What the mechanical brief carries at most, so it always fits where a summary did not.
+_BRIEF_CALLS = 40
+_BRIEF_ARG_CHARS = 120
+_BRIEF_SAID_CHARS = 1500
+_BRIEF_ERRORS = 5
+_WRITE_TOOLS = frozenset({"write_file", "edit_file", "create_file", "apply_patch"})
+
+
+def _call_line(call: dict) -> tuple[str, str]:
+    fn = call.get("function", {}) if isinstance(call, dict) else {}
+    name = fn.get("name") or (call.get("name") if isinstance(call, dict) else "") or "?"
+    args = str(fn.get("arguments") or "")
+    return name, args
+
+
+def mechanical_brief(head: list[dict]) -> str:
+    """What the head did, read off its messages: tools called, files touched, errors, the last words.
+
+    No model call, so it cannot fail and cannot invent: the restart this feeds
+    is the one used when a summary already did.
+    """
+    calls: list[str] = []
+    touched: dict[str, None] = {}
+    errors: list[str] = []
+    said = ""
+    for m in head:
+        role = m.get("role")
+        for call in m.get("tool_calls") or []:
+            name, args = _call_line(call)
+            calls.append(f"{name}({args[:_BRIEF_ARG_CHARS]})")
+            if name in _WRITE_TOOLS:
+                try:
+                    path = json.loads(args).get("path") or json.loads(args).get("file_path")
+                except (ValueError, AttributeError):
+                    path = None
+                if path:
+                    touched[str(path)] = None
+        content = m.get("content")
+        text = content if isinstance(content, str) else ""
+        if role == "tool" and text.lstrip().lower().startswith("error"):
+            errors.append(text.strip().splitlines()[0][:200])
+        if role == "assistant" and text.strip():
+            said = text.strip()
+    lines = []
+    if calls:
+        shown = calls[-_BRIEF_CALLS:]
+        more = f" (and {len(calls) - len(shown)} earlier)" if len(calls) > len(shown) else ""
+        lines.append(f"Tool calls made, oldest first{more}:\n" + "\n".join(f"- {c}" for c in shown))
+    if touched:
+        lines.append("Files written or edited: " + ", ".join(touched))
+    if errors:
+        lines.append("Errors seen:\n" + "\n".join(f"- {e}" for e in errors[-_BRIEF_ERRORS:]))
+    if said:
+        lines.append("The last thing said before the restart:\n" + said[-_BRIEF_SAID_CHARS:])
+    return "\n\n".join(lines) or "No tool calls or answers were recorded before the restart."
+
+
+def build_restarted(messages: list[dict], split: int, brief: str, appendix: str = "") -> list[dict]:
+    """Rebuild the transcript as [protected prefix, mechanical brief, verbatim tail]."""
+    protect_end = protected_prefix_end(messages)
+    if protect_end is None:
+        return messages
+    body = f"{RESTART_MARKER}\n\n{brief}" + (f"\n\n{appendix}" if appendix else "")
+    body += "\n\nContinue the task from where these steps leave it; read again whatever you need."
+    return [*messages[:protect_end], {"role": "user", "content": body}, *messages[split:]]

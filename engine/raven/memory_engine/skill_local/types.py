@@ -1,0 +1,62 @@
+"""Shared dataclasses for SkillForge."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class SkillMeta:
+    """Metadata for a skill — body is loaded separately via SkillRegistry.get_body()."""
+
+    id: str
+    """Unique skill identifier."""
+
+    name: str
+    """Skill name, as its SKILL.md frontmatter declares it.
+
+    The directory name only when that field is absent, so this is a display
+    label the skill chooses and not a path component: anything building a path
+    out of it lets the skill file decide where that path goes.
+    """
+
+    description: str
+    """One-line description shown to the LLM."""
+
+    path: Path
+    """Absolute path to SKILL.md."""
+
+    content: str
+    """SKILL.md body content (excluding name and description)."""
+
+    source: str
+    """Physical origin: ``workspace`` / ``builtin`` / ``everos`` / ``mirror/*`` etc."""
+
+    always: bool = False
+    """Whether to force-inject into the system prompt every turn."""
+
+    inject: str = "full"
+    """How an ``always`` skill occupies the prompt: ``full`` body, or
+    ``description`` (a digest entry pointing at SKILL.md). Ignored when
+    ``always`` is false — routed skills always arrive as full bodies."""
+
+    requires: dict = field(default_factory=dict)
+    """Dependency declarations: ``{"bins": [...], "env": [...]}``."""
+
+    raw_frontmatter: dict = field(default_factory=dict)
+    """Full original frontmatter, kept for downstream consumers."""
+
+
+@dataclass
+class ScoredSkill:
+    """A retrieval hit (name + score + source)."""
+
+    name: str
+    """Skill name."""
+
+    score: float
+    """Relevance score; higher means more relevant."""
+
+    source: str = ""
+    """Physical origin, aligned with SkillMeta.source. Empty string kept for backward compatibility."""

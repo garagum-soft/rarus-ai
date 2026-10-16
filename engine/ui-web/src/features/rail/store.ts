@@ -1,0 +1,378 @@
+import { t } from '../../i18n/t'
+import { setCurrent } from '../../lib/session'
+import { navState } from '../../state/page'
+import { NAV_BUTTONS } from '../../state/pages'
+import { ds } from '../../state/sources'
+import { makeStore } from '../../state/store'
+import { show as toast } from '../../state/toast'
+import { draw as drawWorkdir } from '../../state/workdir'
+import { dropDraft } from '../composer/store'
+import { plainTitle } from './title'
+
+import type { RailSnapshot, RailSource, SessRow } from './types'
+
+/* Rail state, outside React on purpose: the page layers redraw the list after
+ * mutating the active session source, the live boot holds it on skeletons,
+ * and a language flip repaints it. Each draw pulls a fresh source snapshot
+ * instead of keeping a copy that could go stale. */
+
+export interface RailState {
+  /* Null until the first draw; RailPage renders nothing until then. */
+  snap: RailSnapshot | null
+  /* True while the live boot holds the rail on skeleton rows. */
+  skel: boolean
+}
+
+const store = makeStore<RailState>({ snap: null, skel: false })
+let held = false
+
+export const { get, subscribe, _resetForTests } = store
+
+/** A patch, merged into the page's state. */
+export function set(patch: Partial<RailState>): void {
+  store.set((prev) => ({ ...prev, ...patch }))
+}
+
+export const source = (): RailSource => ds('rail')
+
+export function reconcileRows(
+  previous: SessRow[],
+  incoming: SessRow[],
+  currentId: string | null
+): { currentMissing: boolean; rows: SessRow[] } {
+  const oldById = new Map(previous.map(row => [row.id, row]))
+  for (const row of incoming) {
+    const old = oldById.get(row.id)
+    /* A `run` on an old row is the server's to clear, and the incoming row
+       already carries its answer: this page subscribes to the conversation it
+       is showing, so no `message.complete` is coming for any other row and a
+       badge kept here would never come off. `done`/`ask`/`err` are the reader's
+       own unread marks, which no answer to `session.list` carries. */
+    if (old?.status && old.status !== 'run') row.status = old.status
+  }
+  const current = currentId ? oldById.get(currentId) : undefined
+  const currentListed = !!currentId && incoming.some(row => row.id === currentId)
+  if (current && !current.persisted && !currentListed) incoming.unshift(current)
+  return {
+    currentMissing: !!current?.persisted && !currentListed,
+    rows: incoming
+  }
+}
+
+export function removeSessionRow(
+  rows: SessRow[],
+  currentId: string | null,
+  deletedId: string
+): { kind: 'draft' | 'open' | 'unchanged'; next?: SessRow; rows: SessRow[] } {
+  const remaining = rows.filter(row => row.id !== deletedId)
+  if (currentId !== deletedId) return { kind: 'unchanged', rows: remaining }
+  const next = remaining[0]
+  return next ? { kind: 'open', next, rows: remaining } : { kind: 'draft', rows: remaining }
+}
+
+const curId = (): string | null => {
+  try {
+    return source().snapshot().cur
+  } catch {
+    return null
+  }
+}
+
+/* Collapsed rail groups survive reloads; expanded is the default. */
+const FOLD_KEY = 'raven.gui.grpfold'
+const grpFold = new Set<string>(
+  (() => {
+    try {
+      return JSON.parse(localStorage.getItem(FOLD_KEY) || '[]') as string[]
+    } catch {
+      return []
+    }
+  })()
+)
+const saveGrpFold = (): void => {
+  try {
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...grpFold]))
+  } catch {
+    /* private mode */
+  }
+}
+/* Which capped groups stand fully expanded; page-lifetime only. */
+const listOpen = new Set<string>()
+
+export const isFolded = (gid: string): boolean => grpFold.has(gid)
+export const isOpen = (gid: string): boolean => listOpen.has(gid)
+
+export function flipFold(gid: string): void {
+  if (grpFold.has(gid)) grpFold.delete(gid)
+  else grpFold.add(gid)
+  saveGrpFold()
+  draw()
+}
+
+export function flipOpen(gid: string): void {
+  if (listOpen.has(gid)) listOpen.delete(gid)
+  else listOpen.add(gid)
+  draw()
+}
+
+/* One draw = one snapshot. A source that cannot answer keeps the last rows
+   on screen rather than blanking the rail. */
+export function draw(): void {
+  if (held) {
+    if (!get().skel) set({ skel: true })
+    return
+  }
+  let snap: RailSnapshot
+  try {
+    snap = source().snapshot()
+  } catch {
+    return
+  }
+  markNew()
+  set({ snap, skel: false })
+  /* The composer's working-directory chip reads the same two things a draw
+     does -- the rows and the conversation on screen -- and has no moment of its
+     own, so it repaints here. */
+  drawWorkdir()
+}
+
+export function hold(): void {
+  held = true
+  set({ skel: true })
+}
+
+export function release(): void {
+  held = false
+  draw()
+}
+
+export function open(s: SessRow): void {
+  void source().open(s)
+}
+
+export function count(): number {
+  return source().snapshot().rows.length
+}
+
+/* One writer for the rail's nav marks, because the surfaces stack: the
+   settings dialog layers over a module page, which layers over the chat,
+   and every one of them has a row that would claim to be current on its
+   own. Deciding it in one place from the topmost surface is what makes two
+   selected rows impossible.
+
+   The new-task row stands for a draft -- a draft has no session id, so an
+   empty `cur` is its get() -- but only while nothing covers it. Imperative
+   on purpose: every element it marks lives outside the island's root. */
+export function markNew(): void {
+  const nav = navState()
+  const el = (id: string): HTMLElement | null => document.getElementById(id)
+  const app = document.querySelector<HTMLElement>('.app')
+  const pageUp =
+    app && app.dataset.page === 'on'
+      ? nav.pages.find(p => {
+          const n = el(p)
+          return !!n && n.dataset.open === 'true'
+        }) || null
+      : null
+  const top: string | null | undefined = pageUp ? nav.btnOf(pageUp) : !curId() ? 'newBtn' : null
+  /* Every button a page can light, plus the draft row's, from the one table
+     that declares them (state/pages.ts): the capabilities page lights skillBtn
+     or plugBtn depending on which tab stands open, so the mark has to be
+     cleared on both whichever of the two `navState` can see. Adding a page to
+     that table is what adds it here. */
+  for (const id of NAV_BUTTONS) {
+    const b = el(id)
+    if (b) b.setAttribute('aria-current', String(id === top))
+  }
+}
+
+
+/* Every session at once, from the settings page's data section. Same guard as
+   the pin: no source installed means there is nothing to delete from. */
+export function deleteAll(): void {
+  try {
+    source().deleteAll?.()
+  } catch {
+    /* no source, nothing to delete */
+  }
+}
+
+/* Persisting a pin, when there is anywhere to persist it. Wrapped rather than
+   read at the call site because source() throws with nothing installed, and an
+   optimistic move must not be undone by the attempt to record it. */
+export function pin(id: string, pinned: boolean): void {
+  try {
+    source().pin?.(id, pinned)
+  } catch {
+    /* no source, nowhere to put it */
+  }
+}
+
+export function renameRow(s: SessRow, title: string): void {
+  if (title === s.title) return
+  const previous = s.title
+  s.title = title
+  if (curId() === s.id) {
+    const heading = document.getElementById('title')
+    if (heading) heading.textContent = plainTitle(title)
+  }
+  try {
+    source().renamed?.(s.id, title, previous)
+  } catch {
+    /* no source, nowhere to put it */
+  }
+  draw()
+}
+
+export function archive(s: SessRow): void {
+  let via: RailSource['archive']
+  try {
+    via = source().archive
+  } catch {
+    /* nothing installed: hiding the local row is the whole behaviour */
+  }
+  if (via) {
+    via(s)
+    return
+  }
+  const rows = source().snapshot().rows
+  const at = rows.indexOf(s)
+  const index = rows.findIndex(row => row.id === s.id)
+  if (index >= 0) rows.splice(index, 1)
+  draw()
+  toast(t('gui.sess.archived', { title: s.title }), {
+    label: t('gui.undo'),
+    fn: () => {
+      const current = source().snapshot().rows
+      if (!current.some(row => row.id === s.id)) current.splice(Math.max(0, Math.min(at, current.length)), 0, s)
+      draw()
+    }
+  })
+}
+
+/* Deleting a session. A source that can delete one does it -- the live page
+   has a confirmation to ask and a pile of per-session get() to forget, none of
+   which belongs to the rail. Without one, this is the whole behaviour: splice
+   the source-owned rows in place, and offer it back. */
+let undoBin: { s: SessRow; at: number } | null = null
+
+export function remove(s: SessRow): void {
+  let via: RailSource['remove']
+  try {
+    via = source().remove
+  } catch {
+    /* nothing installed: the local behaviour below is the whole of it */
+  }
+  if (via) {
+    via(s)
+    return
+  }
+  const rows = source().snapshot().rows
+  const at = rows.indexOf(s)
+  dropDraft(s.id)
+  const i = rows.findIndex(x => x.id === s.id)
+  if (i >= 0) rows.splice(i, 1)
+  undoBin = { s, at }
+  const st = source().snapshot()
+  if (st.cur === s.id) {
+    const nx = st.rows[0]
+    if (nx) {
+      setCurrent(nx.id)
+      open(nx)
+    }
+  }
+  draw()
+  toast(t('gui.sess.deleted_x', { title: s.title }), {
+    label: t('gui.undo'),
+    fn: () => {
+      const bin = undoBin as { s: SessRow; at: number }
+      source().snapshot().rows.splice(bin.at, 0, bin.s)
+      undoBin = null
+      draw()
+    }
+  })
+}
+
+/* The open title editor's own finisher. Module-level because the input stands
+   IN PLACE OF h1#title -- while it is open that id resolves to nothing, and the
+   live layer reaches the heading through it on every path that changes which
+   conversation is open. Only ever one: `rename` returns early when the heading
+   is already gone. */
+let finishOpen: ((commit: boolean) => void) | null = null
+
+/* End an open editor, committing what was typed the way leaving the field
+   does: the name was meant for the conversation this editor belongs to, not
+   for whichever one is being opened. Quiet when there is no editor, which is
+   almost every call. */
+export function endRename(): void {
+  finishOpen?.(true)
+}
+
+/* Inline rename in the top bar; the list follows. The DOM dance is swap #title
+   for an input, then put an h1#title back. It commits at most once, and it
+   publishes that commit so a conversation switch can end an editor left
+   standing; persisting is not its own -- the source is TOLD the new title (see
+   renamed in types.ts). */
+export function rename(): void {
+  const h = document.getElementById('title')
+  if (!h) return
+  let snap: RailSnapshot
+  try {
+    snap = source().snapshot()
+  } catch {
+    return
+  }
+  const s = snap.rows.find(x => x.id === snap.cur)
+  if (!s) return
+  const inp = document.createElement('input')
+  inp.className = 'titin'
+  inp.value = s.title
+  /* The field opens at exactly the heading's width, so nothing after it moves:
+     a field that measures its own value opens a little wider than the name it
+     replaces, and a short name was pushed wider still by the floor such a
+     field needs -- either way the workspace tag beside it slid sideways at
+     the moment of the click. A name longer than the box scrolls in it. */
+  inp.style.width = `${h.getBoundingClientRect().width}px`
+  h.replaceWith(inp)
+  inp.focus()
+  inp.select()
+  const was = s.title
+  /* One commit per editor. Enter takes the focused input out of the document
+     and Chrome fires a blur for exactly that, which ran the whole commit a
+     second time -- telling the source twice, and throwing on the second
+     `replaceWith` because the node had already left the tree, so which of the
+     two put the heading back was a race. It is also what lets `endRename` sit
+     next to a blur without either one having to know about the other. */
+  let done = false
+  const finish = (commit: boolean): void => {
+    if (done) return
+    done = true
+    finishOpen = null
+    const v = inp.value.trim()
+    const next = commit && v ? v : s.title
+    s.title = next
+    /* Only on a real change, and from inside finish rather than off a blur:
+       committing with Enter replaces the input while it still has focus, and
+       whether that fires a blur at all is the browser's business -- which is
+       why the wrapper this replaces could miss an Enter entirely. */
+    if (next !== was) source().renamed?.(s.id, next, was)
+    const nh = document.createElement('h1')
+    nh.textContent = plainTitle(next)
+    nh.id = 'title'
+    inp.replaceWith(nh)
+    draw()
+  }
+  finishOpen = finish
+  inp.onblur = () => finish(true)
+  inp.onkeydown = e => {
+    if (e.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      finish(true)
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      finish(false)
+    }
+  }
+}

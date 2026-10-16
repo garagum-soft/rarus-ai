@@ -1,0 +1,2499 @@
+"""Console handlers: ext.list / cron.* / settings.* / channels.status / fs.*.
+
+The management surface a front end needs beside the transcript -- what is
+installed, what is scheduled, what is configured, which channels are up, and
+what is in the workspace. Nothing here is specific to one client.
+
+Every handler reads and writes the same sources the CLI does (the CronService
+store, LocalSkillCatalog, PluginDiscovery, config.json), so a change made from
+any surface is the change every other surface sees.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, get_args
+
+from loguru import logger
+from pydantic.alias_generators import to_camel, to_snake
+
+from raven.config.env_file import MIRRORED_KEYS, refresh_env_file
+from raven.config.schema import WEB_VENDOR_ENV_VARS, WebFetchProvider, WebSearchProvider
+from raven.rpc import LOCAL_CHANNEL
+from raven.rpc.errors import ConfigValidationError
+from raven.utils.atomic_io import atomic_update
+
+if TYPE_CHECKING:
+    from raven.rpc.methods import AgentLoopFactory
+
+
+_SECRET_HINTS = ("key", "token", "secret", "password", "credential")
+
+
+def _safe_loop(factory) -> Any:
+    if factory is None:
+        return None
+    try:
+        return factory()
+    except Exception:
+        return None
+
+
+def _hub_marker_name() -> str | None:
+    """Filename marking a hub-installed skill, or ``None`` without the market.
+
+    The skill market is an optional install, so its absence is a normal state
+    rather than a failure: with no market nothing is hub-installed, and every
+    skill correctly reports ``hub=false``.
+    """
+    try:
+        from raven.skill_hub.hub import MARKER
+    except ImportError:
+        logger.debug("ext.list: skill market not installed; reporting every skill as hub=false")
+        return None
+    return MARKER
+
+
+def _install_meta_name() -> str | None:
+    """The other installer's stamp, or ``None`` on the same terms as above.
+
+    The context engine and the ``use_skill`` tool install a bundle rather than
+    a skill, and stamp it with a different file than the market module's
+    ``MARKER``. Both mean "the hub put this here", so a skill list that asked
+    about one and not the other called most installed skills local -- and the
+    page, which gates removal on this flag, offered it for the few and hid it
+    for the many. Read from the writer so the spelling cannot drift.
+    """
+    try:
+        from raven.skill_hub.audit import INSTALL_META
+    except ImportError:
+        return None
+    return INSTALL_META
+
+
+# ---------------------------------------------------------------------------
+# ext.list
+# ---------------------------------------------------------------------------
+
+
+def _mcp_credential_state(name: str, sc: Any) -> tuple[str, bool]:
+    """How a server authenticates and whether it holds what that needs.
+
+    OAuth: a stored token. API key: the templated header or env entry the
+    install wrote, non-empty. None: nothing to hold. Read from the config and
+    the credential store only, never the catalog -- this runs on every page load.
+    """
+    auth = str(getattr(sc, "auth", "none") or "none")
+    if auth == "oauth":
+        try:
+            from raven.mcp.oauth import has_stored_tokens
+
+            return auth, bool(has_stored_tokens(name))
+        except Exception:
+            logger.exception("ext.list: could not read the credential store for {}", name)
+            return auth, False
+    if auth == "apikey":
+        values = {**dict(getattr(sc, "headers", None) or {}), **dict(getattr(sc, "env", None) or {})}
+        return auth, any(str(v).strip() for v in values.values())
+    return "none", True
+
+
+async def ext_list(params: dict, *, agent_loop_factory: "AgentLoopFactory | None" = None) -> dict:
+    from raven.config.loader import load_config
+    from raven.config.raven import load_raven_config
+    from raven.core.plugin_stack import discover_plugins
+
+    loop = _safe_loop(agent_loop_factory)
+    ec = load_raven_config()
+
+    skills: list[dict] = []
+    catalog = getattr(getattr(loop, "context", None), "skills", None)
+    if catalog is None:
+        try:
+            from raven.memory_engine import LocalSkillCatalog
+
+            config = load_config()
+            catalog = LocalSkillCatalog(
+                config.workspace_path,
+                config=getattr(ec, "skill_forge", None),
+                start_watcher=False,
+            )
+        except Exception:
+            catalog = None
+    if catalog is not None:
+        # Hub-installed skills carry a marker file next to SKILL.md, and only
+        # those can be uninstalled through skillhub.remove. The market is an
+        # optional install, so its absence is a normal state, not a failure:
+        # without it no skill is hub-installed and every entry reports
+        # hub=false. Kept out of the loop's try so a missing market costs the
+        # two hub fields, never the skill list itself.
+        marker_name = _hub_marker_name()
+        meta_name = _install_meta_name()
+        try:
+            for m in catalog.gather_all_skills():
+                path = getattr(m, "path", None)
+                hub_id = ""
+                marker = path.parent / marker_name if (path and marker_name) else None
+                from_market = marker is not None and marker.is_file()
+                if from_market:
+                    try:
+                        hub_id = str(json.loads(marker.read_text()).get("id") or "")
+                    except Exception:
+                        hub_id = ""
+                # The bundle installer's stamp names a slug, not a market id, so
+                # a skill it placed is hub-installed with no ``hub_id`` to offer:
+                # the page fetches market detail only when one is present.
+                from_bundle = bool(path and meta_name) and (path.parent / meta_name).is_file()
+                skills.append(
+                    {
+                        "name": m.name,
+                        "description": (m.description or "")[:200],
+                        "source": str(m.source),
+                        "always": bool(getattr(m, "always", False)),
+                        "hub": from_market or from_bundle,
+                        "hub_id": hub_id,
+                    }
+                )
+        except Exception:
+            logger.exception("ext.list: skill enumeration failed")
+
+    plugins: list[dict] = []
+    try:
+        disabled = set(ec.plugins.disabled)
+        for dp in discover_plugins(ec):
+            mf = dp.manifest
+            plugins.append(
+                {
+                    "id": mf.id,
+                    "display_name": mf.display_name,
+                    "version": mf.version,
+                    "enabled": mf.id not in disabled,
+                    "bundled": mf.bundled,
+                }
+            )
+    except Exception:
+        logger.exception("ext.list: plugin discovery failed")
+
+    tools: list[dict] = []
+    mcp: list[dict] = []
+    if loop is not None:
+        # Ownership comes from the registry's origin index, which is where a
+        # namespaced tool records the server it came from. It used to be guessed
+        # from the name: match the longest configured server name that prefixes
+        # it. That reads as careful and is not -- a server name is sanitised
+        # into the tool name, so ``context7.io`` produces ``mcp_context7_io_*``
+        # and no configured key prefixes it, and the server showed as connected
+        # with zero tools while the agent was calling them. The cap and the
+        # collision suffix rewrite the tail for the same reason: the name is a
+        # one-way function of the pair, so nothing can read it backwards.
+        servers: dict[str, Any] = {}
+        try:
+            servers = dict(load_config().tools.mcp_servers or {})
+        except Exception:
+            logger.exception("ext.list: could not read the configured mcp servers")
+        tool_owner: dict[str, str] = {}
+        owned: dict[str, int] = {}
+        for name in loop.tools.tool_names:
+            ref = loop.tools.origin_of(name)
+            if ref is not None:
+                tool_owner[name] = ref.server
+                owned[ref.server] = owned.get(ref.server, 0) + 1
+        # The manager is the authority on state, and this pull has to carry it:
+        # the `mcp.status` / `oauth.pending` notifications that carry the same
+        # facts are dropped when no client is attached, which is every connect
+        # started at assembly time. Without this a server parked at the browser
+        # step reads as `disconnected` here, and the page draws no authorization
+        # action for a plugin that is waiting on one.
+        #
+        # A configured server the manager has no record of yet is still listed,
+        # from config alone, so an installed plugin never vanishes from view.
+        try:
+            from raven.mcp.client import resolve_transport
+            from raven.mcp.oauth import pending_url
+
+            mgr = getattr(loop, "mcp_manager_if_started", None)
+            live = {snap["name"]: snap for snap in mgr.status()} if mgr is not None else {}
+            for name, sc in servers.items():
+                count = owned.get(name, 0)
+                snap = live.get(name)
+                if snap is not None:
+                    row = dict(snap)
+                else:
+                    row = {
+                        "name": name,
+                        "transport": resolve_transport(sc) or "unknown",
+                        # Tools registered and callable is what the caller draws,
+                        # and it is all that is knowable without the manager: the
+                        # loop's own `_mcp_connected` only says the one-shot
+                        # connect ran, so a server that failed inside it would
+                        # read as connected.
+                        "state": "connected" if count else "disconnected",
+                        "connected": bool(count),
+                        "tool_count": count,
+                        "error": None,
+                    }
+                row["enabled"] = bool(getattr(sc, "enabled", True))
+                row["auth_url"] = pending_url(name)
+                row["auth"], row["credentialed"] = _mcp_credential_state(name, sc)
+                mcp.append(row)
+        except Exception:
+            logger.exception("ext.list: config mcp merge failed")
+        # Which tools carry no switch, asked as the question the switch
+        # actually answers: would the loop honour an entry naming this tool in
+        # `tools.disabledTools`? Two groups would not. The MCP resource and
+        # prompt meta-tools are registered and withdrawn by the loop itself as
+        # servers come and go, so an entry naming one is a preference nothing
+        # can act on -- `_report_reserved_disabled_tools` says so in those
+        # words. The two tool-search meta-tools are fixed by product decision:
+        # they are the doorway every hidden tool is reached through.
+        #
+        # NOT the schema-hidden set, which is what this asked before. Hidden
+        # from the schema and withheld from the model are different mechanisms:
+        # `offers()` consults `withheld_names()`, which reads the off switch,
+        # whatever the schema shows. Measured on a real gateway -- putting
+        # `cancel_dag` in `tools.disabledTools` flips its `enabled` to false --
+        # so the DAG controls were being drawn as fixed while their switch
+        # worked.
+        from raven.agent.tools.tool_search import META_TOOL_NAMES
+        from raven.mcp.prompts import PROMPT_TOOL_NAMES
+        from raven.mcp.resources import RESOURCE_TOOL_NAMES
+
+        fixed = META_TOOL_NAMES | RESOURCE_TOOL_NAMES | PROMPT_TOOL_NAMES
+        for name in loop.tools.tool_names:
+            tool = loop.tools.get(name)
+            # Asked, not inferred from membership: a tool the operator switched
+            # off -- or one registered without the credential it needs -- stays
+            # in the registry by construction, so "registered" stopped meaning
+            # "the model can call it". ``offers_by_name`` is the one predicate
+            # that answers the latter, and reporting anything else here tells a
+            # deployer a capability is on while the model is never offered it.
+            offered = loop.tools.offers_by_name(name)
+            tools.append(
+                {
+                    "name": name,
+                    "description": (getattr(tool, "description", "") or "")[:200],
+                    "enabled": offered,
+                    "mcp_server": tool_owner.get(name),
+                    "needs": None if offered else _needs_of(name),
+                    "builtin": name in fixed,
+                }
+            )
+        tools.extend(_gated_tools({t["name"] for t in tools}, getattr(loop, "web_search_provider", "serper")))
+        tools.extend(_absent_meta_tools({t["name"] for t in tools}))
+
+    return {"skills": skills, "plugins": plugins, "tools": tools, "mcp": mcp}
+
+
+# Tools the loop withholds from the model until a key exists, and the config
+# key that unlocks each. Withholding is right -- offered without a key, the
+# model reaches for it and relays a failure naming a config path to whoever is
+# on the other end of a channel -- but the same decision also erased them from
+# the user's view, so the feature looked deleted rather than unconfigured.
+def _key_gated_tools(search_provider: str) -> tuple[tuple[str, str, str], ...]:
+    """``(tool, setting, env)`` for each key-gated tool, keyed to the vendor the
+    loop actually selected: a Tavily deployment is told to fill the Tavily slot,
+    not Serper's."""
+    from raven.config.schema import WEB_VENDOR_ENV_VARS
+
+    vendor = search_provider if search_provider in WEB_VENDOR_ENV_VARS else "serper"
+    return (("web_search", f"tools.web.providers.{vendor}.apiKey", WEB_VENDOR_ENV_VARS[vendor]),)
+
+
+def _needs_of(name: str) -> dict | None:
+    """The credential an unavailable tool is missing, or None if it lacks none.
+
+    ``agent/tools/capabilities.py`` is the single description of which tool
+    wants which credential, pinned against what the loop actually offers. Asked
+    here rather than restated, because a second table is how the three media
+    tools ended up with no setup affordance while web_search had one.
+
+    Only the credential gate answers. A tool can be unavailable for two
+    unrelated reasons, and ``is_disabled``'s own docstring names the cost of
+    collapsing them: a switched-off tool usually has its key set, so reporting
+    it as needing one sends the deployer to set a credential already there. An
+    off switch is the operator's own doing and needs no instructions.
+
+    ``key_path``, never ``config_path``: for the media family the latter is the
+    *model* field, and naming it as the missing credential sends the reader to
+    edit a line that holds no key.
+    """
+    from raven.agent.tools.capabilities import CAPABILITIES, Need, is_configured
+    from raven.config.loader import load_config
+
+    for cap in CAPABILITIES:
+        if cap.tool != name or cap.need is Need.NOTHING:
+            continue
+        if not (cap.key_path or cap.env_var):
+            return None
+        try:
+            if is_configured(cap, load_config()):
+                return None
+        except Exception:  # noqa: BLE001 - an unreadable config is not a credential verdict
+            logger.warning("ext.list: could not read the config to explain why {} is unavailable", name)
+            return None
+        return {"setting": cap.key_path, "env": cap.env_var}
+    return None
+
+
+def _absent_meta_tools(registered: set[str]) -> list[dict]:
+    """Rows for meta-tools the loop did not register, for the same reason
+    ``_gated_tools`` exists: absent from the list reads as deleted.
+
+    Only ``tool_search`` reaches this. It is registered when progressive tool
+    disclosure is on (``tools.toolSearch.enabled``, off by default) and skipped
+    when it is not, so a default install showed a card named after tool search
+    holding the one meta-tool that is not tool search. ``tool_call`` is
+    registered either way and never lands here.
+
+    ``builtin`` is true and it is not a convenience: this page writes
+    ``tools.disabledTools``, and an entry there would not register this tool.
+    Its switch is a different setting, which is what the row's own note says.
+    """
+    rows: list[dict] = []
+    from raven.agent.tools.tool_search import META_TOOL_NAMES
+
+    for name in sorted(META_TOOL_NAMES - registered):
+        rows.append(
+            {
+                "name": name,
+                "description": "",
+                "enabled": False,
+                "mcp_server": None,
+                "needs": None,
+                "builtin": True,
+            }
+        )
+    return rows
+
+
+def _gated_tools(registered: set[str], search_provider: str = "serper") -> list[dict]:
+    """Rows for key-gated tools that are not registered, so the page can offer
+    the field instead of showing nothing at all."""
+    rows: list[dict] = []
+    for name, setting, env in _key_gated_tools(search_provider):
+        if name in registered:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "description": "",
+                # Not enabled, and not a lie either: the model genuinely cannot
+                # call it. The page reads `needs` to draw the setup affordance.
+                "enabled": False,
+                "mcp_server": None,
+                "needs": {"setting": setting, "env": env},
+                # A key away from being offered: the switch is exactly what
+                # this row exists to carry.
+                "builtin": False,
+            }
+        )
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# cron.*
+# ---------------------------------------------------------------------------
+
+
+def _cron_service(loop):
+    svc = getattr(loop, "cron_service", None) if loop is not None else None
+    if svc is not None:
+        return svc
+    from raven.core.cron_stack import build_cron_service
+
+    return build_cron_service(allowed_channels=None)
+
+
+def _job_info(j) -> dict:
+    return {
+        "id": j.id,
+        "name": j.name,
+        "enabled": j.enabled,
+        "kind": j.schedule.kind,
+        "expr": j.schedule.expr,
+        "every_ms": j.schedule.every_ms,
+        "at_ms": j.schedule.at_ms,
+        "tz": j.schedule.tz,
+        "message": j.payload.message,
+        "next_run_at_ms": j.state.next_run_at_ms,
+        "last_run_at_ms": j.state.last_run_at_ms,
+        "last_status": j.state.last_status,
+        "last_error": j.state.last_error,
+    }
+
+
+async def cron_list(params: dict, *, agent_loop_factory=None) -> dict:
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    return {"jobs": [_job_info(j) for j in svc.list_jobs(include_disabled=True)]}
+
+
+async def cron_save(params: dict, *, agent_loop_factory=None) -> dict:
+    from datetime import datetime
+
+    from raven.proactive_engine.schedulers.cron.types import CronSchedule
+
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    kind = params.get("kind")
+    tz = params.get("tz")
+    if kind == "cron":
+        if not params.get("expr"):
+            raise ConfigValidationError("expr is required for kind=cron")
+        schedule = CronSchedule(kind="cron", expr=params["expr"], tz=tz)
+    elif kind == "every":
+        secs = params.get("every_seconds")
+        if not isinstance(secs, int) or secs <= 0:
+            raise ConfigValidationError("every_seconds must be a positive integer")
+        schedule = CronSchedule(kind="every", every_ms=secs * 1000)
+    elif kind == "at":
+        at_iso = params.get("at_iso")
+        if not at_iso:
+            raise ConfigValidationError("at_iso is required for kind=at")
+        try:
+            dt = datetime.fromisoformat(at_iso)
+            if dt.tzinfo is None and tz:
+                from zoneinfo import ZoneInfo
+
+                dt = dt.replace(tzinfo=ZoneInfo(tz))
+            elif dt.tzinfo is None:
+                dt = dt.astimezone()
+        except Exception as e:
+            raise ConfigValidationError(f"invalid at_iso: {e}") from None
+        schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+    else:
+        raise ConfigValidationError("kind must be cron | every | at")
+
+    name = str(params.get("name") or "")[:30]
+    message = str(params.get("message") or "")
+    if not name or not message:
+        raise ConfigValidationError("name and message are required")
+
+    # An edit names the job it edits and `add_job` updates that job in place.
+    # Removing it first, as this did, meant a rejected edit had already
+    # committed the deletion -- so a bad schedule did not fail the edit, it
+    # deleted the job.
+    old_id = str(params.get("id") or "")
+    try:
+        job = svc.add_job(
+            name=name,
+            schedule=schedule,
+            message=message,
+            channel=LOCAL_CHANNEL,
+            to="default",
+            delete_after_run=kind == "at",
+            # Keep the id across an edit: run history lives in the
+            # cron:<id> session and would orphan under a fresh id.
+            job_id=old_id or None,
+        )
+    except ValueError as e:
+        raise ConfigValidationError(str(e)) from None
+    return {"job": _job_info(job)}
+
+
+async def cron_delete(params: dict, *, agent_loop_factory=None) -> dict:
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    return {"deleted": svc.remove_job(str(params.get("id", "")))}
+
+
+async def cron_set_enabled(params: dict, *, agent_loop_factory=None) -> dict:
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    job = svc.enable_job(str(params.get("id", "")), enabled=bool(params.get("enabled", True)))
+    if job is None:
+        raise ConfigValidationError("unknown job id")
+    return {"enabled": job.enabled}
+
+
+async def cron_run_now(params: dict, *, agent_loop_factory=None) -> dict:
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    ok = await svc.run_job(str(params.get("id", "")), force=True)
+    return {"ok": bool(ok)}
+
+
+def _msg_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+async def cron_runs(params: dict, *, agent_loop_factory=None) -> dict:
+    """Run history for one job, derived from its ``cron:<id>`` session.
+
+    Every fire writes the job prompt as a user message into that session, so
+    one user message = one run; a run counts as ok once its turn produced a
+    non-empty assistant reply and did not then say it had failed. The job
+    state's last_error names the newest failure (per-run errors are not stored
+    anywhere else).
+    """
+    from datetime import datetime
+
+    from raven.config.loader import load_config
+    from raven.rpc.methods.session import _safe_invoke_factory
+    from raven.session.resolve import manager_for
+
+    job_id = str(params.get("id", ""))
+    svc = _cron_service(_safe_loop(agent_loop_factory))
+    job = next((j for j in svc.list_jobs(include_disabled=True) if j.id == job_id), None)
+    if job is None:
+        raise ConfigValidationError("unknown job id")
+
+    session_key = f"cron:{job_id}"
+    try:
+        mgr = manager_for(_safe_invoke_factory(agent_loop_factory), load_config())
+        raw = mgr.peek(session_key)
+        messages = raw.messages if raw is not None else []
+    except Exception:
+        messages = []
+
+    def _iso_ms(v: Any) -> int | None:
+        try:
+            return int(datetime.fromisoformat(str(v)).timestamp() * 1000)
+        except (ValueError, TypeError):
+            return None
+
+    runs: list[dict] = []
+    cur: dict | None = None
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role == "user":
+            cur = {"at_ms": _iso_ms(m.get("timestamp")), "ok": False, "preview": ""}
+            runs.append(cur)
+        elif role == "assistant" and cur is not None:
+            ended = m.get("turn_ended")
+            if isinstance(ended, dict):
+                # Read before the text, and the last word on this run: the marker
+                # is an assistant message too, and so is the half-answer that
+                # streamed before the turn broke, so both read as a reply here.
+                cur["ok"] = False
+                reason = str(ended.get("reason") or "").strip()
+                if reason:
+                    cur["preview"] = reason[:140]
+                continue
+            text = _msg_text(m.get("content")).strip()
+            if text:
+                cur["ok"] = True
+                cur["preview"] = text[:140]
+    runs.reverse()
+    if job.state.last_status == "error" and job.state.last_error:
+        top = runs[0] if runs else None
+        if top is not None and not top["ok"]:
+            top["preview"] = str(job.state.last_error)[:140]
+        else:
+            runs.insert(
+                0,
+                {"at_ms": job.state.last_run_at_ms, "ok": False, "preview": str(job.state.last_error)[:140]},
+            )
+    return {"runs": runs[:50], "session_id": session_key}
+
+
+# ---------------------------------------------------------------------------
+# settings.*
+# ---------------------------------------------------------------------------
+
+
+def _mask_secrets(node: Any, key_hint: str = "") -> Any:
+    if isinstance(node, dict):
+        return {k: _mask_secrets(v, k) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_mask_secrets(v, key_hint) for v in node]
+    if isinstance(node, str) and node and any(h in key_hint.lower() for h in _SECRET_HINTS):
+        return "••••••" + node[-4:] if len(node) > 8 else "••••••"
+    return node
+
+
+async def settings_get(params: dict, *, agent_loop_factory=None) -> dict:
+    from importlib.metadata import version as pkg_version
+
+    from raven.config.loader import get_config_path, read_raw_or_raise
+
+    path = get_config_path()
+    try:
+        raw = read_raw_or_raise(path)
+    except Exception as e:
+        raise ConfigValidationError(f"config unreadable: {e}") from None
+    try:
+        ver = pkg_version("raven")
+    except Exception:
+        ver = "unknown"
+    return {"settings": _mask_secrets(raw), "config_path": str(path), "raven_version": ver}
+
+
+async def settings_set(params: dict, *, agent_loop_factory=None) -> dict:
+    """Whitelisted dotted-path config writes for a settings surface.
+
+    Channel enables and typed keys delegate to the existing update_* writers;
+    raw list keys (plugins.disabled / tools.disabledTools) go through
+    read_raw_or_raise + atomic replace so a malformed config never gets
+    clobbered.
+    """
+
+    key = str(params.get("key", ""))
+    value = params.get("value")
+
+    if key == "language":
+        if value not in ("en", "zh"):
+            raise ConfigValidationError("language must be en | zh")
+        from raven import i18n
+        from raven.config.update import set_language
+
+        prev = set_language(value)
+        # The file is where the next process reads it; this is where the one
+        # answering right now does. The CLI seeds it at startup
+        # (``cli/commands.py``), and nothing else would until a restart, so a
+        # user who switched language here went on being answered in the old one.
+        i18n.set_language(value)
+        return {"applied": True, "previous": prev}
+
+    if key == "cron.defaultTimezone":
+        from raven.config.update import update_cron_config
+
+        if not isinstance(value, str) or not value:
+            raise ConfigValidationError("defaultTimezone must be a non-empty string")
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(value)
+        except Exception:
+            raise ConfigValidationError(f"unknown timezone: {value}") from None
+        # The page names the key the way the config file spells it; the writer
+        # validates against ``CronConfig.model_fields``, which holds the Python
+        # field names. Nothing else in this endpoint crosses the two, so the
+        # conversion belongs here rather than in a writer the CLI shares.
+        sub = to_snake(key.split(".", 1)[1])
+        prev = update_cron_config(sub, value)
+        return {"applied": True, "previous": prev}
+
+    if key.startswith("channels.") and key.endswith(".enabled"):
+        from raven.config.update_channels import channel_names, disable_channel, enable_channel
+
+        name = key.split(".")[1]
+        if name not in channel_names():
+            raise ConfigValidationError(f"unknown channel: {name}")
+        if not isinstance(value, bool):
+            raise ConfigValidationError("enabled must be a boolean")
+        if value:
+            enable_channel(name)
+        else:
+            disable_channel(name)
+        return {"applied": True, "previous": not value}
+
+    if key in ("plugins.disabled", "tools.disabledTools", "skillForge.blocklist"):
+        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+            raise ConfigValidationError(f"{key} must be a list of strings")
+        return _write_raw_key(key, value)
+
+    if key in ("embedding", "embedding.model", "embedding.provider"):
+        # Through the endpoint writer rather than the raw one, so this block has
+        # a single way in. The raw path wrote a pin nothing had checked and said
+        # nothing about what the change costs -- and a model swapped on this
+        # page invalidates every vector already stored just as surely as one
+        # swapped in the wizard.
+        from raven.config.update import EmbeddingPinError, embedding_model_change, set_embedding_endpoint
+
+        checker = _SETTINGS_SIMPLE_KEYS[key]
+        fields = checker(value) if key == "embedding" else {key.split(".", 1)[1]: checker(value)}
+        try:
+            previous = await asyncio.to_thread(set_embedding_endpoint, fields)
+        except EmbeddingPinError as exc:
+            raise ConfigValidationError(str(exc)) from exc
+        warning = embedding_model_change(previous, fields)
+        result: dict[str, Any] = {"applied": True, "previous": previous or None}
+        if warning:
+            result["warning"] = warning
+        return result
+
+    checker = _SETTINGS_SIMPLE_KEYS.get(key)
+    if checker is not None:
+        written = _write_raw_key(key, checker(value), merge=key in _MERGED_KEYS)
+        if key in MIRRORED_KEYS:
+            # cli/acp sub-agents read every web credential from the
+            # environment, not from the config, so the ~/.raven/env mirror has
+            # to follow the write or they keep running on the key this call
+            # just replaced.
+            refresh_env_file()
+        return written
+
+    raise ConfigValidationError(f"key not writable via settings.set: {key}")
+
+
+#: Keys whose value is an object covering only part of the block it names, so
+#: the write merges instead of replacing. ``sessionTitle`` carries enabled, the
+#: timeout and the width gate beside its pin, and a replacing write would drop
+#: every one of them.
+_MERGED_KEYS = frozenset(
+    {
+        "tools.media.image",
+        "tools.media.speech",
+        "tools.media.video",
+        "sessionTitle",
+        "context",
+        "skillForge",
+        "translate",
+        "knowledge",
+    }
+)
+
+
+def _as_written(node: dict, name: str) -> str:
+    """The spelling this object already uses for ``name``, or ``name`` itself.
+
+    The config models set ``alias_generator=to_camel`` with
+    ``populate_by_name=True``, so every block and field is accepted under two
+    spellings and a hand-written config may hold either. A write that always
+    used the camelCase one did not update the file, it grew a second key beside
+    the first -- and since the models forbid extras, the block that was there
+    before became an extra input and the whole config stopped loading. The
+    write has to follow the file rather than the writer's spelling.
+    """
+    if name in node:
+        return name
+    for alias in (to_camel(name), to_snake(name)):
+        if alias != name and alias in node:
+            return alias
+    return name
+
+
+def _write_raw_key(key: str, value: Any, *, merge: bool = False) -> dict:
+    """Dotted-path read-modify-write into config.json, under the config lock.
+
+    The same ``atomic_update`` transaction the ``update.py`` writers run, so a
+    console save cannot interleave with a CLI save on the same file, and a
+    config held at 0600 keeps its mode across the replace.
+    """
+    from raven.config.loader import get_config_path, read_raw_or_raise
+
+    path = get_config_path()
+
+    def _apply(_text: str | None) -> tuple[str, Any]:
+        try:
+            raw = read_raw_or_raise(path)
+        except Exception as e:
+            raise ConfigValidationError(f"config unreadable: {e}") from None
+        node = raw
+        parts = key.split(".")
+        for p in parts[:-1]:
+            node = node.setdefault(_as_written(node, p), {})
+            if not isinstance(node, dict):
+                raise ConfigValidationError(f"config path {key} blocked by non-object")
+        leaf = _as_written(node, parts[-1])
+        prev = node.get(leaf)
+        if merge:
+            if prev is not None and not isinstance(prev, dict):
+                raise ConfigValidationError(f"config path {key} blocked by non-object")
+            existing = prev or {}
+            # Each field of the pair, under the spelling the block already uses.
+            fields = {_as_written(existing, k): v for k, v in value.items()}
+            node[leaf] = {**existing, **fields}
+            prev = {k: existing.get(k) for k in fields}
+        else:
+            node[leaf] = value
+        return json.dumps(raw, indent=2, ensure_ascii=False), prev
+
+    prev = atomic_update(path, _apply)
+    return {"applied": True, "previous": prev}
+
+
+def _chk_bool(key: str):
+    def chk(v: Any) -> bool:
+        if not isinstance(v, bool):
+            raise ConfigValidationError(f"{key} must be a boolean")
+        return v
+
+    return chk
+
+
+def _chk_int(key: str, lo: int, hi: int):
+    def chk(v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ConfigValidationError(f"{key} must be an integer")
+        if not lo <= v <= hi:
+            raise ConfigValidationError(f"{key} must be between {lo} and {hi}")
+        return v
+
+    return chk
+
+
+def _chk_enum(key: str, *allowed: Any):
+    def chk(v: Any) -> Any:
+        if v not in allowed:
+            raise ConfigValidationError(f"{key} must be one of {allowed}")
+        return v
+
+    return chk
+
+
+def _chk_str(key: str, max_len: int = 500):
+    def chk(v: Any) -> str:
+        if not isinstance(v, str):
+            raise ConfigValidationError(f"{key} must be a string")
+        if len(v) > max_len:
+            raise ConfigValidationError(f"{key} too long (max {max_len})")
+        return v
+
+    return chk
+
+
+def _chk_pin_model(key: str):
+    """A subsystem pin's model half: a Model Ref, or empty to unset it.
+
+    Empty clears the pin rather than being rejected, because "follow the
+    conversation" is the documented unset state and a picker needs a way back
+    to it. Not checked against a catalogue: a provider's live list is the
+    authority on what it serves, and a config written before a model was
+    published must not be refused by a snapshot that predates it.
+    """
+    inner = _chk_str(key, 200)
+
+    def chk(v: Any) -> str | None:
+        if v is None:
+            return None
+        text = inner(v).strip()
+        return text or None
+
+    return chk
+
+
+def _configured_provider_section(slug: str) -> bool:
+    """Whether this config holds a section for ``slug``."""
+    try:
+        from raven.config.loader import get_config_path, read_raw_or_raise
+
+        providers = read_raw_or_raise(get_config_path()).get("providers")
+    except Exception:  # noqa: BLE001 - an unreadable config proves nothing exists
+        return False
+    return isinstance(providers, dict) and slug in providers
+
+
+def _chk_pin_provider(key: str):
+    """A pin's provider half: a configured provider's slug, or empty to unset.
+
+    Known to the registry, or already a section in this config: naming a
+    provider that has no credentials yet is an ordinary order of operations
+    (pick the model, then go and add the key), while naming one that does not
+    exist is a typo that would otherwise surface as a silent fallback to the
+    conversation's model.
+
+    The config half is not a loophole, it is the other half of the same
+    question. Raven carries no spec for every vendor LiteLLM can reach, and a
+    section the operator wrote is proof the vendor exists -- so a pin the
+    wizard stored through one surface could not be edited through this one,
+    which is how a working DeepInfra endpoint became uneditable on the page
+    that exists to edit it.
+    """
+    inner = _chk_str(key, 100)
+
+    def chk(v: Any) -> str | None:
+        if v is None:
+            return None
+        text = inner(v).strip()
+        if not text:
+            return None
+        from raven.providers.registry import canonical_provider_name, find_by_name
+
+        slug = canonical_provider_name(text)
+        if find_by_name(slug) is None and not _configured_provider_section(slug):
+            raise ConfigValidationError(f"{key}: no provider named {text!r}")
+        return slug
+
+    return chk
+
+
+def _chk_pin_pair(parent: str, model_field: str, provider_field: str):
+    """A model/provider pin as one value, so it is written as one operation.
+
+    Both halves in a single ``settings.set`` because a pin is only meaningful
+    as a pair. Written a key at a time, a dropped connection between the two
+    leaves a model pointing at the wrong provider, and the rollback cannot
+    recover through the connection that just failed; two pickers saving at once
+    can interleave their writes into a pair neither of them chose. One key is
+    one ``atomic_update`` under the config lock, which has neither failure.
+
+    The leaves stay individually writable for callers that set one on purpose,
+    exactly as ``tools.media.image.model`` does beside ``tools.media.image``;
+    their validators are what this delegates to.
+    """
+    fields = {model_field, provider_field}
+
+    def chk(value: Any) -> dict:
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ConfigValidationError(f"{parent} must contain exactly {model_field} and {provider_field}")
+        return {k: _SETTINGS_SIMPLE_KEYS[f"{parent}.{k}"](v) for k, v in value.items()}
+
+    return chk
+
+
+def _chk_image_selection(value: Any) -> dict:
+    """The image role's selection: model and quality, and the provider it runs on."""
+    if not isinstance(value, dict) or not {"model", "quality"} <= set(value) <= {"model", "quality", "provider"}:
+        raise ConfigValidationError("image selection must contain model and quality, and may name a provider")
+    return {k: _SETTINGS_SIMPLE_KEYS[f"tools.media.image.{k}"](v) for k, v in value.items()}
+
+
+def _chk_media_selection(value: Any) -> dict:
+    """Speech and video name no provider: their request shapes are OpenRouter's own."""
+    if not isinstance(value, dict) or set(value) != {"model", "quality"}:
+        raise ConfigValidationError("media selection must contain exactly model and quality")
+    return {k: _SETTINGS_SIMPLE_KEYS[f"tools.media.image.{k}"](v) for k, v in value.items()}
+
+
+def _chk_image_provider(v: Any) -> str:
+    """The provider the image tool runs on, or empty for OpenRouter.
+
+    Only one the registry marks ``image_api``: any other connected provider would
+    save cleanly and then answer every picture with an error, which is the
+    failure the roles card exists to keep out of reach.
+    """
+    text = _chk_str("tools.media.image.provider", 100)(v).strip()
+    if not text:
+        return ""
+    from raven.providers.registry import PROVIDERS, canonical_provider_name, find_by_name
+
+    slug = canonical_provider_name(text)
+    spec = find_by_name(slug)
+    if spec is None or not spec.image_api:
+        serving = ", ".join(s.label for s in PROVIDERS if s.image_api)
+        raise ConfigValidationError(f"tools.media.image.provider: the image tool runs on {serving}, not {text!r}")
+    return slug
+
+
+# Low-risk hot-writable keys a settings surface may offer. Each entry is a
+# validator that returns the value to store; anything not listed here (or in
+# the special cases above) stays editable only through the config file.
+#
+# The containment controls stay absent because they can remove the execution
+# boundary in one unaudited RPC call. `tools.restrictToWorkspace` and
+# `tools.sandbox.backend` are the containment controls themselves -- one call
+# to either turns a sandboxed agent into an unsandboxed one -- and
+# `tools.web.proxy` would route every WebSearch and WebFetch, API keys and all,
+# through a chosen host. This whitelist is reachable from any RPC client with
+# no confirmation step, so it must not contain the settings that decide what an
+# attacker who reaches it can then do. Editing the config file for those is the
+# friction, and it is the point.
+def _chk_int_or_null(key: str, lo: int, hi: int):
+    inner = _chk_int(key, lo, hi)
+
+    def chk(v: Any) -> int | None:
+        return None if v is None else inner(v)
+
+    return chk
+
+
+_SETTINGS_SIMPLE_KEYS: dict[str, Any] = {
+    "tools.exec.timeout": _chk_int("tools.exec.timeout", 5, 3600),
+    "tools.web.search.apiKey": _chk_str("tools.web.search.apiKey", 200),
+    "tools.web.jinaApiKey": _chk_str("tools.web.jinaApiKey", 200),
+    "tools.web.search.provider": _chk_enum("tools.web.search.provider", *get_args(WebSearchProvider)),
+    "tools.web.fetch.provider": _chk_enum("tools.web.fetch.provider", *get_args(WebFetchProvider)),
+    # One slot per vendor: the same low-risk shape as the two legacy keys above,
+    # a credential the deployment already chose to hold, not a containment control.
+    **{
+        f"tools.web.providers.{vendor}.apiKey": _chk_str(f"tools.web.providers.{vendor}.apiKey", 200)
+        for vendor in WEB_VENDOR_ENV_VARS
+    },
+    "tools.media.image.apiKey": _chk_str("tools.media.image.apiKey", 200),
+    "tools.media.image.model": _chk_str("tools.media.image.model"),
+    "tools.media.image.quality": _chk_enum("tools.media.image.quality", "", "low", "medium", "high"),
+    "tools.media.image": _chk_image_selection,
+    "tools.media.image.provider": _chk_image_provider,
+    "channels.sendProgress": _chk_bool("channels.sendProgress"),
+    "channels.sendToolHints": _chk_bool("channels.sendToolHints"),
+    "memory.memoryTopK": _chk_int("memory.memoryTopK", 1, 50),
+    # The default-model pins the settings page offers, each a model and the
+    # provider serving it. Written as a pair by the page; validated
+    # independently here because `settings.set` carries one key at a time, and
+    # a pin with one half missing is a state the readers already handle (they
+    # follow the conversation's model rather than guess a credential).
+    "sessionTitle.model": _chk_pin_model("sessionTitle.model"),
+    "sessionTitle.provider": _chk_pin_provider("sessionTitle.provider"),
+    "translate.model": _chk_pin_model("translate.model"),
+    "translate.provider": _chk_pin_provider("translate.provider"),
+    "embedding.model": _chk_pin_model("embedding.model"),
+    "embedding.provider": _chk_pin_provider("embedding.provider"),
+    "vision.model": _chk_pin_model("vision.model"),
+    "vision.provider": _chk_pin_provider("vision.provider"),
+    # The pair keys. A surface offering a pin writes one of these, not the two
+    # leaves in sequence.
+    "sessionTitle": _chk_pin_pair("sessionTitle", "model", "provider"),
+    "translate": _chk_pin_pair("translate", "model", "provider"),
+    "embedding": _chk_pin_pair("embedding", "model", "provider"),
+    "vision": _chk_pin_pair("vision", "model", "provider"),
+    "agents.defaults.enablePersonalization": _chk_bool("agents.defaults.enablePersonalization"),
+    "agents.defaults.reasoningEffort": _chk_enum("agents.defaults.reasoningEffort", "minimal", "low", "medium", "high"),
+    "permissions.mode": _chk_enum("permissions.mode", "ask", "smart", "full"),
+    "agents.defaults.maxToolIterations": _chk_int("agents.defaults.maxToolIterations", 1, 200),
+    "agents.defaults.contextWindowTokens": _chk_int_or_null("agents.defaults.contextWindowTokens", 1024, 100_000_000),
+    "context.curatorModel": _chk_pin_model("context.curatorModel"),
+    "context.curatorProvider": _chk_pin_provider("context.curatorProvider"),
+    "skillForge.llmGateModel": _chk_pin_model("skillForge.llmGateModel"),
+    "skillForge.llmGateProvider": _chk_pin_provider("skillForge.llmGateProvider"),
+    # The two pins as one write each, the way sessionTitle already is: a pair
+    # written a key at a time can be left half-changed by a dropped connection.
+    "context": _chk_pin_pair("context", "curatorModel", "curatorProvider"),
+    "skillForge": _chk_pin_pair("skillForge", "llmGateModel", "llmGateProvider"),
+    # The image tool's selection object without its provider: the three media
+    # tools share one config shape, and only the image tool runs elsewhere.
+    "tools.media.speech": _chk_media_selection,
+    "tools.media.video": _chk_media_selection,
+    "sessions.autoArchiveAfterDays": _chk_int_or_null("sessions.autoArchiveAfterDays", 1, 3650),
+}
+
+
+# ---------------------------------------------------------------------------
+# settings.usage — every API the agent burns: LLM calls and tool calls
+# ---------------------------------------------------------------------------
+
+
+def _parse_day(value: Any, field: str):
+    """An ISO date (``YYYY-MM-DD``) or None; anything else is refused."""
+    if value is None or value == "":
+        return None
+    from datetime import date
+
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        raise ConfigValidationError(f"{field} must be a date like 2026-09-17") from None
+
+
+def _usage_range(params: dict):
+    """The days a usage query covers: ``from``/``to`` when given (inclusive,
+    clamped to 90 days back), else ``days`` back from today."""
+    from datetime import date, timedelta
+
+    today = date.today()
+    earliest = today - timedelta(days=89)
+    frm = _parse_day(params.get("from"), "from")
+    to = _parse_day(params.get("to"), "to")
+    if frm is not None or to is not None:
+        to = min(to or today, today)
+        frm = max(frm or earliest, earliest)
+        if frm > to:
+            raise ConfigValidationError("from must not be after to")
+    else:
+        days = params.get("days")
+        days = days if isinstance(days, int) and not isinstance(days, bool) else 30
+        days = max(1, min(days, 90))
+        to = today
+        frm = today - timedelta(days=days - 1)
+    dates = [frm + timedelta(days=i) for i in range((to - frm).days + 1)]
+    return frm, to, dates
+
+
+async def settings_usage(params: dict, *, agent_loop_factory=None) -> dict:
+    """Aggregate API usage for the settings page.
+
+    Both halves read the same UsageTracker telemetry files
+    (``~/.raven/telemetry/usage-YYYY-MM-DD.jsonl``, one JSON row per call, one
+    per tool call), so one range means one thing across the whole reply. The
+    scan is read-only and bounded by ``days`` (default 30, max 90). Session
+    transcripts are read for their titles only.
+    """
+    from datetime import datetime
+
+    from raven.config.loader import load_config
+
+    frm, to, dates = _usage_range(params)
+    days = len(dates)
+
+    from raven.providers.usage import reported_cost, token_count
+
+    def empty_totals() -> dict[str, Any]:
+        return {
+            "calls": 0,
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_tokens": None,
+            "cache_write_tokens": None,
+            "cost_usd": None,
+            "input_missing_calls": 0,
+            "output_missing_calls": 0,
+            "cost_missing_calls": 0,
+            "cache_read_missing_calls": 0,
+            "cache_write_missing_calls": 0,
+            "legacy_cost_calls": 0,
+        }
+
+    selected_session = params.get("session_key") or None
+    sessions: set[str] = set()
+    models: dict[str, dict[str, Any]] = {}
+    total = empty_totals()
+    # The same resolution the writer uses (usage_tracker._default_telemetry_dir):
+    # both used to hardcode ~/.raven, which held together only until RAVEN_HOME
+    # moved one of them.
+    from raven.config.loader import raven_home
+
+    tel_dir = raven_home() / "telemetry"
+    daily: dict[str, dict[str, Any]] = {d.isoformat(): {"date": d.isoformat(), **empty_totals()} for d in dates}
+    for day in dates:
+        day_key = day.isoformat()
+        p = tel_dir / f"usage-{day_key}.jsonl"
+        if not p.is_file():
+            continue
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            if row.get("_type") == "tool_call":
+                continue
+            root = row.get("root_session_key") or row.get("session_key")
+            if isinstance(root, str) and root:
+                sessions.add(root)
+            if selected_session and root != selected_session:
+                continue
+            name = str(row.get("model") or "?")
+            acc = models.setdefault(name, {"model": name, **empty_totals()})
+            cost = reported_cost(row.get("cost_usd")) if row.get("schema_version") == 2 else None
+            legacy = row.get("schema_version") != 2 and row.get("estimated_cost_usd") is not None
+            for target in (acc, total, daily[day_key]):
+                target["calls"] += 1
+                target["legacy_cost_calls"] += int(legacy)
+                for key, value, missing in (
+                    ("input_tokens", token_count(row.get("input_tokens")), "input_missing_calls"),
+                    ("output_tokens", token_count(row.get("output_tokens")), "output_missing_calls"),
+                    ("cost_usd", cost, "cost_missing_calls"),
+                    ("cache_read_tokens", token_count(row.get("cache_read_tokens")), "cache_read_missing_calls"),
+                    ("cache_write_tokens", token_count(row.get("cache_write_tokens")), "cache_write_missing_calls"),
+                ):
+                    if value is None:
+                        target[missing] += 1
+                    else:
+                        target[key] = (target[key] or 0) + value
+
+    session_titles: dict[str, str] = {}
+    tools: dict[str, int] = {}
+    tool_total = 0
+    try:
+        for day in dates:
+            p = tel_dir / f"usage-{day.isoformat()}.jsonl"
+            if not p.is_file():
+                continue
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    row = json.loads(line)
+                    if row.get("_type") != "tool_call":
+                        continue
+                    root = row.get("root_session_key") or row.get("session_key")
+                    if selected_session and root != selected_session:
+                        continue
+                    name = row.get("name")
+                    if isinstance(name, str):
+                        tools[name] = tools.get(name, 0) + 1
+                        tool_total += 1
+            except Exception:
+                continue
+        # Titles only. Tool calls were also counted from transcripts here, to
+        # cover conversations older than the day tool rows started being
+        # written, and a transcript counted as in-range when its file mtime
+        # was -- which gave the range every tool call the conversation had ever
+        # made while its model calls, dated per day, stayed outside it. A reply
+        # cannot carry two readings of one range: a page showing thousands of
+        # tool calls beside no model calls reads as broken, and is.
+        sess_root = Path(load_config().workspace_path) / "sessions"
+        # A floor rather than a window: a transcript last written before the
+        # range cannot name a session the range saw, and which sessions it saw
+        # is what the telemetry above already answered.
+        cutoff = datetime.combine(frm, datetime.min.time()).timestamp()
+        for p in sess_root.glob("*/*.jsonl"):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    continue
+                lines = p.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                continue
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("_type") != "metadata":
+                    continue
+                key = entry.get("key")
+                title = (entry.get("metadata") or {}).get("title")
+                if isinstance(key, str) and key in sessions and isinstance(title, str):
+                    session_titles[key] = title
+    except Exception:
+        logger.exception("settings.usage: tool scan failed")
+
+    return {
+        "days": days,
+        "from": frm.isoformat(),
+        "to": to.isoformat(),
+        "daily": list(daily.values()),
+        "session_key": selected_session,
+        "sessions": sorted(sessions),
+        "session_titles": session_titles,
+        "llm": {
+            "total": total,
+            "models": sorted(models.values(), key=lambda m: -(m["cost_usd"] or 0)),
+        },
+        "tools": {
+            "total": tool_total,
+            "counts": sorted(({"name": k, "count": v} for k, v in tools.items()), key=lambda t: -t["count"]),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# settings.everos — the EverOS model roles behind long-term memory
+# ---------------------------------------------------------------------------
+
+
+def _everos_config_module():
+    """The plugin's config module, or a typed error naming what to install.
+
+    The module ships with the ``everos-memory`` distribution, so on an install
+    without it the import raises ``ModuleNotFoundError`` -- which reaches the
+    client as a generic internal error with a traceback, saying nothing a
+    person can act on. Both handlers below go through here so the absence is
+    reported once, in the words every other surface uses for it.
+    """
+    try:
+        import raven_everos.config as module
+    except ImportError as exc:
+        from raven.core.plugin_stack import everos_plugin_missing_note
+
+        raise ConfigValidationError(everos_plugin_missing_note()) from exc
+    return module
+
+
+async def settings_everos(params: dict, *, agent_loop_factory=None) -> dict:
+    """Current EverOS model sections, api_key reduced to a set/unset flag.
+
+    ``available`` is false with a ``note`` when this install has no EverOS to
+    configure. The page used to render four "not set" rows in that case --
+    identical to an install where the plugin is present and simply
+    unconfigured -- so a person could fill in a model and a key and have
+    nothing happen, with no way to learn why.
+    """
+    del params
+    from raven.core.plugin_stack import everos_plugin_installed, everos_plugin_missing_note
+
+    if not everos_plugin_installed():
+        return {
+            "available": False,
+            "note": everos_plugin_missing_note(),
+            "sections": {},
+            "config_path": "",
+        }
+    from raven_everos.config import describe_roles
+
+    return describe_roles()
+
+
+# One restart at a time, and one more run queued at most. Two saves in quick
+# succession must end at the final configuration without their stop/spawn
+# windows overlapping -- overlapping ones race for the same port and the loser
+# reports a startup failure for a configuration that is actually in force.
+_everos_restart: dict[str, Any] = {"running": False, "again": False, "loops": []}
+# Held rather than dropped: a bare create_task is collectable while it is the
+# only reference to a running task, and a collected one silently skips the
+# restart the save promised.
+_everos_restart_tasks: set[asyncio.Task] = set()
+
+
+async def _restart_everos_for_config(loop: Any) -> None:
+    """Apply what was just written, and report the outcome to the page.
+
+    Backgrounded by the caller: a spawn is seconds, and a save that blocks on
+    one cannot say anything while it waits. The outcome arrives as
+    ``memory.health``, the frame the page's standing banner already reads --
+    success included, because that is the only thing that clears it.
+    """
+    from raven_everos.config import everos_root, recorded_slice
+    from raven_everos.server import DEFAULT_EVEROS_BASE_URL, restart_for_config_change
+
+    # Every session that asked, not the one that happened to start the run. The
+    # outcome of a restart a second session queued is that session's answer too,
+    # and reporting only to the first left its banner on whatever was there.
+    loops: list = _everos_restart["loops"]
+    if not any(existing is loop for existing in loops):
+        loops.append(loop)
+
+    if _everos_restart["running"]:
+        _everos_restart["again"] = True
+        return
+    _everos_restart["running"] = True
+
+    def _report(ok: bool, error: str | None) -> None:
+        for target in list(_everos_restart["loops"]):
+            try:
+                target._emit_mcp_event("memory.health", {"ok": ok, "error": error})
+            except Exception:  # noqa: BLE001 - one closed session must not silence the rest
+                logger.debug("settings/everos: could not report the restart to a session")
+
+    try:
+        while True:
+            _everos_restart["again"] = False
+            # Read inside the loop: a second save that arrived mid-restart
+            # changed these, and the whole point of the extra run is to end at
+            # what it wrote.
+            base_url = str(recorded_slice().get("base_url") or DEFAULT_EVEROS_BASE_URL)
+            try:
+                await restart_for_config_change(everos_root(), base_url, on_result=_report)
+            except asyncio.CancelledError:
+                # A gateway shutting down mid-restart. Said out loud, because the
+                # banner otherwise keeps whatever the last run put there and the
+                # next session inherits a claim nobody can check.
+                _report(False, "the restart was interrupted before it finished")
+                raise
+            except Exception as exc:  # noqa: BLE001 - a dropped outcome leaves the banner lying
+                logger.warning("settings/everos: restart chain failed: {}", exc)
+                _report(False, str(exc))
+            if not _everos_restart["again"]:
+                return
+    finally:
+        _everos_restart["running"] = False
+        _everos_restart["loops"] = []
+
+
+def _everos_applied(agent_loop_factory: Any, cost: str = "") -> dict:
+    """Start the restart the write just earned, or say why it did not run.
+
+    Refused synchronously when no loop is up: the outcome only reaches the page
+    as a pushed frame, so a restart started here would report to nobody -- and
+    the caller would read ``applied`` as "this configuration is running" while
+    the old server kept serving.
+
+    ``cost`` is what the write costs the stores -- moving the embedding model
+    orphans every vector already written under the old one. Said here because
+    this is where the person made the change; it outranks the refusal text,
+    which describes when the change takes effect rather than what it costs.
+    """
+    loop = _safe_loop(agent_loop_factory)
+    if loop is None:
+        return {
+            "applied": False,
+            "warning": cost
+            or (
+                "Saved, but the memory service was not restarted: no session is connected "
+                "to report the outcome to. The change takes effect at the next start."
+            ),
+        }
+    task = asyncio.get_running_loop().create_task(_restart_everos_for_config(loop))
+    _everos_restart_tasks.add(task)
+    task.add_done_callback(_everos_restart_tasks.discard)
+    return {"applied": True, **({"warning": cost} if cost else {})}
+
+
+def everos_follows_provider(slug: str, agent_loop_factory: Any) -> None:
+    """Restart EverOS when ``slug`` is what one of its four roles runs on.
+
+    A role stores a pin -- a model and a provider -- and resolves the address
+    and key from that provider at spawn time. So a credential edited on the
+    models page changes what the *next* spawn would hand the server while the
+    one already running keeps what it booted with, and nothing on any screen
+    says so: EverOS's health endpoint never touches a model, so a revoked key
+    reads as healthy right up until memory fails in EverOS's own log.
+
+    ``roles_changed_since_spawn`` catches this at the next session whatever
+    wrote the credential, ``raven provider set`` and a hand-edited config.json
+    included. This is the half that makes it the moment the person made the
+    change instead.
+
+    Silent when the install has no EverOS, when no role names this provider, or
+    when no session is connected to hear the outcome. None of those is a reason
+    to fail a save that already succeeded.
+    """
+    try:
+        from raven.providers.registry import names_same_provider
+        from raven_everos.config import FOLLOWS_MAIN_ROLES, ROLES, main_model_pin, role_pin
+    except ImportError:
+        return
+    try:
+        for section in ROLES:
+            pin = role_pin(section)
+            if pin is None and section in FOLLOWS_MAIN_ROLES:
+                pin = main_model_pin()
+            if pin is not None and names_same_provider(pin[1], slug):
+                break
+        else:
+            return
+    except Exception:  # noqa: BLE001 - a save must not fail over this question
+        logger.debug("settings/everos: could not tell whether {} serves a memory role", slug)
+        return
+    _everos_applied(agent_loop_factory)
+
+
+def everos_follows_main_model(agent_loop_factory: Any) -> None:
+    """Restart EverOS after the default model moved, when its memory model follows it.
+
+    An unset memory model resolves to the main model at spawn time, so the
+    running server still extracts with the old one until it is restarted --
+    the same gap ``everos_follows_provider`` closes for a key. Only while
+    EverOS is the memory backend: a switch of the chat model must not start a
+    memory server nobody uses.
+    """
+    try:
+        from raven.config.raven import load_raven_config
+        from raven_everos.config import FOLLOWS_MAIN_ROLES, role_is_env_managed, role_pin
+    except ImportError:
+        return
+    try:
+        if load_raven_config().memory.backend != "everos":
+            return
+        if not any(role_pin(s) is None and not role_is_env_managed(s) for s in FOLLOWS_MAIN_ROLES):
+            return
+    except Exception:  # noqa: BLE001 - a model switch must not fail over this question
+        logger.debug("settings/everos: could not tell whether the memory model follows the main model")
+        return
+    _everos_applied(agent_loop_factory)
+
+
+async def settings_everos_set(params: dict, *, agent_loop_factory=None) -> dict:
+    """Record which model and provider serve one EverOS role, or clear the role.
+
+    A forwarder by design: the plugin owns these keys, validates them, and
+    enforces the ownership guard at its own write primitive so a new caller --
+    this one, most recently -- cannot opt out of it.
+
+    The pair is stored, not the credential. What used to be ``borrow_from``, which
+    copied a lender's key into ``everos.toml``, is now just ``provider``: the file
+    is no longer read by EverOS for these sections, so the reason that copy
+    existed is gone, and a stored name follows a later key rotation on its own.
+
+    ``protocol`` is the one thing a pair cannot answer for: reranking against
+    somebody's own server needs a request shape, and no table knows what they
+    deployed. Ignored for every vendor the table does answer for.
+    """
+    _everos_config_module()
+    from raven.config.update import EmbeddingPinError
+    from raven_everos.config import (
+        RERANK_PROTOCOLS,
+        ROLES,
+        EverosRootNotOwnedError,
+        RoleRequiredError,
+        clear_role,
+        rerank_protocol,
+        rerank_protocol_for_role,
+        role_is_env_managed,
+        role_pin,
+        set_role,
+    )
+
+    section = str(params.get("section", ""))
+    if section not in ROLES:
+        raise ConfigValidationError(f"unknown everos role: {section}")
+
+    if params.get("clear") is True:
+        # The rule is `clear_role`'s now, so this door translates rather than
+        # restates it -- a second copy here is what let the wizard's own copy
+        # drift from this one.
+        try:
+            clear_role(section, deliberate=True)
+        except RoleRequiredError as e:
+            raise ConfigValidationError(str(e)) from e
+        return _everos_applied(agent_loop_factory)
+
+    model = str(params.get("model") or "").strip()
+    provider = str(params.get("provider") or "").strip()
+    if not model or not provider:
+        raise ConfigValidationError("both model and provider are required")
+    if len(model) > 500 or len(provider) > 500:
+        raise ConfigValidationError("model and provider must be under 500 characters")
+    protocol = str(params.get("protocol") or "").strip()
+    if protocol and protocol not in RERANK_PROTOCOLS:
+        raise ConfigValidationError(f"unknown rerank protocol: {protocol}")
+    if role_is_env_managed(section):
+        # The exported variables outrank both raven and the file, so a save here
+        # would be accepted, written, and then ignored. Naming the variables is
+        # the only useful thing raven can do: it cannot edit a shell.
+        #
+        # All four roles, not just embedding: `everos_env` skips an env-managed
+        # role whole, so a save accepted for any of them is a save that silently
+        # never takes.
+        prefix = f"EVEROS_{section.upper()}__"
+        raise ConfigValidationError(
+            f"the {section} endpoint is set by the {prefix}MODEL / {prefix}BASE_URL / "
+            f"{prefix}API_KEY environment variables, which outrank anything saved here; "
+            "change them instead"
+        )
+
+    # Refused here rather than discovered later: a pin naming a provider with no
+    # usable credential saves cleanly and then reads back as "not configured",
+    # which looks like the save was lost. The same question the gate asks.
+    from raven.config.update_providers import resolve_provider_credentials
+
+    try:
+        resolved = resolve_provider_credentials(provider)
+    except KeyError:
+        raise ConfigValidationError(f"unknown provider: {provider}") from None
+    if resolved is None:
+        raise ConfigValidationError(
+            f"{provider} has no usable credential, so a role pinned to it cannot run -- give it an API key first"
+        )
+
+    if section == "rerank" and not protocol and not rerank_protocol(provider):
+        # The shape already on file, when this save keeps the same vendor. A
+        # role the wizard configured against somebody's own box carries the
+        # answer they gave; not reading it back made that role permanently
+        # unsaveable from the page -- not even a model-only edit.
+        pinned = role_pin("rerank")
+        protocol = rerank_protocol_for_role() or "" if pinned and pinned[1] == provider else ""
+    if section == "rerank" and not protocol and not rerank_protocol(provider):
+        # Refused rather than guessed. EverOS falls back to its own default shape
+        # when told nothing, and posting a deepinfra-shaped request to a vLLM
+        # server is the defect this change started from -- silent, and looking
+        # exactly like a bad model.
+        raise ConfigValidationError(
+            f"reranking on {provider} needs its request shape named "
+            f"({' / '.join(RERANK_PROTOCOLS)}); nothing knows what a self-hosted server runs"
+        )
+
+    try:
+        cost = await asyncio.to_thread(set_role, section, model=model, provider=provider, protocol=protocol)
+    except EmbeddingPinError as exc:
+        # A pair that cannot embed. The embedding branch used to catch this and
+        # the rewrite dropped it, which sent the page `internal_error` plus a
+        # traceback instead of the sentence naming the model.
+        raise ConfigValidationError(str(exc)) from exc
+    except EverosRootNotOwnedError as exc:
+        # A refusal the page has to be able to read. Left as a RuntimeError it
+        # reaches the dispatcher, which renders any non-RpcError as
+        # "internal_error" plus a traceback -- and the one useful thing this
+        # refusal carries, the path of the root somebody else manages, never
+        # arrives.
+        raise ConfigValidationError(str(exc)) from exc
+    if section == "llm":
+        # The CLI wizard records the backend name on a CONFIGURED outcome from
+        # its own onboard step; a web save has no such step, so record it here.
+        # Only where no key exists: an explicit null is the CLI step's record
+        # of a reader who declined memory, and a model saved for it does not
+        # overturn that.
+        from raven.config.loader import get_config_path, read_raw_or_raise
+        from raven.config.update import set_memory_backend
+        from raven.core.plugin_stack import SHIPPED_DEFAULT_BACKEND
+
+        raw = read_raw_or_raise(get_config_path())
+        if "backend" not in (raw.get("memory") or {}):
+            set_memory_backend(SHIPPED_DEFAULT_BACKEND)
+    return _everos_applied(agent_loop_factory, cost)
+
+
+# ---------------------------------------------------------------------------
+# channels.status
+# ---------------------------------------------------------------------------
+
+
+async def channels_status(params: dict, *, agent_loop_factory=None) -> dict:
+    from raven.config.loader import load_config
+    from raven.config.update_channels import channel_field_specs, channel_names
+
+    config = load_config()
+    items = []
+    for name in channel_names():
+        model = getattr(config.channels, name, None)
+        enabled = bool(getattr(model, "enabled", False))
+        missing: list[str] = []
+        # Every field the channel takes, so a client can render its configure
+        # form instead of naming the gaps and sending the user to a terminal.
+        # Values never ride along -- only whether one is set -- because the row
+        # crosses the wire on every status poll and secrets among them.
+        fields: list[dict] = []
+        try:
+            for field, spec in channel_field_specs(name).items():
+                if field == "enabled":
+                    continue
+                # A walk, not one getattr: three of the twelve channels spec
+                # nested keys (`dm.policy`, `mention.require_in_groups`), and a
+                # flat lookup returns None for those -- so a configured slack DM
+                # policy drew as an empty box in the configure form, forever.
+                current: Any = model
+                for part in field.split("."):
+                    current = getattr(current, part, None)
+                    if current is None:
+                        break
+                is_set = current not in (None, "", []) and current != spec.get("default")
+                if spec.get("required") and current in (None, "", []):
+                    missing.append(field)
+                fields.append(
+                    {
+                        "key": field,
+                        "label": str(spec.get("description") or field),
+                        "required": bool(spec.get("required")),
+                        "secret": bool(spec.get("is_secret")),
+                        "set": bool(is_set),
+                    }
+                )
+        except Exception:
+            pass
+        items.append(
+            {
+                "name": name,
+                "enabled": enabled,
+                "configured": not missing,
+                "missing": missing,
+                "fields": fields,
+            }
+        )
+
+    gateway_running = False
+    try:
+        import time
+
+        from raven.gateway.lock import read_status
+
+        gateway_running = read_status(time.time()) is not None
+    except Exception:
+        pass
+
+    # `enabled` is what the config asks for; these say what is actually
+    # happening. They stay absent when no gateway answered, so a client can
+    # tell "not connected" from "nobody could say" -- collapsing the second
+    # into the first is how a working channel came to read as broken.
+    live = None
+    try:
+        from raven.gateway.live_probe import channel_liveness
+
+        live = await channel_liveness()
+    except Exception:
+        live = None
+    if live:
+        for item in items:
+            state = live.get(item["name"])
+            if not isinstance(state, dict):
+                continue
+            item["running"] = bool(state.get("running"))
+            if state.get("connected") is not None:
+                item["connected"] = bool(state["connected"])
+            item["qr_login"] = bool(state.get("qr_login"))
+
+    return {"channels": items, "gateway_running": gateway_running}
+
+
+async def channels_configure(params: dict, *, agent_loop_factory=None) -> dict:
+    """Patch one channel's credential fields, validated against its schema.
+
+    The dedicated writer, not a widening of ``settings.set``: field names are
+    checked against the channel's own spec map here, so an arbitrary dotted
+    path can never ride a credential write into the rest of the config.
+    Empty-string values are skipped rather than written -- the form sends every
+    box it showed, and a blank one means "left as is", not "erase".
+    """
+    from raven.config.update_channels import (
+        channel_field_specs,
+        channel_names,
+        disable_channel,
+        enable_channel,
+        set_channel_fields,
+    )
+
+    name = str(params.get("name") or "")
+    if name not in channel_names():
+        raise ConfigValidationError(f"unknown channel: {name}")
+    raw = params.get("fields")
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigValidationError("fields must be an object")
+    enabled = params.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ConfigValidationError("enabled must be a boolean")
+    if not raw and enabled is None:
+        raise ConfigValidationError("nothing to apply: give fields, enabled, or both")
+    specs = channel_field_specs(name)
+    payload: dict[str, Any] = {}
+    for key, value in raw.items():
+        # `enabled` is not a credential and does not travel in the patch: it is
+        # its own argument, routed through the enable/disable writers.
+        if key == "enabled" or key not in specs:
+            raise ConfigValidationError(f"unknown field for channel {name}: {key}")
+        if isinstance(value, str) and not value.strip():
+            continue
+        payload[key] = value
+    if not payload and enabled is None:
+        return {"applied": False}
+    try:
+        # Credentials first, then the switch, so a channel is never left on
+        # without the values it was turned on for.
+        if enabled is True:
+            enable_channel(name, payload or None)
+        else:
+            if payload:
+                set_channel_fields(name, payload)
+            if enabled is False:
+                disable_channel(name)
+    except Exception as e:
+        raise ConfigValidationError(str(e)) from None
+    # The switch is config; the adapter is the gateway's. Writing the flag used
+    # to be the whole of "connect", so a channel turned on here did nothing at
+    # all until the next launch -- for a scan-login entrance that meant no QR
+    # could ever appear, and the page said "reopen Raven App" instead of
+    # signing anyone in. Ask the gateway to start (or stop) it now.
+    answer: dict[str, Any] = {"applied": True}
+    if enabled is not None:
+        from raven.gateway.live_probe import channel_start, reset_cache
+
+        try:
+            # A credential written onto a channel that is already running
+            # reaches config and nothing else: the adapter holds the slice it
+            # was built with and re-reads none of it, so the corrected value
+            # only takes effect once the gateway rebuilds it.
+            outcome = await channel_start(name, enabled=enabled, restart=bool(payload) and enabled)
+        except Exception:
+            outcome = None
+        # Nobody answered, or the gateway refused to say: the config write
+        # stands and the next launch honours it, which is the one case the
+        # page's "reopen the app" sentence is true of. Every other outcome was
+        # swallowed here too, so a channel whose SDK is missing and a channel
+        # nothing was running reached the reader as the same silence.
+        answer["outcome"] = outcome or "unreachable"
+        if outcome == "missing_dep":
+            from raven.gateway.manager import missing_dep_hint
+
+            answer["detail"] = missing_dep_hint()
+        # The liveness cache is three seconds old at most, but the poll right
+        # after this write is exactly the one that should see the new adapter.
+        reset_cache()
+    return answer
+
+
+async def channels_qr(params: dict) -> dict:
+    """The pending login QR for one channel, read off the live adapter.
+
+    A pass-through to the gateway, which is the only process holding the
+    adapter. Empty when no gateway answered -- the same shape as "nothing
+    pending", because to this surface the two are the same: there is no code to
+    show either way, and inventing a distinction here would only add a state the
+    dialog has to explain.
+    """
+    name = str(params.get("name") or "")
+    try:
+        from raven.gateway.live_probe import channel_qr
+
+        answer = await channel_qr(name)
+    except Exception:
+        answer = None
+    answer = answer or {}
+    return {
+        "qr": answer.get("qr") or None,
+        "qr_text": answer.get("qr_text") or None,
+        "connected": bool(answer.get("connected")),
+        "running": bool(answer.get("running")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# fs.*
+# ---------------------------------------------------------------------------
+
+_FS_MAX_ENTRIES = 500
+_FS_DEFAULT_MAX_BYTES = 200_000
+
+
+def _workspace_root(loop, session_key: str = "") -> Path:
+    """The directory the page's file panel is rooted at.
+
+    The working directory the session's turns run in, not agent home: home is
+    ``~/.raven/workspace`` by default, which holds the agent's own memory and
+    is not where a launch-directory turn reads or writes anything. Resolved
+    per session because a session can be pinned to its own directory (the
+    persisted ``workdir`` override); an empty key falls through to the
+    resolver's policy default, which for the gateway is the launch directory.
+    """
+    if loop is not None:
+        peek = getattr(loop, "peek_session_workdir", None)
+        if peek is not None:
+            try:
+                return Path(peek(session_key)).resolve()
+            except ValueError:
+                pass
+    ws = getattr(loop, "workspace", None) if loop is not None else None
+    if ws:
+        return Path(ws).resolve()
+    from raven.config.loader import load_config
+
+    return Path(load_config().workspace_path).resolve()
+
+
+def _resolve_inside(root: Path, rel: str) -> Path:
+    """Resolve ``rel`` under ``root``, refusing anything outside it -- or inside
+    raven's own state directory.
+
+    Containment alone was enough while the root was agent home, a *sibling* of
+    the state dir. It is not now: the root is the session's working directory,
+    which under the launch-directory policy is wherever the gateway was started
+    from. Started in the reader's home -- the ordinary place to type a command
+    -- the state dir sits *under* the root, and `fs.list` even un-hides it. That
+    hands the page ``serve.json``, whose token mints unlimited nonces and so
+    outlives the cookie, and ``config.json`` with the provider keys.
+
+    The same fence the viewer and `fs.reveal` apply -- literally the same
+    function, because a second copy of it drifted immediately: the first one
+    here lacked the workspace carve-out, so with the root at the default
+    ``~/.raven/workspace`` it refused every file the agent had written, which is
+    this bug mirrored. Anchored the same way, too: agent home decides what the
+    fence exempts, and the session root is only added to that, never put in
+    home's place -- which is how the viewer came to refuse the session directory.
+    """
+    from raven.config.loader import load_config
+    from raven.rpc.files import in_state_dir
+
+    p = (root / rel.lstrip("/")).resolve()
+    if p != root and root not in p.parents:
+        raise ConfigValidationError("path escapes workspace")
+    if in_state_dir(p, load_config().workspace_path, root):
+        raise ConfigValidationError(f"{p} is inside raven's state directory")
+    return p
+
+
+async def fs_list(params: dict, *, agent_loop_factory=None) -> dict:
+    root = _workspace_root(_safe_loop(agent_loop_factory), str(params.get("session") or ""))
+    rel = str(params.get("path") or "")
+    target = _resolve_inside(root, rel)
+    if not target.is_dir():
+        raise ConfigValidationError(f"not a directory: {rel or '/'}")
+    entries = []
+    try:
+        children = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    except OSError as e:
+        raise ConfigValidationError(str(e)) from None
+    for child in children[:_FS_MAX_ENTRIES]:
+        # Hidden entries stay hidden. `.raven` used to be the one exception,
+        # from when the root was agent home and the state dir was elsewhere;
+        # under the launch-directory policy it can be a child of the root, and
+        # every path inside it is now refused -- so listing it offers a folder
+        # that answers nothing.
+        if child.name.startswith("."):
+            continue
+        try:
+            entries.append(
+                {
+                    "name": child.name,
+                    "dir": child.is_dir(),
+                    "size": 0 if child.is_dir() else child.stat().st_size,
+                }
+            )
+        except OSError:
+            continue
+    return {"root": str(root), "path": rel, "entries": entries}
+
+
+async def fs_dirs(params: dict, *, agent_loop_factory=None) -> dict:
+    """``fs.dirs`` -- the subdirectories of one absolute directory.
+
+    What the page's folder picker walks when a person chooses where a new
+    conversation will work. Not rooted at a session like ``fs.list``: the
+    conversation does not exist yet, and the point is to reach a directory the
+    policy default would never have picked. Directories only, since a file
+    cannot be a working directory; dotfiles omitted, as ``fs.list`` omits them.
+
+    Every entry carries ``ok``, the answer ``validate_override`` would give
+    ``session.create`` for that path, so the picker can grey out the agent's
+    own data instead of offering a folder the create is going to refuse. A
+    directory that merely CONTAINS that data answers false too (the validator
+    refuses agent home's ancestors), which says nothing about its children --
+    the picker lets such a row be entered and only withholds the pick.
+
+    The cap counts directories FOUND, not names examined, so a folder is never
+    dropped for sorting late among its siblings: the picker offers no typed
+    path, and a subtree left out of the listing cannot be reached at all.
+    Bounding the input instead would buy speed with the answer. The scan is
+    cheap regardless because the type comes off the dirent -- ``os.scandir``
+    answers ``is_dir`` from what the kernel already returned, so a directory of
+    thirty thousand files costs no stats at all. And the walk runs off the
+    event loop, as ``fs_read`` does, because the directory is the caller's
+    choice and a slow mount would otherwise stall every other client on the
+    shared socket.
+    """
+    from raven.config.loader import load_config
+
+    raw = str(params.get("path") or "")
+    target = Path(raw).expanduser() if raw else Path.home()
+    if not target.is_absolute():
+        raise ConfigValidationError(f"path must be absolute, got {raw!r}", data={"field": "path"})
+    home = load_config().workspace_path
+    return await asyncio.to_thread(_walk_dirs, target, home)
+
+
+def _walk_dirs(target: Path, agent_home: Path) -> dict:
+    """The blocking half of ``fs.dirs``: resolve, list, judge."""
+    from raven.agent.workdir import validate_override
+
+    target = target.resolve()
+    if not target.is_dir():
+        raise ConfigValidationError(f"not a directory: {target}", data={"field": "path"})
+
+    def allowed(path: Path) -> bool:
+        try:
+            validate_override(path, agent_home)
+        except ValueError:
+            return False
+        return True
+
+    try:
+        with os.scandir(target) as scan:
+            children = sorted((c for c in scan if not c.name.startswith(".")), key=lambda c: c.name.lower())
+    except OSError as e:
+        raise ConfigValidationError(str(e)) from None
+    entries = []
+    for child in children:
+        try:
+            if not child.is_dir():
+                continue
+        except OSError:
+            continue
+        entries.append({"name": child.name, "path": child.path, "ok": allowed(Path(child.path))})
+        if len(entries) >= _FS_MAX_ENTRIES:
+            break
+    return {
+        "path": str(target),
+        "parent": None if target.parent == target else str(target.parent),
+        "home": str(Path.home()),
+        "ok": allowed(target),
+        "entries": entries,
+    }
+
+
+# The native folder dialog, per host. Each prints the chosen folder on stdout
+# and exits non-zero (macOS) or prints nothing (the other two) when dismissed.
+# Only the first tool found on PATH is offered on Linux, where no dialog ships
+# with every desktop.
+_PICK_DIR_PROMPT = "Choose the folder this conversation will work in"
+
+
+def _pick_dir_argv() -> list[str] | None:
+    """The command that opens this host's folder dialog, or None where none is known."""
+    if sys.platform == "darwin":
+        return ["osascript", "-e", f'POSIX path of (choose folder with prompt "{_PICK_DIR_PROMPT}")']
+    if sys.platform.startswith("win"):
+        return [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            "$d=New-Object System.Windows.Forms.FolderBrowserDialog;"
+            f"$d.Description='{_PICK_DIR_PROMPT}';"
+            "if($d.ShowDialog() -eq 'OK'){Write-Output $d.SelectedPath}",
+        ]
+    for argv in (
+        ["zenity", "--file-selection", "--directory", f"--title={_PICK_DIR_PROMPT}"],
+        ["kdialog", "--getexistingdirectory", str(Path.home()), "--title", _PICK_DIR_PROMPT],
+    ):
+        if shutil.which(argv[0]):
+            return argv
+    return None
+
+
+async def _run_pick_dir(argv: list[str]) -> str | None:
+    """Run the dialog and read the folder back, or None when it was dismissed.
+
+    A thread and a blocking run, not an asyncio subprocess: under the event
+    loop's child handling the macOS dialog closed itself after about three
+    seconds with "user canceled" (-128) and nobody at the keyboard, and the
+    same command run synchronously stays up until the person answers
+    (measured 2026-09-22). One thread held for as long as the dialog is up is
+    the price, and the page opens one dialog at a time.
+
+    A dismissed dialog is not an error -- `choose folder` exits 1 with "User
+    canceled", the others print nothing -- and both read as no folder.
+    """
+
+    def run() -> str | None:
+        done = subprocess.run(argv, capture_output=True, check=False)
+        text = done.stdout.decode("utf-8", errors="replace").strip()
+        return text or None
+
+    return await asyncio.to_thread(run)
+
+
+async def fs_pick_dir(params: dict, *, agent_loop_factory=None) -> dict:
+    """``fs.pick_dir`` -- a folder chosen in the host's own folder dialog.
+
+    The other half of the page's working-directory picker: ``fs.dirs`` walks
+    the tree in the page, this opens Finder (or the platform's equivalent) on
+    the gateway's host and hands the choice back. Only sensible where that host
+    is the reader's own desktop, which is the page's call to make -- it knows
+    where it is being served from -- so the method itself does not refuse a
+    remote caller; it would merely open a dialog nobody sees, and a host with
+    no dialog says so instead.
+
+    The answer carries the same ``ok`` ``fs.dirs`` puts on every entry, so the
+    page can decline a folder the create would refuse without a second call.
+    """
+    from raven.agent.workdir import validate_override
+    from raven.config.loader import load_config
+
+    argv = _pick_dir_argv()
+    if argv is None:
+        raise ConfigValidationError("no folder dialog is available on this host")
+    try:
+        chosen = await _run_pick_dir(argv)
+    except OSError as e:
+        raise ConfigValidationError(f"folder dialog failed: {e}") from None
+    if not chosen:
+        return {"ok": False}
+    target = Path(chosen).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise ConfigValidationError(f"not a directory: {chosen}")
+    target = target.resolve()
+    try:
+        validate_override(target, load_config().workspace_path)
+        ok = True
+    except ValueError:
+        ok = False
+    return {"path": str(target), "ok": ok}
+
+
+_UPLOAD_DIR = "uploads"
+
+
+def _safe_name(name: str) -> str:
+    """Strip directory parts and anything that could escape or confuse a shell."""
+    base = Path(str(name or "file")).name
+    cleaned = "".join(c for c in base if c.isalnum() or c in "._- ()[]").strip()
+    return (cleaned or "file")[:120]
+
+
+def viewer_root(workspace: Path, rel: Path) -> Path:
+    """Which root a relative path handed to the viewer is relative to.
+
+    Two roots, each deliberate, and one kind of path belongs to the other one.
+    ``fs.upload`` deposits into agent home whichever session asked -- it is the
+    root always writable, and ``turn.send`` fences an attachment there -- and
+    answers with a path relative to it. Everything else the viewer is handed is
+    relative to the session's own working directory, which is what the file
+    panel browses. The two are the same directory for a session that runs where
+    the agent lives, and part company for one pinned elsewhere: there a picture
+    the reader attached came back 404 from ``/file`` and its bubble fell back to
+    a file name.
+
+    The session's own root is tried first, so a session that keeps an
+    ``uploads`` directory of its own still serves its own file; agent home
+    answers only for a path that is an upload and is actually there.
+    """
+    if (workspace / rel).exists():
+        return workspace
+    if rel.parts[:1] == (_UPLOAD_DIR,) and (_upload_root() / rel).exists():
+        return _upload_root()
+    return workspace
+
+
+def _upload_root() -> Path:
+    """Where an uploaded file is deposited: agent home, not the session workdir.
+
+    The relative path this handler returns rides back to ``turn.send``, which
+    resolves an attachment against agent home and fences it there, so a file
+    parked anywhere else is dropped from the turn without an error. Agent home
+    is also the one root always writable: a session's working directory is
+    wherever the engine was launched from, and an engine started by the desktop
+    shell inherits ``/``, where creating the directory cannot succeed.
+
+    Browsing is the other way round on purpose -- ``fs.list`` / ``fs.read`` /
+    ``fs.reveal`` stay rooted at the session's working directory, because the
+    panel shows where this session's turns read and write.
+    """
+    from raven.config.loader import load_config
+
+    return Path(load_config().workspace_path).expanduser().resolve()
+
+
+async def fs_upload(params: dict, *, agent_loop_factory=None) -> dict:
+    """Store an uploaded file under ``<agent home>/uploads`` and return its path.
+
+    The caller hands the agent a path, not bytes: every tool that reads files is
+    already workspace-scoped, so an upload is just a file appearing in the
+    workspace. Collisions get a numeric suffix rather than overwriting.
+
+    ``session`` is still accepted (the page sends it) but does not select the
+    root -- see :func:`_upload_root`.
+    """
+    import base64
+
+    from raven.rpc.files import MAX_UPLOAD_BYTES
+
+    root = _upload_root()
+    raw = params.get("content_b64") or ""
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except Exception:
+        raise ConfigValidationError("content_b64 is not valid base64") from None
+    if not data:
+        raise ConfigValidationError("empty file")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ConfigValidationError(f"file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
+
+    target_dir = root / _UPLOAD_DIR
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        # Guarded like the write below: unguarded, an unwritable root reached
+        # the page as a bare -32603 ``internal_error`` with no reason in it.
+        raise ConfigValidationError(f"cannot create {target_dir}: {e}") from None
+    name = _safe_name(params.get("name", ""))
+    target = target_dir / name
+    stem, suffix = target.stem, target.suffix
+    n = 1
+    while target.exists():
+        target = target_dir / f"{stem}-{n}{suffix}"
+        n += 1
+    try:
+        target.write_bytes(data)
+    except OSError as e:
+        raise ConfigValidationError(f"write failed: {e}") from None
+    return {
+        "path": f"{_UPLOAD_DIR}/{target.name}",
+        "abs_path": str(target),
+        "size": len(data),
+    }
+
+
+def _reader_language() -> str:
+    """The language the page is in, which is the language its templates speak.
+
+    One setting, not a parameter on every call: the picker's covers, the pages
+    behind them and the file a pick hands over are the same reader's, and a
+    caller that could disagree with the page about which language that is would
+    be a way to get a Chinese cover over an English gallery.
+    """
+    from raven.config.loader import load_config
+
+    try:
+        return load_config().language
+    except Exception:  # noqa: BLE001 - an unreadable config is the shipped language
+        return deck_templates_source_language()
+
+
+def deck_templates_source_language() -> str:
+    from raven.rpc import deck_templates
+
+    return deck_templates.SOURCE_LANGUAGE
+
+
+async def deck_templates_list(params: dict, *, agent_loop_factory=None) -> dict:
+    """The bundled deck templates, with a cover each where this host has drawn one.
+
+    ``available`` is false without the deck engine, and the page hides the
+    picker on it: a button that opens an empty gallery is a broken button.
+    ``pending`` is true while a cover is still being drawn in the background,
+    and the page asks again until it is not.
+    """
+    from raven.rpc import deck_templates
+
+    rows, pending = await deck_templates.listing(
+        with_covers=bool(params.get("covers", True)), language=_reader_language()
+    )
+    return {"templates": rows, "available": deck_templates.templates_dir() is not None, "pending": pending}
+
+
+async def deck_templates_pages(params: dict, *, agent_loop_factory=None) -> dict:
+    """Every page of one bundled template, for the reader to flip through before picking."""
+    from raven.rpc import deck_templates
+
+    name = str(params.get("name") or "").strip()
+    template = deck_templates.find(name)
+    if template is None:
+        raise ConfigValidationError(f"no bundled deck template named {name!r}")
+    pages = await deck_templates.pages_for(template, _reader_language())
+    return {"pages": [deck_templates.data_url(p) for p in pages]}
+
+
+async def deck_templates_pick(params: dict, *, agent_loop_factory=None) -> dict:
+    """Deposit a bundled template under ``<agent home>/uploads`` and answer as ``fs.upload`` does.
+
+    The route that reaches the deck engine opens on a ``.pptx`` the turn hands
+    over, and ``turn.send`` admits exactly the paths ``fs.upload`` mints -- so a
+    picked template is made into one of those rather than into a new kind of
+    thing the turn would have to learn.
+    """
+    from raven.rpc import deck_templates
+
+    name = str(params.get("name") or "").strip()
+    template = deck_templates.find(name)
+    if template is None:
+        raise ConfigValidationError(f"no bundled deck template named {name!r}")
+    try:
+        target = deck_templates.deposit(template, _upload_root() / _UPLOAD_DIR, _reader_language())
+    except OSError as e:
+        raise ConfigValidationError(f"cannot place the template under uploads: {e}") from None
+    return {"path": f"{_UPLOAD_DIR}/{target.name}", "abs_path": str(target), "size": target.stat().st_size}
+
+
+async def fs_reveal(params: dict, *, agent_loop_factory=None) -> dict:
+    """Show one file in the host's file manager, selected.
+
+    The gateway's host is where the file lives, so the reveal happens there --
+    for the localhost page that is the reader's own desktop, which is the whole
+    use. Fenced exactly like the viewer (``resolve_readable``): a path the page
+    may not render is not one it may pop a Finder window on either.
+
+    ``place`` is the one way past that fence, and it takes no path: it names one
+    of two locations the gateway resolves from its own config (see
+    :func:`_reveal_place`).
+    """
+    from raven.rpc.files import resolve_readable
+
+    place = params.get("place")
+    if place:
+        return _reveal_place(str(place))
+    raw = str(params.get("path") or "").strip()
+    if not raw:
+        raise ConfigValidationError("path is required")
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        # The session's working directory first, since that is what the file
+        # panel lists; agent home second, by handing the relative path to
+        # ``resolve_readable``, which roots it there. Both are needed because
+        # the page sends one string to two surfaces: the panel's own rows are
+        # relative to the workdir, while an uploaded attachment's chip carries
+        # ``uploads/<name>``, and only agent home holds that.
+        listed = _workspace_root(_safe_loop(agent_loop_factory), str(params.get("session") or "")) / raw
+        p = listed if listed.exists() else Path(raw)
+    try:
+        target = resolve_readable(str(p))
+    except (ValueError, PermissionError, FileNotFoundError, IsADirectoryError, OSError) as e:
+        raise ConfigValidationError(str(e)) from None
+    _show_in_file_manager(target, select=True)
+    return {"ok": True}
+
+
+def _reveal_place(place: str) -> dict:
+    """Show one of raven's own locations: the config file, or agent home.
+
+    The settings page's About rows are addresses, and pressing one should go
+    there. Both live under the state directory the viewer's fence refuses, and
+    agent home is a folder, which the fence refuses too -- so they are named
+    here rather than sent as paths. The page picks one of two places this
+    gateway resolves from its own config, which reaches nothing else and reads
+    nothing back: the reveal opens a window on the host and answers ``ok``.
+    """
+    from raven.config.loader import get_config_path, load_config
+
+    if place == "config":
+        target, select = get_config_path(), True
+    elif place == "workspace":
+        target, select = Path(load_config().workspace_path).expanduser(), False
+    else:
+        raise ConfigValidationError(f"unknown place: {place}")
+    if not target.exists():
+        raise ConfigValidationError(f"{target} does not exist")
+    _show_in_file_manager(target.resolve(), select=select)
+    return {"ok": True}
+
+
+def _show_in_file_manager(target: Path, *, select: bool) -> None:
+    """Open the host's file manager on ``target``: selected in its folder, or opened."""
+    if sys.platform == "darwin":
+        argv = ["open", "-R", str(target)] if select else ["open", str(target)]
+    elif sys.platform.startswith("win"):
+        argv = ["explorer", f"/select,{target}"] if select else ["explorer", str(target)]
+    else:
+        # No cross-desktop "select this file" verb exists, so the containing
+        # folder is the best any Linux file manager can be asked for.
+        argv = ["xdg-open", str(target.parent if select else target)]
+    try:
+        subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise ConfigValidationError(f"reveal failed: {e}") from None
+
+
+# An application NAME, and nothing that could be anything else. The check is a
+# whitelist rather than a blacklist because this string becomes an argv element
+# next to a resolved path: letters, digits, spaces, and the four punctuation
+# marks real application names use. That rejects a separator (no arbitrary
+# binary by path), a leading dash (no flag smuggled into `open`), and every
+# shell metacharacter -- which cannot reach a shell anyway, since nothing here
+# runs one, but a name that looks like a command is a name worth refusing.
+_APP_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}$")
+
+
+async def fs_open(params: dict, *, agent_loop_factory=None) -> dict:
+    """Hand one file to the host's own application for it.
+
+    The other half of the viewer: a kind the page can render opens in the page,
+    and a kind it cannot -- a pptx, a spreadsheet, an archive -- opens in
+    whatever the reader picked for it. Fenced exactly like ``fs.reveal``
+    (``resolve_readable``): a path the page may not render is not one it may
+    launch an application on either.
+
+    Like ``fs.reveal``, this runs on the GATEWAY's host, which is the reader's
+    own desktop for a localhost page and somebody else's machine otherwise. The
+    page is what decides whether to offer it.
+
+    ``app`` is placed as a single argv element, never concatenated into a
+    command line and never passed to a shell.
+    """
+    from raven.rpc.files import resolve_readable
+
+    raw = str(params.get("path") or "").strip()
+    if not raw:
+        raise ConfigValidationError("path is required")
+    app = params.get("app")
+    app = str(app).strip() if app is not None else ""
+    if app and not _APP_NAME.match(app):
+        raise ConfigValidationError("app must be an application name, not a path or a command")
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        # Same two roots as fs.reveal, for the same reason: the panel's rows are
+        # relative to the session's working directory, an uploaded attachment's
+        # chip carries `uploads/<name>` and only agent home holds that.
+        listed = _workspace_root(_safe_loop(agent_loop_factory), str(params.get("session") or "")) / raw
+        p = listed if listed.exists() else Path(raw)
+    try:
+        target = resolve_readable(str(p))
+    except (ValueError, PermissionError, FileNotFoundError, IsADirectoryError, OSError) as e:
+        raise ConfigValidationError(str(e)) from None
+    _open_with_system(target, app)
+    return {"ok": True, **({"app": app} if app else {})}
+
+
+def _open_with_system(target: Path, app: str = "") -> None:
+    """Hand ``target`` to the desktop's opener (or to ``app``), on this host."""
+    if sys.platform == "darwin":
+        argv = ["open", "-a", app, str(target)] if app else ["open", str(target)]
+    elif sys.platform.startswith("win"):
+        # `start` is a shell builtin, so the launcher is cmd itself -- with the
+        # empty string standing in for the window title `start` would otherwise
+        # read the quoted path as. An application choice has no portable form
+        # here, so the file goes to its own default.
+        argv = ["cmd", "/c", "start", "", str(target)]
+    else:
+        argv = [app, str(target)] if app else ["xdg-open", str(target)]
+    try:
+        subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise ConfigValidationError(f"open failed: {e}") from None
+
+
+async def fs_read(params: dict, *, agent_loop_factory=None) -> dict:
+    root = _workspace_root(_safe_loop(agent_loop_factory), str(params.get("session") or ""))
+    rel = str(params.get("path") or "")
+    target = _resolve_inside(root, rel)
+    if not target.is_file():
+        raise ConfigValidationError(f"not a file: {rel}")
+    # Read the window, not the file. `read_bytes()[:limit]` materialised the
+    # whole thing to throw almost all of it away: an agent-written multi-gigabyte
+    # log in the workspace meant allocating all of it to return 200 KB, on the
+    # event loop, stalling every other client on the shared socket.
+    #
+    # The bound is on the read, not on the file. `fh.read(limit)` allocates at
+    # most `limit` whatever the file's size, so a size ceiling would add nothing
+    # here -- it would only make the very file this windowing exists for
+    # unreadable. `/file` needs one because it serves the whole file to a
+    # renderer; this returns a window and says so, in `truncated`.
+    from raven.rpc.files import MAX_VIEW_BYTES
+
+    limit = params.get("max_bytes")
+    if not isinstance(limit, int) or limit <= 0:
+        limit = _FS_DEFAULT_MAX_BYTES
+    # A caller-supplied ceiling is still a ceiling: without this, `max_bytes`
+    # was an unbounded allocation request from the wire.
+    limit = min(limit, MAX_VIEW_BYTES)
+    size = target.stat().st_size
+    with target.open("rb") as fh:
+        data = await asyncio.to_thread(fh.read, limit)
+    return {
+        "content": data.decode("utf-8", errors="replace"),
+        "truncated": size > limit,
+        "size": size,
+    }
+
+
+# ---------------------------------------------------------------------------
+# registration
+# ---------------------------------------------------------------------------
+
+
+async def deliverables_list(params: dict, *, agent_loop_factory=None) -> dict:
+    """``deliverables.list`` -- what this conversation has handed over.
+
+    The registry, not the transcript. A client can read the manifests off the
+    turn events as they arrive, and one that was open the whole time will have
+    them all -- but only that one. A reconnect re-opens the session from disk
+    and a turn still in flight has not been written yet; a compaction archives
+    the tool messages that carried the manifests; a second client was never
+    told. The registry outlives all three, because it is what the download
+    token resolves against.
+
+    ``missing`` is stat'd here rather than pruned: a delivered file that has
+    since been deleted is still something this conversation handed over, and
+    saying so is more use than dropping the row.
+    """
+    session_key = str(params.get("session_key") or "")
+    loop = _safe_loop(agent_loop_factory)
+    store = getattr(loop, "deliverables", None)
+    if store is None or not session_key:
+        return {"files": []}
+    from urllib.parse import quote
+
+    files = [
+        {
+            "path": rec.path,
+            "name": rec.name,
+            "title": rec.title,
+            "description": rec.description,
+            "size": rec.size,
+            "media_type": rec.media_type,
+            "download_path": f"/files/download?token={quote(rec.token)}",
+            "created_at": rec.created_at,
+            "missing": not os.path.isfile(rec.path),
+        }
+        for rec in store.for_conversation(session_key)
+    ]
+    return {"files": files}
+
+
+async def settings_mcp_clients(params: dict, *, agent_loop_factory=None) -> dict:
+    """For each known MCP client, how to connect it to Raven's MCP server and what to tell the agent."""
+    from raven.mcp.onboarding import onboard_all, tool_catalog
+
+    return {"clients": [o.to_dict() for o in onboard_all(await tool_catalog())]}
+
+
+def register_console_methods(dispatcher, *, agent_loop_factory=None) -> None:
+    """Register the console handlers with the loop factory pre-bound."""
+
+    def bind(fn):
+        async def _h(params: dict) -> dict:
+            return await fn(params, agent_loop_factory=agent_loop_factory)
+
+        return _h
+
+    dispatcher.register("ext.list", bind(ext_list))
+    dispatcher.register("cron.list", bind(cron_list))
+    dispatcher.register("cron.save", bind(cron_save))
+    dispatcher.register("cron.delete", bind(cron_delete))
+    dispatcher.register("cron.set_enabled", bind(cron_set_enabled))
+    dispatcher.register("cron.run_now", bind(cron_run_now))
+    dispatcher.register("cron.runs", bind(cron_runs))
+    dispatcher.register("settings.get", bind(settings_get))
+    dispatcher.register("settings.set", bind(settings_set))
+    dispatcher.register("settings.usage", bind(settings_usage))
+    dispatcher.register("settings.mcpClients", bind(settings_mcp_clients))
+    dispatcher.register("settings.everos", bind(settings_everos))
+    dispatcher.register("settings.everosSet", bind(settings_everos_set))
+    # The camelCase spelling is what the shipped TUI calls; the snake_case name is
+    # the method's, double-registered until the TUI reads it.
+    dispatcher.register("settings.everos_set", bind(settings_everos_set))
+    dispatcher.register("channels.status", bind(channels_status))
+    dispatcher.register("channels.configure", bind(channels_configure))
+    dispatcher.register("channels.qr", channels_qr)
+    dispatcher.register("fs.list", bind(fs_list))
+    dispatcher.register("fs.dirs", bind(fs_dirs))
+    dispatcher.register("fs.pick_dir", bind(fs_pick_dir))
+    dispatcher.register("fs.read", bind(fs_read))
+    dispatcher.register("fs.upload", bind(fs_upload))
+    dispatcher.register("deck.templates.list", bind(deck_templates_list))
+    dispatcher.register("deck.templates.pages", bind(deck_templates_pages))
+    dispatcher.register("deck.templates.pick", bind(deck_templates_pick))
+    dispatcher.register("fs.reveal", bind(fs_reveal))
+    dispatcher.register("fs.open", bind(fs_open))
+    dispatcher.register("deliverables.list", bind(deliverables_list))
+
+
+__all__ = ["register_console_methods"]

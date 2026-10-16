@@ -1,0 +1,808 @@
+// @vitest-environment happy-dom
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { setTranslator } from '../../i18n/t'
+import {
+  _resetForTests as sessionReset,
+  current as sessionCurrent,
+  onChange,
+  setCurrent,
+} from '../../lib/session'
+import * as confirmStore from '../../state/confirm'
+import * as pageStore from '../../state/page'
+import { add as rackAdd, remove as rackRemove } from '../../state/sheetRack'
+import { resetSources, setSources, sources } from '../../state/sources'
+import { domSnapshot } from '../../test/domSnapshot'
+import { RailApp } from './RailPage'
+import * as store from './store'
+
+import type { MenuItem } from '../../state/menu'
+import type { ToastAction } from '../../state/toast'
+import type { RailSnapshot, RailSource, SessRow } from './types'
+
+/* The search term is the find row's, not the snapshot's, so the island reads it
+   straight out of state/find. Stubbed here rather than mounting that row's
+   markup: this file asks what the LIST does with a term, and find.test.ts asks
+   how the row produces one. */
+const found = vi.hoisted(() => ({ term: '' }))
+const toastWriter = vi.hoisted(() => ({ items: [] as Array<{ text: string; action?: ToastAction }> }))
+vi.mock('../../state/find', () => ({ term: () => found.term }))
+vi.mock('../../state/toast', () => ({
+  show: (text: string, action?: ToastAction) => { toastWriter.items.push({ text, action }) },
+}))
+
+/* React refuses act() outside a test runner it recognizes unless told. */
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+function row(over: Partial<SessRow> = {}): SessRow {
+  return { id: 'a', title: 'GTM research', last: 'made a table', when: '11:24', pin: false, ...over }
+}
+
+interface Harness {
+  state: RailSnapshot
+  calls: Array<[string, unknown]>
+  toasts: Array<{ text: string; action?: ToastAction }>
+}
+
+/* The island runs against the same two seams production wires: a stand-in
+   translator on setTranslator (it returns its key, so tests assert catalogue
+   keys) and a snapshot source on sources.rail. */
+function install(over: Partial<RailSnapshot> = {}): Harness {
+  const state: RailSnapshot = { rows: [row()], cur: 'a', busy: false, ...over }
+  const calls: Array<[string, unknown]> = []
+  const toasts: Array<{ text: string; action?: ToastAction }> = []
+  toastWriter.items = toasts
+  setTranslator((key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key))
+  vi.spyOn(confirmStore, 'ask').mockImplementation((_t, _b, _l, fn) => fn())
+  vi.spyOn(pageStore, 'show').mockImplementation(id => calls.push(['showPage', id]))
+  vi.spyOn(pageStore, 'navState').mockImplementation(() => ({ pages: [], btnOf: () => undefined }))
+  sessionReset()
+  setCurrent(state.cur)
+  onChange((id) => {
+    state.cur = id
+    store.draw()
+  })
+  setSources({ rail: {
+    snapshot: () => state,
+    replace: (rows: SessRow[]) => { state.rows = rows },
+    open: (s: SessRow) => calls.push(['openSession', s.id]),
+  } as unknown as RailSource })
+  document.body.innerHTML =
+    '<div class="app" data-page="off">' +
+    '<button id="newBtn"></button><button id="agentsBtn"></button>' +
+    PAGES.map(p => `<div id="${p}" data-open="false"></div>`).join('') +
+    '<div id="list"></div><h1 id="title">t</h1></div>'
+  return { state, calls, toasts }
+}
+
+/* The installed source, for the cases that add a write verb to it. */
+const src = (): RailSource => sources.rail as RailSource
+
+/* The nav the assembled page hands over (state/page.ts's navState, off the
+   page table): every module page and the rail button each one lights up. The
+   default fake above hands over an empty one, which is the whole page shut. */
+const PAGES = ['extAgentsPage']
+const BTN_OF: Record<string, string> = {
+  extAgentsPage: 'agentsBtn',
+}
+
+function navUp(open: string): void {
+  vi.spyOn(pageStore, 'navState').mockReturnValue({
+    pages: PAGES,
+    btnOf: (p: string) => BTN_OF[p]
+  })
+  document.querySelector<HTMLElement>('.app')!.dataset.page = 'on'
+  PAGES.forEach(p => {
+    document.getElementById(p)!.dataset.open = String(p === open)
+  })
+}
+
+const current = (id: string): string | null => document.getElementById(id)!.getAttribute('aria-current')
+
+function mount(): HTMLElement {
+  const host = document.getElementById('list')!
+  render(<RailApp />, { container: host })
+  act(() => store.draw())
+  return host
+}
+
+const rowByTitle = (host: HTMLElement, title: string): HTMLElement =>
+  [...host.querySelectorAll<HTMLElement>('.sess')].find(r => r.querySelector('.t')?.textContent === title)!
+
+const rowItems = (host: HTMLElement, title: string): Array<MenuItem | '-'> =>
+  (rowByTitle(host, title) as HTMLElement & { _ctx: () => Array<MenuItem | '-'> })._ctx()
+
+afterEach(() => {
+  cleanup()
+  sessionReset()
+  found.term = ''
+  localStorage.clear()
+  resetSources()
+})
+
+describe('rail island', () => {
+  it('keeps only an unsaved current row when a refresh cannot list it yet', () => {
+    const pending = row({ id: 'pending', persisted: false, status: 'run' })
+    const saved = row({ id: 'saved', persisted: true })
+    const pendingResult = store.reconcileRows([pending], [saved], 'pending')
+    expect(pendingResult.currentMissing).toBe(false)
+    expect(pendingResult.rows.map(x => x.id)).toEqual(['pending', 'saved'])
+
+    const deletedResult = store.reconcileRows([row({ id: 'gone', persisted: true })], [saved], 'gone')
+    expect(deletedResult.currentMissing).toBe(true)
+    expect(deletedResult.rows.map(x => x.id)).toEqual(['saved'])
+  })
+
+  it('retains client-only completion state without reviving stale pin data', () => {
+    const [next] = store.reconcileRows(
+      [row({ id: 'a', pin: true, persisted: true, status: 'done' })],
+      [row({ id: 'a', pin: false, persisted: true })],
+      'a'
+    ).rows
+    expect(next?.status).toBe('done')
+    expect(next?.pin).toBe(false)
+  })
+
+  it('lets the server end a run badge while keeping the reader\'s own marks', () => {
+    /* The page subscribes to the conversation it is showing, so no
+       message.complete is coming for any other row: a `run` kept against the
+       server's answer would never come off. */
+    const cleared = store.reconcileRows(
+      [row({ id: 'a', persisted: true, status: 'run' })],
+      [row({ id: 'a', persisted: true, status: null })],
+      null
+    ).rows[0]
+    expect(cleared?.status).toBeNull()
+
+    const stillRunning = store.reconcileRows(
+      [row({ id: 'a', persisted: true, status: 'run' })],
+      [row({ id: 'a', persisted: true, status: 'run' })],
+      null
+    ).rows[0]
+    expect(stillRunning?.status).toBe('run')
+
+    for (const mark of ['done', 'ask'] as const) {
+      const kept = store.reconcileRows(
+        [row({ id: 'a', persisted: true, status: mark })],
+        [row({ id: 'a', persisted: true, status: null })],
+        null
+      ).rows[0]
+      expect(kept?.status).toBe(mark)
+    }
+  })
+
+  it('describes the complete state transition after deleting a session', () => {
+    const a = row({ id: 'a' })
+    const b = row({ id: 'b' })
+    expect(store.removeSessionRow([a, b], 'a', 'b')).toEqual({ kind: 'unchanged', rows: [a] })
+    expect(store.removeSessionRow([a, b], 'b', 'b')).toEqual({ kind: 'open', next: a, rows: [a] })
+    expect(store.removeSessionRow([b], 'b', 'b')).toEqual({ kind: 'draft', rows: [] })
+  })
+
+  it('renders the groups and the rows, titles stripped of leading emoji', () => {
+    install({
+      rows: [
+        row(),
+        row({ id: 'p', title: 'pinned one', pin: true }),
+        row({ id: 'k', title: 'daily digest', from: 'cron' }),
+        row({ id: 'e', title: '🚀 Ship it' })
+      ]
+    })
+    const host = mount()
+    expect(screen.getByText('gui.rail.pinned')).toBeTruthy()
+    expect(screen.getByText('gui.rail.from_cron')).toBeTruthy()
+    expect(screen.getByText('gui.rail.recent')).toBeTruthy()
+    expect(screen.getByText('GTM research')).toBeTruthy()
+    expect(screen.getByText('daily digest')).toBeTruthy()
+    expect(screen.getByText('Ship it')).toBeTruthy()
+    expect(host.querySelectorAll('.sess').length).toBe(4)
+    expect(screen.getByText('gui.rail.manage')).toBeTruthy()
+  })
+
+  it('keeps every unpinned conversation in one recent group, folder or not', () => {
+    install({
+      rows: [
+        row({ id: 'a', title: 'thesis edits', workdir: '/Users/me/thesis' }),
+        row({ id: 'b', title: 'quick question' }),
+        row({ id: 'c', title: 'pinned in a folder', pin: true, workdir: '/Users/me/thesis' }),
+        row({ id: 'd', title: 'notes', workdir: 'C:\\work\\notes' })
+      ]
+    })
+    const host = mount()
+    /* One list of recent work: the folder a conversation runs in is said
+       beside its title once it is open, not as a second heading here, and
+       not as a tag on the row. A pinned session stays in the pinned group. */
+    const groups = [...host.querySelectorAll('.grp .lab')].map((n) => n.textContent)
+    expect(groups).toEqual(['gui.rail.pinned', 'gui.rail.from_cron', 'gui.rail.recent'])
+    expect(host.querySelectorAll('.sess .rail-wdt').length).toBe(0)
+    expect(host.querySelectorAll('.sess').length).toBe(4)
+    expect(screen.getByText('thesis edits')).toBeTruthy()
+    expect(screen.getByText('notes')).toBeTruthy()
+  })
+
+  it('marks only the current session, and the new button when nothing is', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+    const host = mount()
+    expect(rowByTitle(host, 'second task').getAttribute('aria-current')).toBe('true')
+    expect(rowByTitle(host, 'GTM research').getAttribute('aria-current')).toBe('false')
+    expect(document.getElementById('newBtn')!.getAttribute('aria-current')).toBe('false')
+  })
+
+  it('marks the new button while no session is current', () => {
+    install({ rows: [row()], cur: null })
+    mount()
+    expect(document.getElementById('newBtn')!.getAttribute('aria-current')).toBe('true')
+  })
+
+  /* A conversation that is asking something says so from the same slot, and says
+     it even while its turn is busy. Its sheet only mounts on its own screen, so
+     this row is the whole of the notice, and the turn behind it waits for the
+     person rather than expiring. */
+  it('shows the asking tail, and it outranks a busy turn', () => {
+    const h = install({ rows: [row({ status: 'ask' })], busy: true })
+    const host = mount()
+
+    const w = rowByTitle(host, 'GTM research').querySelector('.w')!
+    expect(w.getAttribute('data-sig')).toBe('ask')
+    expect(w.getAttribute('aria-label')).toBe('gui.sess.asking')
+    expect(h).toBeTruthy()
+  })
+
+  it('shows it for a standing question even when no mark was stored, and clears it when the question goes', () => {
+    /* The stored mark is cleared by opening the row and overwritten by leaving
+       it, so a reader who watched the question appear and then walked away
+       would have been left with a row reading like any other running turn. What
+       the rack is holding answers that without a mark to defend -- but only if
+       the rail hears the rack move: `approval.closed` resumes the turn first,
+       which repaints while the sheet is still docked, and removes the sheet
+       after, so a rail sampling on its own schedule would keep showing a
+       question that is over. */
+    const h = install({ rows: [row()], busy: true })
+    const sheet = document.createElement('div')
+    sheet.dataset.asks = '1'
+    rackAdd(sheet, 'a')
+
+    const host = mount()
+    const sig = () => rowByTitle(host, 'GTM research').querySelector('.w')!.getAttribute('data-sig')
+    expect(sig()).toBe('ask')
+
+    act(() => { rackRemove(sheet) })
+
+    expect(sig()).toBe('run')
+    expect(h).toBeTruthy()
+  })
+
+  it('shows the running tail on the busy current row and clears it after', () => {
+    const h = install({
+      rows: [
+        row(),
+        row({ id: 'd', title: 'done one', status: 'done' }),
+        row({ id: 'x', title: 'broken one', status: 'err' })
+      ],
+      busy: true
+    })
+    const host = mount()
+    const run = rowByTitle(host, 'GTM research').querySelector('.w')!
+    expect(run.getAttribute('data-sig')).toBe('run')
+    expect(run.getAttribute('aria-label')).toBe('gui.sess.running')
+    expect(run.querySelector('i')).toBeTruthy()
+    const done = rowByTitle(host, 'done one').querySelector('.w')!
+    expect(done.getAttribute('data-sig')).toBe('done')
+    /* A failed turn reports from the same slot the running one does, not from a
+       dot at the other end of the row. */
+    const bad = rowByTitle(host, 'broken one').querySelector('.w')!
+    expect(bad.getAttribute('data-sig')).toBe('err')
+    expect(bad.getAttribute('aria-label')).toBe('gui.sess.failed')
+    expect(bad.querySelector('i')).toBeTruthy()
+    expect(rowByTitle(host, 'broken one').querySelector('.dot')).toBeNull()
+    h.state.busy = false
+    h.state.rows[1]!.status = null
+    act(() => store.draw())
+    expect(rowByTitle(host, 'GTM research').querySelector('[data-sig]')).toBeNull()
+    expect(rowByTitle(host, 'done one').querySelector('[data-sig]')).toBeNull()
+    expect(rowByTitle(host, 'broken one').querySelector('[data-sig="err"]')).toBeTruthy()
+  })
+
+  it('keeps a queued session on a leading dot: it is not the state of a turn', () => {
+    install({ rows: [row({ id: 'q', title: 'queued one', status: 'que' })], busy: false, cur: null })
+    const host = mount()
+    expect(rowByTitle(host, 'queued one').querySelector('.dot.que')).toBeTruthy()
+    expect(rowByTitle(host, 'queued one').querySelector('[data-sig]')).toBeNull()
+  })
+
+  it('keeps the permanent groups on an empty list', () => {
+    install({ rows: [], cur: null })
+    mount()
+    expect(screen.getByText('gui.rail.from_cron')).toBeTruthy()
+    expect(screen.getByText('gui.rail.recent')).toBeTruthy()
+    expect(screen.queryByText('gui.rail.pinned')).toBeNull()
+  })
+
+  it('draws an empty group as its heading alone, a plain label keeping only its verb', () => {
+    install({ rows: [], cur: null })
+    const host = mount()
+    const heads = [...host.querySelectorAll<HTMLElement>('.grp')]
+    expect(heads.map(g => g.firstElementChild!.textContent)).toEqual(['gui.rail.from_cron', 'gui.rail.recent'])
+    for (const g of heads) {
+      expect(g.hasAttribute('data-empty')).toBe(true)
+      expect(g.getAttribute('role')).toBeNull()
+      expect(g.getAttribute('tabindex')).toBeNull()
+      expect(g.getAttribute('aria-expanded')).toBeNull()
+      expect(g.querySelector('.car')).toBeNull()
+    }
+    expect([...heads[0]!.children].map(c => c.className)).toEqual(['lab', 'grp-go'])
+    expect([...heads[1]!.children].map(c => c.className)).toEqual(['lab'])
+    expect([...host.children].map(c => c.className)).toEqual(['grp', 'grp'])
+    act(() => heads[1]!.click())
+    expect(store.isFolded('recent')).toBe(false)
+  })
+
+  it('holds skeleton rows for the live boot and swaps them for the list', () => {
+    install()
+    const host = document.getElementById('list')!
+    render(<RailApp />, { container: host })
+    act(() => store.hold())
+    const skels = host.querySelectorAll('.sess.skel')
+    expect(skels.length).toBe(6)
+    expect(skels[0]!.querySelectorAll('.sk').length).toBe(2)
+    act(() => store.draw())
+    expect(host.querySelectorAll('.sess.skel').length).toBe(6)
+    act(() => store.release())
+    expect(host.querySelector('.sess.skel')).toBeNull()
+    expect(screen.getByText('GTM research')).toBeTruthy()
+  })
+
+  it('shows a placeholder instead of a title while the name is being generated', () => {
+    /* The row is not loading -- the list is here. Only its name is coming, so
+       the bar stands where the title goes, and the row carries no clock. */
+    install({ rows: [row({ naming: true, title: 'gui.new_task' })] })
+    const host = mount()
+
+    const bars = host.querySelectorAll('.sess .t .sk')
+    expect(bars.length).toBe(1)
+    expect(bars[0]!.getAttribute('aria-label')).toBe('gui.sess.naming')
+    expect(screen.queryByText('gui.new_task')).toBeNull()
+    expect(screen.queryByText('11:24')).toBeNull()
+  })
+
+  it('leaves the placeholder no width of its own', () => {
+    /* Width and flex belong to the stylesheet, not to this element. Two earlier
+       versions sized the bar here and both were wrong for the same reason: a
+       per-row inline size resolves against the title slot, whose width depends
+       on what else shares the row and shrinks again under hover.
+       Only the height stays inline, since it is the one dimension the
+       surrounding line box does not set. */
+    install({ rows: [row({ naming: true, title: 'gui.new_task' })] })
+    const host = mount()
+
+    const bar = host.querySelector('.sess .t .sk') as HTMLElement
+    expect(bar.parentElement!.classList.contains('t')).toBe(true)
+    expect(bar.style.width).toBe('')
+    expect(bar.style.maxWidth).toBe('')
+    expect(bar.style.flex).toBe('')
+    expect(bar.style.height).toBe('11px')
+    /* The shimmer keyframes hang off `.skel .sk`, so an ancestor must carry it. */
+    expect(bar.closest('.skel')).not.toBeNull()
+  })
+
+  it('draws the title once the name has landed', () => {
+    install({ rows: [row({ naming: false, title: 'Cut a desktop release' })] })
+    const host = mount()
+
+    expect(host.querySelector('.sess .t .sk')).toBeNull()
+    expect(screen.getByText('Cut a desktop release')).toBeTruthy()
+  })
+
+  it('keeps the last rows when the source cannot answer a draw', () => {
+    install()
+    const host = mount()
+    expect(screen.getByText('GTM research')).toBeTruthy()
+    setSources({
+      rail: {
+        snapshot: () => {
+          throw new Error('gone')
+        }
+      } as unknown as RailSource
+    })
+    act(() => store.draw())
+    expect(host.querySelectorAll('.sess').length).toBe(1)
+    expect(screen.getByText('GTM research')).toBeTruthy()
+  })
+
+  it('answers a search with hits and with the empty note', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    found.term = 'gtm'
+    const host = mount()
+    expect(screen.getByText('gui.rail.search_hits {"n":1}')).toBeTruthy()
+    expect(host.querySelectorAll('.sess').length).toBe(1)
+    found.term = 'zzz'
+    act(() => store.draw())
+    expect(screen.getByText('gui.rail.no_hits {"q":"zzz"}')).toBeTruthy()
+    expect(host.querySelector('.sess')).toBeNull()
+  })
+
+  /* The term is read at paint time, never captured: a redraw the find row did
+     not trigger (a new session, a finished turn) must still filter. */
+  it('reads the term on every draw, not once at mount', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const host = mount()
+    expect(host.querySelectorAll('.sess').length).toBe(2)
+    found.term = 'second'
+    act(() => store.draw())
+    expect(host.querySelectorAll('.sess').length).toBe(1)
+  })
+
+  it('opens another session through the source and repaints the mark', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'a' })
+    const host = mount()
+    act(() => {
+      rowByTitle(host, 'second task').click()
+    })
+    expect(h.calls).toContainEqual(['showPage', null])
+    expect(sessionCurrent()).toBe('b')
+    expect(h.calls).toContainEqual(['openSession', 'b'])
+    expect(rowByTitle(host, 'second task').getAttribute('aria-current')).toBe('true')
+    h.calls.length = 0
+    act(() => {
+      rowByTitle(host, 'second task').click()
+    })
+    expect(h.calls).toContainEqual(['showPage', null])
+    expect(h.calls.find(c => c[0] === 'openSession')).toBeUndefined()
+  })
+
+  it('pins through the hover shortcut, optimistically and persisted', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const pins: Array<[string, boolean]> = []
+    src().pin = (id: string, pinned: boolean) => pins.push([id, pinned])
+    const host = mount()
+    act(() => rowByTitle(host, 'second task').querySelector<HTMLButtonElement>('.quick-pin')!.click())
+    expect(h.state.rows[1]!.pin).toBe(true)
+    expect(pins).toEqual([['b', true]])
+    expect(h.toasts.map(x => x.text)).toContain('gui.pinned_ok')
+    expect(screen.getByText('gui.rail.pinned')).toBeTruthy()
+  })
+
+  /* A page with nowhere to keep the flag still moves the row: the pin is
+     optimistic, and the attempt to record it must not undo it. */
+  it('pins with no source verb at all', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const host = mount()
+    expect(() =>
+      act(() => rowByTitle(host, 'second task').querySelector<HTMLButtonElement>('.quick-pin')!.click())
+    ).not.toThrow()
+    expect(h.state.rows[1]!.pin).toBe(true)
+  })
+
+  it('archives through the hover shortcut and restores the local row on undo', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const host = mount()
+    const archive = rowByTitle(host, 'second task').querySelectorAll<HTMLButtonElement>('.quick button')[1]!
+    act(() => archive.click())
+    expect(host.querySelectorAll('.sess')).toHaveLength(1)
+    const undo = h.toasts.find(x => x.action)!
+    expect(undo.text).toBe('gui.sess.archived {"title":"second task"}')
+    expect(undo.action!.label).toBe('gui.undo')
+    act(() => undo.action!.fn())
+    expect(screen.getByText('second task')).toBeTruthy()
+  })
+
+  it('hands archive navigation to a source that can persist it', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const archived: string[] = []
+    src().archive = s => archived.push(s.id)
+    const host = mount()
+    const archive = rowByTitle(host, 'second task').querySelectorAll<HTMLButtonElement>('.quick button')[1]!
+    act(() => archive.click())
+    expect(archived).toEqual(['b'])
+    expect(screen.getByText('second task')).toBeTruthy()
+  })
+
+  it('renames a session inline on double click', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+    const renamed: Array<[string, string]> = []
+    src().renamed = (id, title) => renamed.push([id, title])
+    const host = mount()
+    fireEvent.doubleClick(rowByTitle(host, 'second task'))
+    const input = host.querySelector<HTMLInputElement>('input.ren')!
+    fireEvent.change(input, { target: { value: 'renamed inline' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(renamed).toEqual([['b', 'renamed inline']])
+    expect(rowByTitle(host, 'renamed inline')).toBeTruthy()
+    expect(document.getElementById('title')!.textContent).toBe('renamed inline')
+  })
+
+  it('sizes the rename box from the name as it is drawn', () => {
+    /* It used to be the width of the rail whatever it held -- a two-character
+       title in a box eight times its length, which reads as a form field waiting
+       to be filled in rather than a name being corrected.
+
+       The width is not computed here: the wrapper renders `data-value` in the
+       same grid cell with the same font and the column takes that width, so the
+       browser measures the drawn text. Counting characters cannot -- the face is
+       proportional, and `WWWW` needs four times what `iiii` does.
+
+       So what this pins is the mechanism, which is all that is assertable
+       without layout: the mirror carries exactly what the field holds, and the
+       field declares no width of its own. Whether the resulting box fits the
+       glyphs is a question only a real browser can answer, and is checked by
+       hand there. */
+    install({ rows: [row({ id: 'b', title: '你好' })], cur: 'b' })
+    const host = mount()
+    fireEvent.doubleClick(rowByTitle(host, '你好'))
+    const input = host.querySelector<HTMLInputElement>('input.ren')!
+    const sizer = host.querySelector<HTMLElement>('.rensize')!
+
+    expect(sizer.dataset.value).toBe('你好')
+    expect(input.style.width).toBe('')
+
+    fireEvent.change(input, { target: { value: 'WWWW' } })
+    expect(sizer.dataset.value).toBe('WWWW')
+
+    fireEvent.change(input, { target: { value: 'a much longer name than that one' } })
+    expect(sizer.dataset.value).toBe('a much longer name than that one')
+  })
+
+  /* The box a name is edited in and the line it goes back to being occupy the
+     same child slot, so React reconciles them onto ONE node and resets every
+     prop -- but scroll offset is not a prop, it is state the browser keeps on
+     the element. The editing box is a scroll container on purpose (`.sess .t
+     span` clips, and a long name scrolls inside itself), so focusing the field
+     scrolls it to the caret; the finished title then inherited that offset and
+     was drawn 300px to the left of its own box, which under `text-overflow:
+     ellipsis` paints nothing -- an empty row where a long name had been, on
+     any exit from the editor and whether or not the name changed.
+
+     Distinct keys are the fix, and node identity is what this can assert:
+     there is no layout here, so scrollLeft reads 0 either way and only the
+     browser can show the pixels. */
+  it('draws the finished title in a fresh element, not the rename box', () => {
+    const long = 'the reconciliation job misfired on the day the clocks changed, audit it end to end'
+    install({ rows: [row({ id: 'b', title: long })], cur: 'b' })
+    const host = mount()
+    fireEvent.doubleClick(rowByTitle(host, long))
+    const box = host.querySelector<HTMLElement>('.rensize')!
+    fireEvent.keyDown(host.querySelector<HTMLInputElement>('input.ren')!, { key: 'Enter' })
+
+    const line = host.querySelector<HTMLElement>('.sess .t span')!
+    expect(line.textContent).toBe(long)
+    expect(line).not.toBe(box)
+  })
+
+  /* A source that can delete gets the whole action, and the island does none
+     of the local work -- no splice, no undo, no moving off the row. */
+  it('hands the delete to a source that can do it', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+    localStorage.setItem('raven.gui.drafts', JSON.stringify({ b: { t: 'keep', at: 1 } }))
+    const gone: string[] = []
+    src().remove = (s: SessRow) => gone.push(s.id)
+    const host = mount()
+    act(() => (rowItems(host, 'second task').find(x => x !== '-' && x.bad) as MenuItem).fn())
+    expect(gone).toEqual(['b'])
+    expect(screen.getByText('second task')).toBeTruthy()
+    expect(h.toasts.find(x => x.action)).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('raven.gui.drafts') || '{}').b.t).toBe('keep')
+  })
+
+  it('deletes locally when no source can, and restores on undo', () => {
+    const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+    localStorage.setItem('raven.gui.drafts', JSON.stringify({ b: { t: 'discard', at: 1 } }))
+    const host = mount()
+    const del = rowItems(host, 'second task').find(x => x !== '-' && x.bad) as MenuItem
+    act(() => del.fn())
+    expect(JSON.parse(localStorage.getItem('raven.gui.drafts') || '{}').b).toBeUndefined()
+    expect(sessionCurrent()).toBe('a')
+    expect(h.calls).toContainEqual(['openSession', 'a'])
+    expect(screen.queryByText('second task')).toBeNull()
+    const undo = h.toasts.find(x => x.action)!
+    expect(undo.text).toBe('gui.sess.deleted_x {"title":"second task"}')
+    act(() => undo.action!.fn())
+    expect(screen.getByText('second task')).toBeTruthy()
+  })
+
+  /* The rename had no coverage at all, and the seam is the reason to give it
+     some: the live layer used to persist it by hanging a blur listener off the
+     input this island creates, which an Enter -- replacing that input while it
+     still has focus -- could slip past entirely. Telling the source from
+     inside the commit is what closes that. */
+  describe('renaming the current session', () => {
+    function edit(): HTMLInputElement {
+      const host = mount()
+      const it_ = rowItems(host, 'second task').find(x => x !== '-' && x.label === 'gui.sess.rename') as MenuItem
+      act(() => it_.fn())
+      return document.querySelector<HTMLInputElement>('input.titin')!
+    }
+
+    function key(inp: HTMLInputElement, k: string): void {
+      act(() => {
+        inp.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+      })
+    }
+
+    const wire = (): Array<[string, string]> => {
+      const said: Array<[string, string]> = []
+      src().renamed = (id: string, title: string) => said.push([id, title])
+      return said
+    }
+
+    it('tells the source on Enter, which is the case a blur listener missed', () => {
+      install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const said = wire()
+      const inp = edit()
+      inp.value = 'renamed by hand'
+      key(inp, 'Enter')
+      expect(said).toEqual([['b', 'renamed by hand']])
+      /* And the editor is gone, with the heading back. */
+      expect(document.querySelector('input.titin')).toBeNull()
+      expect(document.getElementById('title')!.textContent).toBe('renamed by hand')
+    })
+
+    it('opens the editor at the width the heading was drawn at', () => {
+      /* The workspace tag sits right after the title, and it must not move
+         when the name is clicked. No stylesheet can promise that: a field that
+         measures its own value opens a little wider than the heading it
+         replaces, and a short name is pushed wider still by the floor such a
+         field needs. So the width is taken from the heading's own box and
+         written on the field. jsdom has no layout, so what is assertable here
+         is that mechanism; whether the two line up to the pixel is a question
+         for a browser, and was answered in one. */
+      install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const host = mount()
+      document.getElementById('title')!.getBoundingClientRect = () => ({ width: 137.5 } as DOMRect)
+      const item = rowItems(host, 'second task').find(x => x !== '-' && x.label === 'gui.sess.rename') as MenuItem
+      act(() => item.fn())
+      expect(document.querySelector<HTMLInputElement>('input.titin')!.style.width).toBe('137.5px')
+    })
+
+    it('tells the source on blur too', () => {
+      install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const said = wire()
+      const inp = edit()
+      inp.value = 'renamed by leaving'
+      act(() => inp.dispatchEvent(new FocusEvent('blur')))
+      expect(said).toEqual([['b', 'renamed by leaving']])
+    })
+
+    it('says nothing on escape, or when the title did not change', () => {
+      install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const said = wire()
+      const inp = edit()
+      inp.value = 'thrown away'
+      key(inp, 'Escape')
+      expect(said).toEqual([])
+      expect(document.getElementById('title')!.textContent).toBe('second task')
+
+      const again = edit()
+      again.value = 'second task'
+      key(again, 'Enter')
+      expect(said).toEqual([])
+    })
+
+    it('renames with no source verb at all', () => {
+      const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const inp = edit()
+      inp.value = 'offline rename'
+      expect(() => key(inp, 'Enter')).not.toThrow()
+      expect(h.state.rows[1]!.title).toBe('offline rename')
+    })
+
+    /* Committing with Enter takes the focused input out of the document, and
+       whether that fires a blur is the browser's business -- Chrome's does.
+       The commit then ran a second time on a node no longer in the tree: the
+       server was told twice, and the second `replaceWith` threw where the
+       first had already put the heading back, so recovering was down to which
+       of the two won. One commit per editor closes all of it. */
+    it('ignores the blur that committing with Enter itself causes', () => {
+      install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const said = wire()
+      const inp = edit()
+      inp.value = 'named once'
+      key(inp, 'Enter')
+
+      expect(() => act(() => inp.dispatchEvent(new FocusEvent('blur')))).not.toThrow()
+      expect(said).toEqual([['b', 'named once']])
+      expect(document.querySelectorAll('#title').length).toBe(1)
+      expect(document.getElementById('title')!.textContent).toBe('named once')
+    })
+
+    /* The editor stands IN PLACE OF h1#title, so while it is open that id
+       resolves to nothing -- and the live layer reaches the heading through it
+       on both paths that change which conversation is open, plus on the
+       reconnect that reloads the open one. With an editor up, the reconnect
+       handler died on the first of those reads: the input was left in the top
+       bar for the life of the tab, and the session was never reloaded, never
+       re-subscribed, and never told the reader it was back.
+
+       So switching conversations ends the editor first, and ending it commits
+       -- the name was typed for the conversation this editor belongs to, which
+       is the row it captured, not whichever one is being opened. */
+    it('hands the heading back when a conversation switch needs it', () => {
+      const h = install({ rows: [row(), row({ id: 'b', title: 'second task' })], cur: 'b' })
+      const said = wire()
+      const inp = edit()
+      inp.value = 'named on the way out'
+      expect(document.getElementById('title')).toBeNull()
+
+      act(() => store.endRename())
+
+      expect(document.getElementById('title')!.textContent).toBe('named on the way out')
+      expect(document.querySelector('input.titin')).toBeNull()
+      expect(said).toEqual([['b', 'named on the way out']])
+      expect(h.state.rows[1]!.title).toBe('named on the way out')
+
+      /* Idempotent, and quiet with no editor open: every session switch calls
+         it, and almost none of them have one to end. */
+      expect(() => act(() => store.endRename())).not.toThrow()
+      expect(said).toEqual([['b', 'named on the way out']])
+    })
+  })
+
+  it('puts the caret after the label it opens, not in front of it', () => {
+    /* The eyebrow starts on the word the eye is looking for. Order rather than
+       presence: a caret is in the row either way, and what was asked for is
+       where it sits. The hairline stays last -- it is the one child that takes
+       the remaining width, so anything after it would be pushed off the row. */
+    install({ rows: [row()] })
+    const host = mount()
+    const grp = [...host.querySelectorAll<HTMLElement>('.grp')]
+      .find(g => g.textContent!.includes('gui.rail.recent'))!
+    expect([...grp.children].map(c => c.className)).toEqual(['lab', 'car'])
+  })
+
+  it('folds a group on its eyebrow and unfolds it again', () => {
+    install({ rows: [row(), row({ id: 'b', title: 'second task' })] })
+    const host = mount()
+    const grp = [...host.querySelectorAll<HTMLElement>('.grp')].find(g => g.textContent!.includes('gui.rail.recent'))!
+    act(() => grp.click())
+    expect(host.querySelector('.sess')).toBeNull()
+    expect(
+      [...host.querySelectorAll<HTMLElement>('.grp')]
+        .find(g => g.textContent!.includes('gui.rail.recent'))!
+        .getAttribute('aria-expanded')
+    ).toBe('false')
+    act(() => {
+      ;[...host.querySelectorAll<HTMLElement>('.grp')].find(g => g.textContent!.includes('gui.rail.recent'))!.click()
+    })
+    expect(host.querySelectorAll('.sess').length).toBe(2)
+  })
+
+  it('marks the rail button of the page that is up, over the new-task row', () => {
+    install({ cur: '' })
+    mount()
+    /* Nothing covering the chat and no session: the draft row is current. */
+    act(() => store.markNew())
+    expect(current('newBtn')).toBe('true')
+    navUp('extAgentsPage')
+    act(() => store.markNew())
+    expect(current('agentsBtn')).toBe('true')
+    expect(current('newBtn')).toBe('false')
+  })
+
+  it('caps the recent group and expands the tail behind one row', () => {
+    const rows = Array.from({ length: 17 }, (_, i) => row({ id: 'r' + i, title: 'task ' + i }))
+    install({ rows, cur: 'r0' })
+    const host = mount()
+    expect(host.querySelectorAll('.sess').length).toBe(15)
+    const more = host.querySelector<HTMLElement>('.grp-more')!
+    expect(more.textContent).toBe('gui.rail.expand_rest {"n":2}')
+    act(() => more.click())
+    expect(host.querySelectorAll('.sess').length).toBe(17)
+    const fold = host.querySelector<HTMLElement>('.grp-more')!
+    expect(fold.textContent).toBe('gui.rail.collapse')
+    act(() => fold.click())
+    expect(host.querySelectorAll('.sess').length).toBe(15)
+  })
+
+  it('keeps its rendered shape', () => {
+    install({
+      rows: [
+        row(),
+        row({ id: 'p', title: 'pinned one', pin: true }),
+        row({ id: 'k', title: 'daily digest', from: 'cron' }),
+        row({ id: 'e', title: '🚀 Ship it' })
+      ]
+    })
+    const host = mount()
+    expect(domSnapshot(host)).toMatchSnapshot()
+  })
+})

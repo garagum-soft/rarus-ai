@@ -1,0 +1,1012 @@
+"""Session management for conversation history."""
+
+import copy
+import json
+import uuid
+from collections.abc import Collection
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
+from raven.session.title import TITLE_STORAGE_MAX, collapse_to_line
+from raven.utils.atomic_io import atomic_replace, locked_append, write_transaction
+from raven.utils.paths import ensure_dir, safe_filename, safe_path_segment
+
+# Channel for subagent transcripts. Defined here, not in the subagent package,
+# because this module has to know which sessions to keep out of an unfiltered
+# list and must not import upward to learn it.
+#
+# The filter exists before any writer does, and that ordering is the point:
+# a session store that starts collecting `sub:` files
+# before anything knows to exclude them puts machine-generated transcripts in
+# front of every human-facing picker.
+SUBAGENT_CHANNEL = "sub"
+
+
+def _message_text(content: Any, cap: int = 120) -> str:
+    """Flatten a message's content to one line of plain text (capped).
+
+    Content is either a string or a list of blocks whose text blocks carry
+    a ``text`` field; anything else contributes nothing.
+    """
+    if isinstance(content, list):
+        content = " ".join(
+            str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") in (None, "text")
+        )
+    text = " ".join(str(content or "").split())
+    return text[:cap]
+
+
+def _stored_key(path: Path) -> str | None:
+    """The session key a transcript claims, or None when it claims none.
+
+    Reads the leading metadata record only. ``session_path`` asks this of files
+    it is deciding between, so it runs on the way to opening one rather than
+    after, and the whole transcript is the wrong amount to read to learn its
+    first line. A file whose head is missing, unreadable, or keyless answers
+    None: absent is not the same as belonging to somebody else, and the caller
+    treats the two differently.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            head = f.readline()
+    except OSError:
+        return None
+    try:
+        data = json.loads(head)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or data.get("_type") != "metadata":
+        return None
+    stored = data.get("key")
+    return stored if isinstance(stored, str) and stored else None
+
+
+def new_chat_id(now: datetime | None = None) -> str:
+    """Mint an opaque, sortable per-session chat_id: ``YYYYMMDD_HHMMSS_xxxxxx``.
+
+    Sortable by value (timestamp prefix) and collision-safe (uuid suffix);
+    channel-agnostic. Becomes the session key's chat_id segment and the JSONL
+    filename stem.
+    """
+    ts = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    return f"{ts}_{uuid.uuid4().hex[:6]}"
+
+
+_AUTO_TITLE_MAX_CHARS = 40
+
+
+def derive_title(content: Any) -> str | None:
+    """Derive an auto-title from message content: first non-empty line,
+    whitespace collapsed, truncated to 40 characters. None when the
+    content is not a usable string (e.g. structured multimodal parts).
+
+    Public because a sub-agent instance is named by the same rule: an instance
+    the reader started themselves has no dispatch to take a name from, and one
+    named differently from a conversation would read as a different kind of
+    thing on a screen that shows both."""
+    if not isinstance(content, str):
+        return None
+    stripped = content.strip()
+    if not stripped:
+        return None
+    collapsed = " ".join(stripped.splitlines()[0].split())
+    return collapsed[:_AUTO_TITLE_MAX_CHARS] or None
+
+
+def _first_user_auto_title(messages: list[dict[str, Any]]) -> str | None:
+    for m in messages:
+        if m.get("role") == "user":
+            return derive_title(m.get("content"))
+    return None
+
+
+_FORK_SUFFIX = " (fork)"
+
+
+def _fork_title(parent_title: str) -> str:
+    """Name a fork after its parent, short enough for ``set_title`` to accept.
+
+    Nobody typed this name, so the refusal ``set_title`` gives an over-long
+    human title is the wrong tail here: there is no author to hand the text back
+    to, and the fork would land nameless -- the very hole that inheriting the
+    parent's name was added to close. The parent's part gives way instead, and
+    only for a parent already within the suffix's width of the storage ceiling.
+    The suffix is what makes this a name for the fork rather than for what it was
+    forked from, so it is the part kept whole.
+    """
+    collapsed = collapse_to_line(parent_title)
+    room = TITLE_STORAGE_MAX - len(_FORK_SUFFIX)
+    if len(collapsed) > room:
+        logger.debug("fork: parent title cut to {} chars to leave room for the fork suffix", room)
+        collapsed = collapsed[:room].rstrip()
+    return collapsed + _FORK_SUFFIX
+
+
+@dataclass(frozen=True)
+class SessionResolution:
+    """Outcome of resolving a user-supplied session id to a full key.
+
+    ``status`` is one of ``"resolved"`` / ``"ambiguous"`` / ``"not_found"``.
+    ``key`` carries the full ``channel:chat_id`` when resolved; ``candidates``
+    carries the matching full keys when ambiguous. The no-match case is reported
+    as ``not_found`` so each caller decides its own tail — the agent
+    ``--session`` path mints ``cli:<value>``, while a read-only export errors.
+    """
+
+    status: str
+    key: str | None = None
+    candidates: tuple[str, ...] = ()
+
+
+def _stamp(path: Path) -> tuple[int, int] | None:
+    """A transcript's (size, mtime_ns), or None when it is not there.
+
+    What a saved copy compares itself against to know whether anybody else has
+    written to the file since it last read or wrote it.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
+@dataclass
+class Session:
+    """
+    A conversation session.
+
+    Stores messages in JSONL format for easy reading and persistence.
+
+    Important: Messages are append-only for LLM cache efficiency.
+    The consolidation process writes summaries to MEMORY.md/HISTORY.md
+    but does NOT modify the messages list or get_history() output.
+    """
+
+    key: str  # channel:chat_id
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    last_consolidated: int = 0  # Number of messages already consolidated to files
+    # ── Personalization state ─────────────────────────────────────────────────
+    # Set when the agent asked a clarifying question and is waiting for the answer.
+    # Structure: {"original_message": str, "question": str, "domain": str}
+    # Cleared immediately after the user's answer is processed.
+    pending_clarification: dict | None = field(default=None)
+    # Messages already on disk; save() appends only past this index.
+    _persisted_count: int = field(default=0, repr=False)
+    # What the transcript looked like the last time this copy read or wrote it,
+    # as (size, mtime_ns). save() compares it to decide whether anybody else
+    # has written since, and only then re-reads the record to merge under.
+    _file_stamp: tuple[int, int] | None = field(default=None, repr=False)
+    # The metadata as this copy last read it from the file or wrote it there.
+    # What ``metadata`` says that this does not is what this copy changed, and
+    # only that may outrank a record written since -- the snapshot itself is
+    # every key the file held at load, most of which this copy never meant.
+    _persisted_metadata: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
+        """Add a message to the session."""
+        self.record({"role": role, "content": content, **kwargs})
+
+    def set_title(self, title: str) -> None:
+        """Set a human-given title.
+
+        Clears the ``title_auto`` marker, which is what keeps a generated title
+        from replacing this one later -- ``set_generated_title`` declines against
+        a title no marker calls machine-made. Every rename path must come through
+        here, not assign metadata directly. The marker no longer decides what a
+        fork inherits: a fork carries its parent's name whatever made it.
+
+        Collapsed to one line -- a metadata record is one JSON line and every
+        surface renders a title on one row, so an embedded newline has nowhere
+        to go. Past ``TITLE_STORAGE_MAX`` the title is refused rather than
+        truncated: a person typed this, and quietly storing the first 200
+        characters hands them back a fragment they never wrote with nothing
+        saying why. How a stored title *fits* a row is the front end's business.
+        """
+        cleaned = collapse_to_line(title)
+        if len(cleaned) > TITLE_STORAGE_MAX:
+            raise ValueError(f"session title is {len(cleaned)} characters; the maximum is {TITLE_STORAGE_MAX}")
+        self.metadata["title"] = cleaned
+        self.metadata.pop("title_auto", None)
+
+    def set_generated_title(self, title: str) -> bool:
+        """Record a machine-made title. False when it was declined.
+
+        Stamped ``title_auto`` like the one ``save`` derives: both are machine
+        titles, and the marker is what lets a later *generation* replace them,
+        where a human title is declined below. A rename does not consult it --
+        ``set_title`` overwrites either kind and clears the marker on the way
+        through. Nor does it say anything about what a fork inherits; a fork
+        carries its parent's name whatever made it, and takes no marker with it.
+
+        Declined when a person has already named the session: the call that
+        produced this ran concurrently with the turn, so a rename typed while it
+        was in flight is the newer intent and has to win.
+        """
+        if self.metadata.get("title") and not self.metadata.get("title_auto"):
+            return False
+        cleaned = collapse_to_line(title)
+        if not cleaned or len(cleaned) > TITLE_STORAGE_MAX:
+            return False
+        self.metadata["title"] = cleaned
+        self.metadata["title_auto"] = True
+        return True
+
+    def record(self, msg: dict[str, Any]) -> None:
+        """Append a message dict, stamping a wall-clock timestamp.
+
+        The single choke point for session writes — every persistence path
+        (``add_message``, the agent loop's ``_save_turn``, clarification
+        appends) must come through here so no message lands unstamped. A
+        caller-set ``timestamp`` is preserved. Per-message ordering and
+        turn grouping derive from append order and the ``role`` boundary,
+        so no separate received_at / turn_id stamp is kept.
+        """
+        msg.setdefault("timestamp", datetime.now().isoformat())
+        self.messages.append(msg)
+        self.updated_at = datetime.now()
+
+    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
+        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        unconsolidated = self.messages[self.last_consolidated :]
+        sliced = unconsolidated[-max_messages:]
+
+        # Drop leading non-user messages to avoid orphaned tool_result blocks
+        for i, m in enumerate(sliced):
+            if m.get("role") == "user":
+                sliced = sliced[i:]
+                break
+
+        out: list[dict[str, Any]] = []
+        for m in sliced:
+            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+            for k in ("tool_calls", "tool_call_id", "name"):
+                if k in m:
+                    entry[k] = m[k]
+            out.append(entry)
+        return out
+
+    def clear(self) -> None:
+        """Clear all messages and reset session to initial state."""
+        self.messages = []
+        self.last_consolidated = 0
+        self.updated_at = datetime.now()
+
+    def undo_last_turn(self, n: int = 1) -> int:
+        """Drop the last ``n`` user-turn blocks from the unconsolidated tail.
+
+        A turn starts at a ``role == "user"`` message and runs to the next
+        user message (its assistant/tool followers inherit it). Only the
+        unconsolidated tail (``messages[last_consolidated:]``) is eligible —
+        content already summarized into MEMORY.md is never crossed. Returns
+        the number of messages removed (0 when the tail has no user message).
+        Persistence is the caller's job via ``SessionManager.save``.
+        """
+        if n < 1:
+            return 0
+        start = self.last_consolidated
+        user_starts = [i for i in range(start, len(self.messages)) if self.messages[i].get("role") == "user"]
+        if not user_starts:
+            return 0
+        cut_index = user_starts[-n] if n <= len(user_starts) else user_starts[0]
+        removed = len(self.messages) - cut_index
+        self.messages = self.messages[:cut_index]
+        self.updated_at = datetime.now()
+        return removed
+
+
+class SessionManager:
+    """
+    Manages conversation sessions.
+
+    Sessions are stored as JSONL files in the sessions directory.
+    """
+
+    def __init__(self, workspace: Path, project_slug: str | None = None, project_dir: Path | None = None):
+        """
+        Args:
+            workspace: Agent home; sessions live under ``<workspace>/sessions``.
+            project_slug: Groups this process's sessions under one directory
+                (``raven tui`` / ``raven agent`` pass the slugged launch
+                directory, so a project's conversations stay together). Leave
+                unset on the gateway, where the grouping directory is the
+                channel name instead -- one daemon serves every project, so a
+                launch directory would say nothing about a conversation.
+            project_dir: The unslugged directory behind ``project_slug``,
+                stamped into each new session's metadata. The slug is lossy, so
+                this is what identifies the project; the directory name is only
+                a bucket.
+        """
+        self.workspace = workspace
+        self.project_slug = project_slug
+        self.project_dir = project_dir
+        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self._cache: dict[str, Session] = {}
+        self._delete_observers: tuple = ()
+
+    def set_delete_observers(self, observers: tuple) -> None:
+        """Replace the whole deletion-observer tuple. A START-phase verb owned
+        by the resident host: attach at service start, detach with ``()`` at
+        stop; assembly never calls it (paper: contracts/session_events.py)."""
+        self._delete_observers = tuple(observers)
+
+    def _group_dir(self, key: str) -> Path:
+        """The directory grouping this session: project slug, or channel.
+
+        An empty channel falls back to ``_`` rather than the empty string, which
+        would collapse to ``sessions_dir`` itself -- putting the transcript at
+        ``sessions/.jsonl``, where the ``*/*.jsonl`` scans cannot see it.
+        """
+        channel = key.partition(":")[0]
+        return self.sessions_dir / (self.project_slug or safe_path_segment(channel) or "_")
+
+    def session_path(self, key: str) -> Path:
+        """The file path for a session: ``sessions/<group>/<chat_id>.jsonl``.
+
+        A session opened before this process's grouping applied -- a transcript
+        still under its channel directory, from before project grouping, or
+        from a run started in a different directory -- keeps its existing file.
+        Without that, resuming by id would silently open an empty session next
+        to the real transcript rather than continuing it.
+
+        The search runs whatever this process groups by, gateway included. Its
+        group is the channel name, so a conversation started by a terminal
+        entrypoint sits under a slug it never looks in -- yet ``list_sessions``
+        scans every group, so the gateway offers that conversation and then
+        could not open it. Worse than the empty transcript that produced: the
+        write verbs resolve through here too, so a rename or a turn from the
+        page filed a second transcript under the channel and split the
+        conversation across two files.
+
+        A candidate is adopted only once its own metadata says it is this
+        session. The glob matches on the chat_id alone, and the chat_id does not
+        name a channel: ``cli:<id>`` and ``tui:<id>`` are two conversations, and
+        taking the first file with the right stem handed one of them the other's
+        transcript to append to. The stored key is what tells them apart. A file
+        that carries no key is adopted regardless -- it predates the field, and
+        the stem is the only identity it has.
+        """
+        chat_id = safe_filename(key.partition(":")[2])
+        path = self._group_dir(key) / f"{chat_id}.jsonl"
+        if not path.exists():
+            for existing in sorted(self.sessions_dir.glob(f"*/{chat_id}.jsonl")):
+                stored = _stored_key(existing)
+                if stored is None or stored == key:
+                    return existing
+        return path
+
+    def session_dir(self, key: str) -> Path:
+        """This session's metadata directory, beside its transcript.
+
+        ``sessions/<group>/<chat_id>/`` holds what belongs to the conversation
+        but not in its message log -- the sub-agent call history today. Named
+        the same as the transcript minus the suffix, so the pair sits together
+        and neither the ``*.jsonl`` globs nor this directory sees the other.
+
+        The group comes from :meth:`session_path` so a pre-grouping
+        transcript's metadata lands beside the transcript rather than under the
+        slug this process would otherwise pick.
+
+        The name is re-derived with ``safe_path_segment`` rather than taken off
+        the transcript's stem: ``safe_filename`` leaves ``.`` and ``..`` intact
+        because a suffix always follows it, which is not true here.
+        ``with_suffix("")`` on ``<group>/...jsonl`` yields ``<group>/..`` --
+        pointing out of the group directory -- and on ``<group>/..jsonl`` it
+        raises ``ValueError``.
+        """
+        chat_id = safe_path_segment(key.partition(":")[2]) or "_"
+        return self.session_path(key).parent / chat_id
+
+    @staticmethod
+    def key_from_path(path: Path) -> str:
+        """Best-effort reverse of the nested filename encoding for a session file.
+
+        The on-disk ``_type:metadata`` key is authoritative when present and
+        wins over this; callers use it only as the fallback for metadata-less
+        files. ``safe_filename`` is non-invertible, so any character it folds
+        to ``_`` (``/``, ``:``, ...) is not recovered here.
+
+        The parent directory names the channel only under channel grouping. A
+        project slug always begins with ``-`` (the leading path separator) and
+        a channel name never does, so a slug parent is recognisable -- and
+        there the channel is simply not knowable from the path. Reporting
+        ``unknown`` rather than the slug matters because callers compare the
+        channel half against real channel names: a slug would look like a
+        channel that no session key can ever match.
+        """
+        parent = path.parent.name
+        return f"{'unknown' if parent.startswith('-') else parent}:{path.stem}"
+
+    def resolve_key(self, value: str) -> SessionResolution:
+        """Resolve a session id to a full ``channel:chat_id`` key across channels.
+
+        Shared resolution core for the agent ``--session`` path and session
+        export:
+
+        - a value containing ':' is already a full key -> resolved;
+        - exactly one exact chat_id match across channels -> resolved;
+        - exactly one prefix match -> resolved;
+        - more than one match -> ambiguous (candidate full keys);
+        - no match -> not_found.
+
+        The no-match tail is reported as ``not_found``; callers decide whether to
+        mint (agent ``--session``) or error (read-only export).
+        """
+        if ":" in value:
+            return SessionResolution("resolved", key=value)
+        sessions = self.list_sessions(channel=None)
+        exact = [s for s in sessions if s["key"].partition(":")[2] == value]
+        matches = exact or [s for s in sessions if s["key"].partition(":")[2].startswith(value)]
+        if len(matches) > 1:
+            return SessionResolution("ambiguous", candidates=tuple(s["key"] for s in matches))
+        if matches:
+            return SessionResolution("resolved", key=matches[0]["key"])
+        return SessionResolution("not_found")
+
+    def find_most_recent_chat_id(
+        self,
+        channel: str,
+        *,
+        this_project_only: bool = False,
+        include_archived: bool = True,
+    ) -> str | None:
+        """Return the chat_id of the most-recently-updated session on this
+        channel, or None if no such session exists.
+
+        Used by cron delivery at trigger time to auto-resolve where to
+        forward ephemeral (cli / tui) reminders, so users don't need to
+        know their own open_id / chat_id on the target channel.
+
+        Reads each candidate file's metadata line (first line of the JSONL)
+        to get the authoritative session key ``<channel>:<chat_id>`` and
+        ``updated_at``; recency is decided by ``updated_at``, falling back
+        to file mtime for files that lack it.
+
+        Sessions with messages take priority: a freshly minted zero-message
+        session (``sessions create``) must not hijack delivery away from the
+        user's real last conversation. Empty sessions are only considered
+        when the channel has no session with messages at all.
+
+        ``this_project_only`` narrows the scan, which is what resuming wants:
+        ``--continue`` in one checkout must not reopen a conversation started in
+        another, and the glob fallback would then append this project's turns to
+        a transcript filed under that one. Delivery callers want the opposite --
+        the gateway forwards to whichever session is live regardless of where it
+        was started -- so the wide scan stays the default. Without a
+        ``project_slug`` there is no narrower scan to make and the flag is a
+        no-op.
+
+        Narrowed still means two directories, not one: this project's group, and
+        the channel-named group holding sessions written before grouping
+        existed. Those carry no project attribution, and ``session_path``
+        already lets any project adopt one, so excluding them here would strand
+        every pre-upgrade conversation with no way to reach it from ``-c``.
+
+        ``include_archived`` defaults to True because delivery callers still
+        need the latest live destination even when it is hidden from session
+        pickers. Resume callers set it to False so archiving remains a durable
+        opt-out from automatic reopening.
+        """
+        best_chat_id: str | None = None
+        best_updated = ""
+        best_empty_chat_id: str | None = None
+        best_empty_updated = ""
+        # Either way the directory name is never trusted to name the channel:
+        # under project grouping a `cli` session lives under a slugged launch
+        # path, so the authoritative channel is the one in each file's metadata
+        # (re-checked below).
+        if this_project_only and self.project_slug:
+            groups = {self.project_slug, safe_path_segment(channel) or "_"}
+            candidates = (p for g in groups for p in (self.sessions_dir / g).glob("*.jsonl"))
+        else:
+            candidates = self.sessions_dir.glob("*/*.jsonl")
+        for p in candidates:
+            meta, count, _last, _first, _preview = self._scan_file(p)
+            if meta is None:
+                continue
+            key_val = meta.get("key", "")
+            if ":" not in key_val:
+                continue
+            ch, chat_id = key_val.split(":", 1)
+            if ch != channel or not chat_id:
+                continue
+            if not include_archived and (meta.get("metadata") or {}).get("archived"):
+                continue
+            if this_project_only and self.project_dir is not None:
+                # The slug is lossy, so one group can hold two projects
+                # (`/srv/a_b` and `/srv/a/b`). Where the real launch directory
+                # was recorded, use it; sessions predating that field have no
+                # attribution to contradict and stay eligible.
+                origin = (meta.get("metadata") or {}).get("project_dir")
+                if origin is not None and origin != str(self.project_dir):
+                    continue
+            updated = meta.get("updated_at")
+            if not isinstance(updated, str) or not updated:
+                try:
+                    updated = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
+                except OSError:
+                    continue
+            if count > 0:
+                if updated > best_updated:
+                    best_chat_id = chat_id
+                    best_updated = updated
+            elif updated > best_empty_updated:
+                best_empty_chat_id = chat_id
+                best_empty_updated = updated
+        return best_chat_id if best_chat_id is not None else best_empty_chat_id
+
+    @staticmethod
+    def _scan_file(path: Path) -> tuple[dict[str, Any] | None, int, str, str, str]:
+        """Single pass over a session file: return (last metadata record,
+        message line count, last user message timestamp, first user message
+        text, latest conversational preview).
+
+        One metadata record is appended per save, so the last reflects
+        current state. Message lines are counted without keeping them in
+        memory.
+
+        The timestamp tracked is the newest readable conversational message:
+        ``user`` or ``assistant``. Runtime-origin and delegated entries are
+        deliberately included because they add visible content to a Session
+        even when nobody typed at that moment. Tool and system records do not
+        move the picker on their own. The metadata record's ``updated_at``
+        cannot serve either -- it only moves when a save writes metadata and
+        can lag the transcript by a whole turn.
+
+        The first user message is what session pickers title an untitled
+        session with, so its text (flattened to one line, capped) rides along.
+        The latest non-empty user or assistant message is a separate display
+        preview: identity and recent content have different lifecycles and must
+        not be overloaded into one field.
+        """
+        meta: dict[str, Any] | None = None
+        count = 0
+        last_ts = ""
+        first_user = ""
+        latest_preview = ""
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(data, dict) and data.get("_type") == "metadata":
+                        meta = data
+                    else:
+                        count += 1
+                        if isinstance(data, dict):
+                            role = data.get("role")
+                            if role in {"user", "assistant"}:
+                                text = _message_text(data.get("content"))
+                                if text:
+                                    latest_preview = text
+                                ts = data.get("timestamp")
+                                if isinstance(ts, str) and ts > last_ts:
+                                    last_ts = ts
+                            if role == "user":
+                                if not first_user:
+                                    first_user = _message_text(data.get("content"))
+        except OSError:
+            return None, 0, "", "", ""
+        return meta, count, last_ts, first_user, latest_preview
+
+    def get_or_create(self, key: str) -> Session:
+        """
+        Get an existing session or create a new one.
+
+        Args:
+            key: Session key (usually channel:chat_id).
+
+        Returns:
+            The session.
+        """
+        if key in self._cache:
+            return self._cache[key]
+
+        session = self._load(key)
+        if session is None:
+            session = Session(key=key)
+        # The group directory is a lossy label -- two projects whose paths
+        # differ only in punctuation slug the same way. Record the real
+        # directory so anything that needs the project's identity reads it from
+        # here rather than from the directory name. Set once, on the session
+        # that introduced it; a later run elsewhere must not rewrite history.
+        if self.project_dir is not None and not session.metadata.get("project_dir"):
+            session.metadata["project_dir"] = str(self.project_dir)
+
+        self._cache[key] = session
+        return session
+
+    def _load(self, key: str) -> Session | None:
+        """Load a session from disk."""
+        path = self.session_path(key)
+        if not path.exists():
+            return None
+
+        try:
+            messages = []
+            metadata = {}
+            created_at = None
+            last_consolidated = 0
+            pending_clarification = None
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        # Partial trailing line from a crashed append.
+                        logger.debug("Skipping undecodable line in session {}", key)
+                        continue
+
+                    # Metadata records are appended per save; last one wins.
+                    if data.get("_type") == "metadata":
+                        metadata = data.get("metadata", {})
+                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        last_consolidated = data.get("last_consolidated", 0)
+                        pending_clarification = data.get("pending_clarification")
+                    else:
+                        messages.append(data)
+
+            session = Session(
+                key=key,
+                messages=messages,
+                created_at=created_at or datetime.now(),
+                metadata=metadata,
+                last_consolidated=last_consolidated,
+                pending_clarification=pending_clarification,
+            )
+            session._persisted_count = len(messages)
+            session._file_stamp = _stamp(path)
+            session._persisted_metadata = dict(metadata)
+            return session
+        except Exception as e:
+            logger.warning("Failed to load session {}: {}", key, e)
+            return None
+
+    def append_metadata_patch(self, key: str, patch: dict[str, Any]) -> bool:
+        """Fold ``patch`` into a session's metadata by appending one record.
+
+        The last metadata record wins on load, so appending is enough -- and
+        the transcript is never read, which is what lets a housekeeping pass
+        touch hundreds of sessions without loading any of them. Merging into
+        the record on disk is also what keeps two clients from undoing each
+        other: whoever writes second keeps the other's keys, which a whole
+        ``save`` of one client's copy of the metadata cannot do.
+
+        False when there was nothing to append to -- no transcript, or one with
+        no metadata record -- which a caller reporting whether a flag reached
+        the disk has to tell apart from a write that happened.
+        """
+        path = self.session_path(key)
+        if not path.is_file():
+            return False
+        last, _count, _last_ts, _first, _preview = self._scan_file(path)
+        if last is None:
+            return False
+        merged = {**(last.get("metadata") or {}), **patch}
+        locked_append(path, [json.dumps({**last, "metadata": merged}, ensure_ascii=False)])
+        cached = self._cache.get(key)
+        if cached is not None:
+            cached.metadata.update(patch)
+            # These keys are on disk now, so they are no longer this copy's
+            # unsaved opinion: left out of the baseline the patch reads as a
+            # local change on every later save and is asserted again over
+            # whatever anybody wrote in between. ``_file_stamp`` deliberately
+            # stays stale -- the file also carries the record this merged into,
+            # and a stale stamp is what makes the next save re-read it.
+            cached._persisted_metadata.update(patch)
+        return True
+
+    def save(self, session: Session) -> None:
+        """Save a session to disk.
+
+        Appends a fresh metadata record plus the not-yet-persisted messages
+        under a cross-process lock, so concurrent writers never lose each
+        other's turns and a turn's messages stay contiguous. A shrunken
+        message list (clear) rewrites the file atomically instead.
+
+        An untitled session is auto-named here from its first user message
+        (first line, collapsed whitespace, capped at 40 chars); a title set
+        by the user is never overwritten. Forked children are excluded — their
+        first user message names the fork point's ancestor, not the fork. They
+        are not left nameless by that: ``fork`` gives the child its parent's
+        name with ``(fork)`` after it, which is a name for the fork rather than
+        for what it was forked from.
+        """
+        path = self.session_path(session.key)
+
+        if not session.metadata.get("title") and not session.metadata.get("parent_session_id"):
+            auto_title = _first_user_auto_title(session.messages)
+            if auto_title:
+                session.metadata["title"] = auto_title
+                session.metadata["title_auto"] = True
+
+        channel, _, chat_id = session.key.partition(":")
+        reserved = {
+            "source": None,
+            "channel": channel,
+            "chat_id": chat_id,
+            "title": None,
+            "parent_session_id": None,
+        }
+        session.metadata = {**reserved, **session.metadata}
+
+        # The read and the write are one transaction: the record this merges
+        # under can otherwise be written between them and lost anyway.
+        with write_transaction(path):
+            session.metadata = self._metadata_to_write(session, path)
+            metadata_line = json.dumps(
+                {
+                    "_type": "metadata",
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata,
+                    "last_consolidated": session.last_consolidated,
+                    # Personalization: persist clarification wait-state across restarts
+                    "pending_clarification": session.pending_clarification,
+                },
+                ensure_ascii=False,
+            )
+
+            if len(session.messages) < session._persisted_count:
+                lines = [metadata_line]
+                lines += [json.dumps(m, ensure_ascii=False) for m in session.messages]
+                atomic_replace(path, "".join(line + "\n" for line in lines))
+            else:
+                new_messages = session.messages[session._persisted_count :]
+                lines = [metadata_line]
+                lines += [json.dumps(m, ensure_ascii=False) for m in new_messages]
+                locked_append(path, lines)
+            session._file_stamp = _stamp(path)
+            session._persisted_metadata = dict(session.metadata)
+
+        session._persisted_count = len(session.messages)
+        self._cache[session.key] = session
+
+    def _metadata_to_write(self, session: "Session", path: Path) -> dict[str, Any]:
+        """What this copy changed, over the record on disk, over what it loaded.
+
+        A save rewrites the whole metadata record, so on its own it speaks for
+        every key its own copy happens to hold: a flag another client wrote
+        after this copy was loaded -- archived, most visibly -- was gone the
+        next time anything here saved, and the conversation came back.
+
+        Which is why only what this copy *changed* may outrank the record. A
+        session's ``metadata`` is the whole snapshot it loaded, not the keys it
+        meant, so overlaying it whole trades one stale-write bug for a narrower
+        one: restore persists ``archived: False``, a second client loads that,
+        the first archives again, and the second's next ordinary turn writes
+        its stale False back over the newer True. Comparing against what this
+        copy last read or wrote is what tells the two apart.
+
+        **Removal is written, never left unsaid.** Nothing here can tell a key
+        this copy dropped from one it never had, so every remover states a
+        false value instead (``session.pin``, :meth:`Session.set_title`, the
+        output-limit stamp). A new remover that omits a key instead will find
+        it resurrected.
+
+        The re-read is skipped while the file is byte for byte what this copy
+        last read or wrote, which is every save in the ordinary case of one
+        writer -- so a conversation pays for the scan only when somebody else
+        has actually written to it.
+        """
+        stamp = _stamp(path)
+        if stamp is None or stamp == session._file_stamp:
+            return session.metadata
+        last, *_rest = self._scan_file(path)
+        if last is None:
+            return session.metadata
+        base = session._persisted_metadata
+        changed = {k: v for k, v in session.metadata.items() if k not in base or base[k] != v}
+        # Base under the record: a key this copy read and did not touch still
+        # belongs in what it writes, and the record on disk has the say on it.
+        return {**base, **(last.get("metadata") or {}), **changed}
+
+    def invalidate(self, key: str) -> None:
+        """Remove a session from the in-memory cache."""
+        self._cache.pop(key, None)
+
+    def delete(self, key: str) -> bool:
+        """Remove the session file and invalidate the cache entry.
+
+        Returns True only if a file was actually removed; False if no file
+        existed or the removal failed. Deleting an unknown key is a safe no-op.
+        Attached observers hear every delete request after the store has acted,
+        with the removal outcome; an observer that raises is logged and skipped
+        (paper: contracts/session_events.py), so none can change this verdict.
+        """
+        path = self.session_path(key)
+        self.invalidate(key)
+        removed = False
+        if path.exists():
+            try:
+                path.unlink()
+                removed = True
+            except OSError:
+                logger.warning("session.delete: failed to remove file for {}", key)
+        for observer in self._delete_observers:
+            try:
+                observer.on_session_deleted(key, removed)
+            except Exception:
+                logger.exception("session.delete: observer failed for {}; the deletion stands", key)
+        return removed
+
+    def exists(self, key: str) -> bool:
+        """Return True if the session has a file on disk (lazy sessions don't)."""
+        return self.session_path(key).exists()
+
+    def peek(self, key: str) -> "Session | None":
+        """Return the cached session if present; else load from disk without caching.
+
+        Callers that need read-only access to a session should use this instead
+        of get_or_create, which would cache a fresh empty session for unknown keys.
+        """
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        return self._load(key)
+
+    def fork(self, source_key: str, *, title: str | None = None) -> "Session | None":
+        """Fork ``source_key`` at its head into a new diverging child session.
+
+        Full-copy semantics: the child is minted with a fresh chat_id on the
+        source's channel, a deep copy of the source's messages, and
+        ``parent_session_id`` set to the source key (the reserved lineage slot).
+        The child inherits ``last_consolidated`` (so its active-context window
+        matches the source at the fork point) and resets ``pending_clarification``
+        (interaction wait-state is not history). The child is persisted eagerly.
+
+        Whatever the source is called, the child is called ``<title> (fork)``
+        -- typed by hand, derived by ``save`` from the first user message, or
+        generated. Inheritance used to be restricted to human titles, which
+        crossed with ``save``'s rule that a fork is never auto-named to leave
+        the forks of auto-named sessions with no title at all; the front ends
+        then headed them with a placeholder, so every fork of an unnamed
+        conversation read the same. The reason a fork is not auto-named stands
+        and is a different one: its first user message names the fork point's
+        ancestor, not the fork. The parent's name, marked as the fork it is,
+        does name the fork.
+
+        The child's title carries no ``title_auto`` marker, whatever the
+        source's said. It is the fork's own name from here: a rename still
+        wins, and nothing regenerates it behind the reader's back.
+
+        The derived name goes in through ``set_title`` like every other name, so
+        it obeys the one line and the one ceiling that rule states. Where a human
+        title too long for the record is refused, this one is not: a parent named
+        right up to the ceiling gives up its tail so the fork keeps a name
+        (``_fork_title``).
+
+        Returns the persisted child, or None when the source does not exist or
+        has zero messages (a fork of an empty session has no value).
+        """
+        source = self.peek(source_key)
+        if source is None or not source.messages:
+            return None
+
+        channel = source_key.partition(":")[0]
+        child = Session(
+            key=f"{channel}:{new_chat_id()}",
+            messages=copy.deepcopy(source.messages),
+            last_consolidated=source.last_consolidated,
+        )
+        if title is not None:
+            child.metadata["title"] = title
+        else:
+            parent_title = (source.metadata or {}).get("title")
+            if parent_title:
+                child.set_title(_fork_title(parent_title))
+        child.metadata["parent_session_id"] = source_key
+        # A fork continues its parent's conversation, so it continues on its
+        # parent's model. The caller re-points the live binding, but that lives
+        # in memory only -- without carrying the record too, the fork drops to
+        # the default the first time it is resumed in a new process.
+        for slot in ("model", "provider"):
+            inherited = (source.metadata or {}).get(slot)
+            if inherited:
+                child.metadata[slot] = inherited
+        self.save(child)
+        return child
+
+    def flush(self, key: str) -> bool:
+        """Save the cached session iff it has unpersisted messages.
+
+        Uses the _persisted_count dirty check. Returns False only when a save
+        was attempted and failed (the failure is swallowed); True otherwise,
+        including the no-op cases (key not cached / no new messages).
+        """
+        cached = self._cache.get(key)
+        if cached is None:
+            return True
+        if len(cached.messages) > cached._persisted_count:
+            try:
+                self.save(cached)
+            except Exception:
+                logger.warning("flush: failed to persist session {}", key)
+                return False
+        return True
+
+    def list_sessions(
+        self,
+        channel: str | None = None,
+        *,
+        channels: Collection[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List sessions, optionally filtered by one or several channels.
+
+        Each entry carries: key, created_at, updated_at, last_message_at,
+        path, message_count, first_user_message, last_message_preview. Ordered
+        by the metadata ``updated_at`` stamp descending. Each file is read in a
+        single pass, including when several channels are requested.
+
+        Subagent transcripts are stored as sessions so they can be read with the
+        same machinery, but they are steps inside somebody else's turn rather
+        than conversations -- listing them would bury the real ones. Ask for the
+        channel by name to get them. ``channel`` preserves the original
+        single-channel API; ``channels`` is the multi-channel picker path and
+        cannot be combined with it.
+        """
+        if channel is not None and channels is not None:
+            raise ValueError("channel and channels are mutually exclusive")
+        selected_channels = set(channels) if channels is not None else None
+        sessions = []
+
+        for path in self.sessions_dir.glob("*/*.jsonl"):
+            data, message_count, last_ts, first_user, latest_preview = self._scan_file(path)
+            if data is None:
+                continue
+            key = data.get("key") or self.key_from_path(path)
+            key_channel = key.partition(":")[0]
+            # Filter on the key, not the parent directory: under project
+            # grouping the directory is a slugged launch path, so it no longer
+            # names the channel. That applies to the subagent exclusion too --
+            # keyed off the directory it would quietly stop excluding anything
+            # the moment a session landed under a slugged group instead.
+            if channel is None and selected_channels is None and key_channel == SUBAGENT_CHANNEL:
+                continue
+            if channel is not None and key_channel != channel:
+                continue
+            if selected_channels is not None and key_channel not in selected_channels:
+                continue
+            sessions.append(
+                {
+                    "key": key,
+                    "created_at": data.get("created_at"),
+                    "updated_at": data.get("updated_at"),
+                    # The newest visible conversation entry. Runtime-origin
+                    # and delegated rows count because they change the Session.
+                    "last_message_at": last_ts,
+                    "path": str(path),
+                    "message_count": message_count,
+                    "metadata": data.get("metadata", {}),
+                    "first_user_message": first_user,
+                    "last_message_preview": latest_preview,
+                }
+            )
+
+        # Ordered by ``updated_at``, unchanged. ``last_message_at`` is
+        # carried on each entry but deliberately not sorted on here: three
+        # callers take ``[0]`` off this list to decide *where a message gets
+        # delivered* -- the gateway's heartbeat target, the sentinel's nudge
+        # target, and `raven sessions list`, whose table renders ``updated_at``
+        # in its own Updated column. Re-ordering for a picker's benefit would
+        # silently re-route those. A surface that wants latest conversational
+        # activity sorts on the field itself; ``session.list`` does.
+        return sorted(sessions, key=lambda x: x.get("updated_at") or "", reverse=True)

@@ -1,0 +1,322 @@
+// @vitest-environment happy-dom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import * as settingsDialog from '../../state/settings'
+import { resetSources, setSources } from '../../state/sources'
+import * as store from './store'
+
+import type { SettingsSnapshot, SettingsSource } from './types'
+
+const snapOf = (model: string): SettingsSnapshot => ({
+  raw: {}, configPath: '', everos: null, providers: [], curProvider: '', model, tools: [], skills: [], mcp: [],
+})
+
+afterEach(() => {
+  store._resetForTests()
+  settingsDialog._resetForTests()
+  resetSources()
+  vi.restoreAllMocks()
+})
+
+describe('settings store', () => {
+  it('exposes the store shape and notifies on every write', () => {
+    let n = 0
+    const off = store.subscribe(() => { n += 1 })
+    store.set({ tab: 'usage' })
+    expect(store.get().tab).toBe('usage')
+    expect(n).toBe(1)
+    store.redraw()
+    expect(n).toBe(2)
+    off()
+    store.set({ err: 'x' })
+    expect(n).toBe(2)
+  })
+
+  it('setTab closes every drawer of the section it leaves', () => {
+    store.set({ provider: 'openai', sheet: { slug: 'openai', q: '', state: 'ready', items: [], kind: 'all', picked: [], typed: null }, skill: 's', toolOpen: 'exec', plugOpen: 'p', err: 'oops' })
+    store.setTab('tools')
+    const s = store.get()
+    expect(s.tab).toBe('tools')
+    /* The model picker is no longer one of them: it is the composer's, owned by
+       the model store, and it closes on its own when the dialog does. */
+    expect([s.provider, s.sheet, s.skill, s.toolOpen, s.plugOpen, s.err]).toEqual([null, null, null, null, null, ''])
+  })
+
+  it('both model doors open the providers page, which is where a key and a list are', async () => {
+    /* `openModels` answers "nothing is connected" and `openProviderModels`
+       answers "this one has no model added". Since the split, neither question
+       is answerable on the Model settings page: it holds the roles card and no
+       way to connect anything. */
+    setSources({ settings: { load: async () => snapOf('m') } as unknown as SettingsSource })
+    vi.spyOn(settingsDialog, 'open').mockImplementation(() => {})
+    await store.openModels()
+    expect(settingsDialog.settingsTab.id).toBe('provider')
+    settingsDialog.settingsTab.id = 'general'
+    await store.openProviderModels('moonshot')
+    expect([settingsDialog.settingsTab.id, store.get().provider]).toEqual(['provider', 'moonshot'])
+  })
+
+  it('run marks the key busy while the write runs and lands the snapshot it returns', async () => {
+    let release: (v: SettingsSnapshot) => void = () => {}
+    const p = store.run('k', () => new Promise<SettingsSnapshot>((r) => { release = r }))
+    expect(store.isBusy('k')).toBe(true)
+    release(snapOf('after'))
+    expect(await p).toBe(true)
+    expect(store.isBusy('k')).toBe(false)
+    expect(store.get().snap.model).toBe('after')
+  })
+
+  it('run resolves false on a refusal the source already handled, leaving the snapshot alone', async () => {
+    store.set({ snap: snapOf('before') })
+    const ok = await store.run('k', () => Promise.reject({ handled: true }))
+    expect(ok).toBe(false)
+    expect(store.get().snap.model).toBe('before')
+    expect(store.isBusy('k')).toBe(false)
+  })
+
+  it('write goes through the source with the key and value', async () => {
+    const calls: unknown[] = []
+    setSources({ settings: { set: async (key: string, value: unknown) => { calls.push([key, value]); return snapOf('m') } } as unknown as SettingsSource })
+    await store.write('tools.disabledTools', ['exec'])
+    expect(calls).toEqual([['tools.disabledTools', ['exec']]])
+  })
+
+  it('a device flow that lands closes the add form it started from', async () => {
+    /* The add form is open on the vendor while the code is out. */
+    vi.useFakeTimers()
+    let on = false
+    const data = (): SettingsSnapshot => ({
+      ...snapOf('m'),
+      providers: [{ id: 'minimax_global', name: 'MiniMax Global', models: [], configured: [], on, kind: 'oauth', acceptsKey: false }],
+    })
+    setSources({ settings: {
+      load: async () => data(),
+      reloadProviders: async () => data(),
+      oauthLogin: async () => ({ verification_uri: 'https://v.example/device', user_code: 'ABCD', expires_in: 900 }),
+    } as unknown as SettingsSource })
+    store.set({ provAdd: 'minimax_global' })
+    await store.oauthStart('minimax_global')
+    expect(store.get().oauth?.slug).toBe('minimax_global')
+
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(store.get().oauth?.slug).toBe('minimax_global')
+    expect(store.get().provAdd).toBe('minimax_global')
+
+    on = true
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(store.get().oauth).toBeNull()
+    expect(store.get().provAdd).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('a device flow that lands reloads the offer the pickers draw from', async () => {
+    /* The landing is the one provider write that does not go through this
+       store, so nothing else reloads the list the role slots and the composer's
+       picker read. Left alone, onboarding's Chat slot read the provider as
+       signed out and answered "no model added" until a reload. */
+    vi.useFakeTimers()
+    let on = false
+    const data = (): SettingsSnapshot => ({
+      ...snapOf('m'),
+      providers: [{ id: 'openai_codex', name: 'OpenAI Codex', models: [], configured: [], on, kind: 'oauth', acceptsKey: false }],
+    })
+    const reloadProviders = vi.fn(async () => data())
+    setSources({ settings: {
+      load: async () => data(),
+      reloadProviders,
+      oauthLogin: async () => ({ verification_uri: 'https://v.example/device', user_code: 'ABCD', expires_in: 900 }),
+    } as unknown as SettingsSource })
+    await store.oauthStart('openai_codex')
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(reloadProviders).not.toHaveBeenCalled()
+
+    on = true
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(reloadProviders).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('a refused start keeps watching the code already out', async () => {
+    /* A second click while a code is out: that code is still on screen, and
+       still the one the reader will type. Stopping the poll before asking left
+       it there with nothing watching for it to land. */
+    vi.useFakeTimers()
+    let on = false
+    let refuse = false
+    let loads = 0
+    const data = (): SettingsSnapshot => ({
+      ...snapOf('m'),
+      providers: [{ id: 'openai_codex', name: 'OpenAI Codex', models: [], configured: [], on, kind: 'oauth', acceptsKey: false }],
+    })
+    setSources({ settings: {
+      load: async () => { loads += 1; return data() },
+      reloadProviders: async () => data(),
+      oauthLogin: async () => {
+        if (refuse) throw { handled: true }
+        return { verification_uri: 'https://v.example/device', user_code: 'ABCD', expires_in: 900 }
+      },
+    } as unknown as SettingsSource })
+    await store.oauthStart('openai_codex')
+    refuse = true
+    await store.oauthStart('openai_codex')
+    expect(store.get().oauth?.code).toBe('ABCD')
+
+    const before = loads
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(loads).toBeGreaterThan(before)
+
+    on = true
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(store.get().oauth).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('a code answered with seconds left is watched only that long', async () => {
+    /* A second start is answered with the time the pending code has left. A
+       floor under it kept a dead code drawn as live, and polled, for half a
+       minute. */
+    vi.useFakeTimers()
+    setSources({ settings: {
+      load: async () => snapOf('m'),
+      reloadProviders: async () => snapOf('m'),
+      oauthLogin: async () => ({ verification_uri: 'https://v.example/device', user_code: 'ABCD', expires_in: 2 }),
+    } as unknown as SettingsSource })
+    await store.oauthStart('openai_codex')
+    expect(store.get().oauth?.expired).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(store.OAUTH_POLL_MS + 50)
+    expect(store.get().oauth?.expired).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('lastDays spans today and the days before it, inclusive', () => {
+    const r = store.lastDays(7)
+    const from = new Date(`${r.from}T00:00:00`)
+    const to = new Date(`${r.to}T00:00:00`)
+    expect(Math.round((to.getTime() - from.getTime()) / 86400000)).toBe(6)
+    expect(r.to).toBe(store.isoDay(new Date()))
+    expect(store.lastDays(1)).toEqual({ from: r.to, to: r.to })
+  })
+
+  it('usageLoad keeps the newest range when an older answer lands late', async () => {
+    let releaseFirst: (v: null) => void = () => {}
+    const first = { kind: '7', from: '2026-09-01', to: '2026-09-07' }
+    const second = { kind: '1', from: '2026-09-18', to: '2026-09-18' }
+    setSources({ settings: {
+      usage: async (range: { kind?: string }) => (range === first ? new Promise<null>((r) => { releaseFirst = r }) : null),
+    } as unknown as SettingsSource })
+    const a = store.usageLoad(first)
+    await store.usageLoad(second)
+    expect(store.get().range).toBe(second)
+    expect(store.get().usage).toBe(null)
+    store.set({ usage: undefined })
+    releaseFirst(null)
+    await a
+    expect(store.get().usage).toBe(undefined)
+  })
+})
+
+describe('settings store, what a reopen drops', () => {
+  it('opening again clears what the pages fetched for themselves', async () => {
+    setSources({ settings: { load: async () => snapOf('m') } as unknown as SettingsSource })
+    /* Both carry an answer from an earlier open. `refresh` reloads the
+       snapshot and cannot touch these two, so without the clear a dialog
+       opened once showed its first answer for the life of the page -- a
+       session archived from the rail in between never reached the archive
+       page, and the usage totals stayed at whatever they were on first open. */
+    store.set({ usage: null, archived: [] })
+    await store.open()
+    expect(store.get().usage).toBe(undefined)
+    expect(store.get().archived).toBe(null)
+    settingsDialog.close()
+  })
+})
+
+describe('settings store, a reload that brings nothing new', () => {
+  /* The epoch remounts the whole page. A reopen draws the values it has and
+     reloads behind them; when the reload answered the same values it still
+     remounted, and a click landing then was pressed on one button and
+     released on its replacement -- no click at all. */
+  it('keeps the page mounted when the reload answers the same values, and remounts when they changed', async () => {
+    let model = 'm'
+    setSources({ settings: { load: async () => snapOf(model) } as unknown as SettingsSource })
+    await store.refresh()
+    const first = store.get().epoch
+    expect(store.get().loaded).toBe(true)
+
+    await store.refresh()
+    expect(store.get().epoch, 'same values: no remount').toBe(first)
+
+    model = 'n'
+    await store.refresh()
+    expect(store.get().epoch, 'new values: the inputs reseed').toBe(first + 1)
+    expect(store.get().snap.model).toBe('n')
+  })
+
+  it('leaves the page mounted on the last values when the reload fails', async () => {
+    let fail = false
+    setSources({
+      settings: {
+        load: async () => {
+          if (fail) throw new Error('down')
+          return snapOf('m')
+        },
+      } as unknown as SettingsSource,
+    })
+    await store.refresh()
+    const first = store.get().epoch
+    fail = true
+    await store.refresh()
+    expect(store.get().epoch).toBe(first)
+    expect(store.get().snap.model).toBe('m')
+  })
+})
+
+describe('settings store, a code typed back into a browser sign-in', () => {
+  it('oauthSubmit hands the code to the sign-in and says whether it was taken', async () => {
+    let refuse = false
+    const sent: string[] = []
+    setSources({ settings: {
+      load: async () => snapOf('m'),
+      reloadProviders: async () => snapOf('m'),
+      oauthCode: async (slug: string, code: string) => {
+        if (refuse) throw { handled: true }
+        sent.push(`${slug}:${code}`)
+      },
+    } as unknown as SettingsSource })
+    store.set({ oauth: { slug: 'claude_subscription', uri: 'https://claude.example/authorize', code: '', until: Date.now() + 900_000, expired: false } })
+    expect(await store.oauthSubmit('ABC-123')).toBe(true)
+    refuse = true
+    expect(await store.oauthSubmit('bad')).toBe(false)
+    expect(sent).toEqual(['claude_subscription:ABC-123'])
+  })
+
+  it('oauthSubmit does nothing when no sign-in is open', async () => {
+    const sent: string[] = []
+    setSources({ settings: { oauthCode: async () => { sent.push('called') } } as unknown as SettingsSource })
+    store.set({ oauth: null })
+    expect(await store.oauthSubmit('ABC-123')).toBe(false)
+    expect(sent).toEqual([])
+  })
+})
+
+describe('settings store, the inventory push', () => {
+  it('refreshSoon reloads once per burst while the dialog is open, and not at all while it is down', async () => {
+    vi.useFakeTimers()
+    const loads: number[] = []
+    setSources({ settings: { load: async () => { loads.push(1); return snapOf('pushed') } } as unknown as SettingsSource })
+    store.set({ loaded: true })
+    store.refreshSoon()
+    await vi.advanceTimersByTimeAsync(store.REFRESH_SOON_MS + 50)
+    expect(loads).toHaveLength(0)
+    settingsDialog.open()
+    store.refreshSoon()
+    store.refreshSoon()
+    store.refreshSoon()
+    await vi.advanceTimersByTimeAsync(store.REFRESH_SOON_MS + 50)
+    expect(loads).toHaveLength(1)
+    expect(store.get().snap.model).toBe('pushed')
+    settingsDialog.close()
+    vi.useRealTimers()
+  })
+})

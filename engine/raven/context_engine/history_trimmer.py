@@ -1,0 +1,400 @@
+"""History trimming — the Curator's contribution to ``*history``.
+
+Owned by :class:`CuratorAssembler`, which calls these operations to decide
+which session messages reach the model:
+
+- **adjacency closure** (:meth:`canonical_ids`) — if a tool call is
+  selected its result messages come along, and vice versa, so the
+  provider never sees a dangling tool call / orphan result;
+- **clean extraction** (:meth:`history_from_ids`) — project the selected
+  session messages down to the provider-safe key set;
+- **structural validation** (:meth:`structural_errors`) — verify every
+  tool result has a parent assistant ``tool_calls`` and every call has a
+  result;
+- **budget trimming** (:meth:`trim`) — build the prompt, estimate its
+  token cost, and drop the lowest-priority non-protected messages until
+  it fits -- a tool call and its results as one unit (:meth:`tool_group`),
+  so what fits is also what the provider accepts.
+
+This is the *only* code path that selects ``*history``. The
+``# Curator Working State`` section is rendered by
+:class:`CuratorSegmentBuilder` from the plan's working-state text — it is
+not this module's concern.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from raven.contracts.llm_provider import LLMProvider
+from raven.providers.binding import ModelBinding, active_window, resolve
+from raven.utils.tokens import estimate_prompt_tokens_chain, reuse_prompt_tokenization
+
+# Provider-safe message keys. Anything else on a session message
+# (timestamps, internal ids, manifest annotations) is dropped before
+# the dict reaches the LLM. reasoning_content / thinking_blocks must survive
+# so multi-turn reasoning contracts (e.g. DeepSeek thinking mode) hold; the
+# provider gate strips thinking_blocks for non-Anthropic targets downstream.
+_ALLOWED_KEYS = {
+    "role",
+    "content",
+    "tool_calls",
+    "tool_call_id",
+    "name",
+    "reasoning_content",
+    "thinking_blocks",
+}
+
+
+def _tool_parents(messages: list[dict[str, Any]]) -> dict[int, int]:
+    """Each tool result's index mapped to the index of the call it answers.
+
+    A result answers the nearest earlier assistant that declared its id. That
+    is a position, not an id lookup, because nothing makes an id unique across
+    a session -- the streaming path keeps whatever id the upstream sent.
+    :meth:`HistoryTrimmer.canonical_ids` and :meth:`HistoryTrimmer.tool_group`
+    both pair through here: if closure could pair a result differently from the
+    group a budget drop removed, re-closing would put that group back and the
+    drop loop would never shrink the selection.
+    """
+    declared: dict[str, int] = {}
+    parents: dict[int, int] = {}
+    for idx, message in enumerate(messages):
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            for tc in message.get("tool_calls") or []:
+                if isinstance(tc, dict) and tc.get("id"):
+                    declared[str(tc["id"])] = idx
+        elif message.get("role") == "tool" and message.get("tool_call_id"):
+            parent = declared.get(str(message["tool_call_id"]))
+            if parent is not None:
+                parents[idx] = parent
+    return parents
+
+
+def _group_index(messages: list[dict[str, Any]]) -> dict[int, frozenset[int]]:
+    """Every paired call and result mapped to the whole group it belongs to.
+
+    One :func:`_tool_parents` pass builds it; a message that pairs with nothing
+    has no entry. Pairing walks the whole session, so ``trim`` builds this once
+    and every group lookup reads it, rather than each lookup walking again.
+    Each group is frozen once and shared by its members, so the index stays
+    linear in memory however many results one parallel call has.
+    """
+    members: dict[int, set[int]] = {}
+    for rid, pid in _tool_parents(messages).items():
+        members.setdefault(pid, {pid}).add(rid)
+    return {mid: group for group in map(frozenset, members.values()) for mid in group}
+
+
+@dataclass
+class TrimOutcome:
+    """Result of a :meth:`HistoryTrimmer.trim` call."""
+
+    history: list[dict[str, Any]]
+    included_ids: list[int]
+    estimated_tokens: int
+    max_prompt_tokens: int
+    source: str
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return self.estimated_tokens <= self.max_prompt_tokens
+
+    @property
+    def over_by(self) -> int:
+        return max(0, self.estimated_tokens - self.max_prompt_tokens)
+
+
+class HistoryTrimmer:
+    """Shapes and budget-trims the session history into ``*history``."""
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        model: str,
+        get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        context_window_tokens: int,
+    ) -> None:
+        self._fallback = ModelBinding(provider, model)
+        self.get_tool_definitions = get_tool_definitions
+        self._fallback_window = int(context_window_tokens)
+
+    @property
+    def provider(self) -> "LLMProvider":
+        """The provider of the turn's binding; the build-time one outside a turn."""
+        return resolve(None, self._fallback).provider
+
+    @property
+    def model(self) -> str:
+        """The model of the turn's binding; the build-time one outside a turn."""
+        return resolve(None, self._fallback).model
+
+    def set_provider(self, provider: LLMProvider, model: str) -> None:
+        """Adopt the provider a live ``/model`` switch just built, so token
+        estimates keep matching the model actually being called."""
+        self._fallback = ModelBinding(provider, model)
+
+    # ------------------------------------------------------------------
+    # Pure history-shaping helpers (no token estimation / no I/O)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def canonical_ids(messages: list[dict[str, Any]], ids: list[int]) -> list[int]:
+        """Close ``ids`` over tool-call / tool-result adjacency.
+
+        Returns the selected indices in order, trimmed so the sequence
+        begins at a ``user`` message (so history never starts mid
+        tool-exchange). Returns ``[]`` if no user message survives.
+        """
+        selected = {mid for mid in ids if isinstance(mid, int) and 0 <= mid < len(messages)}
+        parents = _tool_parents(messages)
+        # Calls first: a result's sibling results come in only once its call is selected.
+        selected |= {parents[mid] for mid in selected if mid in parents}
+        selected |= {rid for rid, pid in parents.items() if pid in selected}
+
+        ordered = sorted(selected)
+        for pos, mid in enumerate(ordered):
+            if messages[mid].get("role") == "user":
+                return ordered[pos:]
+        return []
+
+    @staticmethod
+    def history_from_ids(messages: list[dict[str, Any]], ids: list[int]) -> list[dict[str, Any]]:
+        """Project the selected messages down to provider-safe keys."""
+        history: list[dict[str, Any]] = []
+        for mid in ids:
+            clean = {k: v for k, v in messages[mid].items() if k in _ALLOWED_KEYS}
+            if clean.get("role"):
+                history.append(clean)
+        return history
+
+    @staticmethod
+    def tool_group(
+        messages: list[dict[str, Any]], mid: int, index: dict[int, frozenset[int]] | None = None
+    ) -> set[int]:
+        """The ids that stand or fall with ``mid``.
+
+        An assistant carrying ``tool_calls`` goes with every result answering
+        it; a tool result goes with its parent and the parent's other results;
+        any other message stands alone. Dropping one member without the rest
+        leaves the provider a dangling call or an orphan result, which a strict
+        backend refuses outright -- measured 2026-09-11 on DeepSeek's API,
+        where one such request failed every turn until the history was
+        re-selected.
+
+        ``index`` is :func:`_group_index` of ``messages``; a caller asking
+        about many ids passes it, since building it is a pass over the session.
+        """
+        if index is None:
+            index = _group_index(messages)
+        return set(index.get(mid, (mid,)))
+
+    @classmethod
+    def _offenders(cls, messages: list[dict[str, Any]], ids: list[int], index: dict[int, frozenset[int]]) -> set[int]:
+        """Selected ids whose tool pairing is broken *within the selection*:
+        a parent missing any of its results, or a result whose parent is not
+        selected. Empty when the selection is provider-safe."""
+        selected = set(ids)
+        offenders: set[int] = set()
+        seen: set[int] = set()
+        for mid in ids:
+            # Every member answers ``tool_group`` with the same group, so one look covers it.
+            if mid in seen:
+                continue
+            group = cls.tool_group(messages, mid, index)
+            seen |= group
+            if len(group) > 1 and not group <= selected:
+                offenders |= group & selected
+            elif messages[mid].get("role") == "tool" and group == {mid}:
+                offenders.add(mid)  # a result whose parent the session no longer holds
+        return offenders
+
+    @staticmethod
+    def structural_errors(messages: list[dict[str, Any]]) -> list[str]:
+        """Tool-call closure validation over a built message list."""
+        errors: list[str] = []
+        open_calls: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        open_calls.add(str(tc["id"]))
+            if msg.get("role") == "tool":
+                call_id = str(msg.get("tool_call_id", ""))
+                if call_id not in open_calls:
+                    errors.append(f"tool result {call_id} has no parent assistant tool_call")
+                else:
+                    open_calls.remove(call_id)
+        if open_calls:
+            errors.append(f"assistant tool_calls missing results: {sorted(open_calls)}")
+        return errors
+
+    @classmethod
+    def _choose_drop(
+        cls,
+        messages: list[dict[str, Any]],
+        ids: list[int],
+        protected_ids: set[int],
+        index: dict[int, frozenset[int]],
+    ) -> tuple[set[int], list[int], list[int]] | None:
+        """The next drop: ``(group, remaining, reclosed)`` or None when ``ids`` is empty.
+
+        Whole group, not one id: the closure that selected these ids kept every
+        call beside its results, and a drop has to undo it the same way or the
+        next request carries an orphan. Re-closing afterwards adds nothing back
+        (neither parent nor results are selected any more) and re-anchors the
+        history on a user message.
+
+        Ranked by the group a candidate would remove, not by the candidate:
+        a group with any protected member is a protected group, so a
+        protection boundary that falls inside a parallel-call exchange
+        (``protect_first_n`` counting the call but not its results) cannot be
+        used to take the protected call out through an unprotected result.
+        Unprotected groups go first, in selection order,
+        skipping one whose removal would re-anchor a protected id out of the
+        history; protected groups go only after that, under the same rule;
+        when nothing goes cleanly the first candidate goes anyway -- the last
+        resort trimming has always had, so a prompt that cannot fit still
+        shrinks.
+        """
+        if not ids:
+            return None
+
+        def option(group: set[int]) -> tuple[set[int], list[int], list[int]]:
+            remaining = [mid for mid in ids if mid not in group]
+            return group, remaining, cls.canonical_ids(messages, remaining)
+
+        def anchored(choice: tuple[set[int], list[int], list[int]]) -> bool:
+            _group, remaining, reclosed = choice
+            return not (protected_ids & set(remaining)) - set(reclosed)
+
+        # Unprotected groups first, then protected ones, each only if it leaves
+        # every other protected id anchored; when nothing goes cleanly the first
+        # candidate goes anyway, so a prompt that cannot fit still shrinks.
+        # Re-closing walks the whole session, so a group is re-closed only when
+        # it is the next that could go, and the search stops at the first clean one.
+        seen: set[int] = set()
+        protected: list[set[int]] = []
+        first: tuple[set[int], list[int], list[int]] | None = None
+        for candidate in ids:
+            if candidate in seen:
+                continue
+            group = cls.tool_group(messages, candidate, index)
+            seen |= group
+            if group & protected_ids:
+                protected.append(group)
+                continue
+            choice = option(group)
+            if anchored(choice):
+                return choice
+            if first is None:
+                first = choice
+        for group in protected:
+            choice = option(group)
+            if anchored(choice):
+                return choice
+            if first is None:
+                first = choice
+        return first
+
+    # ------------------------------------------------------------------
+    # Budget-driven trimming
+    # ------------------------------------------------------------------
+
+    @property
+    def context_window_tokens(self) -> int:
+        """The running turn's window; the one built with, outside a turn.
+
+        A property because this object outlives any number of turns and two
+        sessions can be on models of different sizes at once -- an int copied
+        at construction answers for whichever session happened to build it.
+        """
+        return active_window(self._fallback_window)
+
+    @context_window_tokens.setter
+    def context_window_tokens(self, tokens: int) -> None:
+        self._fallback_window = int(tokens)
+
+    @reuse_prompt_tokenization()
+    def trim(
+        self,
+        *,
+        session_messages: list[dict[str, Any]],
+        ids: list[int],
+        protected_ids: set[int],
+        reserved_output: int,
+        build_messages: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
+    ) -> tuple[list[dict[str, Any]], TrimOutcome]:
+        """Close ``ids``, build, and drop until under budget.
+
+        ``build_messages`` maps a history list to the full message list
+        (system + history + user) — the caller owns prompt composition
+        (segments, working state, router skills), the trimmer only owns
+        history selection. Returns the final ``messages`` and a
+        :class:`TrimOutcome`.
+        """
+        canon = self.canonical_ids(session_messages, ids)
+        history = self.history_from_ids(session_messages, canon)
+        messages = build_messages(history)
+
+        estimated, source = estimate_prompt_tokens_chain(
+            self.provider,
+            self.model,
+            messages,
+            self.get_tool_definitions(),
+        )
+        max_prompt = max(1, self.context_window_tokens - reserved_output)
+        warnings: list[str] = []
+        trimmed_ids = list(canon)
+        index = _group_index(session_messages)
+        while estimated > max_prompt and trimmed_ids:
+            choice = self._choose_drop(session_messages, trimmed_ids, protected_ids, index)
+            if choice is None:
+                break
+            group, remaining, reclosed = choice
+            for mid in sorted(group):
+                label = "protected message" if mid in protected_ids else "message"
+                warnings.append(f"dropped {label} {mid} to fit budget")
+            for mid in sorted(set(remaining) - set(reclosed)):
+                warnings.append(f"dropped message {mid}: nothing before the first remaining user message is kept")
+            trimmed_ids = reclosed
+            history = self.history_from_ids(session_messages, trimmed_ids)
+            messages = build_messages(history)
+            estimated, source = estimate_prompt_tokens_chain(
+                self.provider,
+                self.model,
+                messages,
+                self.get_tool_definitions(),
+            )
+
+        # A selection that arrived broken -- a plan naming a result whose parent
+        # the session no longer holds -- is not shipped either; each pass drops
+        # at least one id, so this ends.
+        offenders = self._offenders(session_messages, trimmed_ids, index)
+        while offenders:
+            trimmed_ids = [mid for mid in trimmed_ids if mid not in offenders]
+            for mid in sorted(offenders):
+                warnings.append(f"dropped message {mid}: its tool call or result is not in the selection")
+            history = self.history_from_ids(session_messages, trimmed_ids)
+            messages = build_messages(history)
+            estimated, source = estimate_prompt_tokens_chain(
+                self.provider,
+                self.model,
+                messages,
+                self.get_tool_definitions(),
+            )
+            offenders = self._offenders(session_messages, trimmed_ids, index)
+
+        return messages, TrimOutcome(
+            history=history,
+            included_ids=trimmed_ids,
+            estimated_tokens=estimated,
+            max_prompt_tokens=max_prompt,
+            source=source,
+            warnings=warnings,
+        )
+
+
+__all__ = ["HistoryTrimmer", "TrimOutcome"]

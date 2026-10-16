@@ -1,0 +1,424 @@
+"""``raven plugins`` — inspect installed memory / context plugins.
+
+Reads ``RavenConfig.plugins`` + the live :class:`PluginRegistry`
+and prints a table of activated plugins, what each contributes, and
+which memory backend the current config selects.
+
+Use cases:
+
+- "Where did this plugin come from?" — the command lists discovery
+  sources (bundled / user / project / entry_points) so the user can see
+  where each plugin was resolved from.
+- "Why isn't my plugin loading?" — disabled / failed-to-activate
+  entries surface here.
+- "Which backend is actually active?" — shows the
+  ``config.memory.backend`` selection resolved against the registry.
+
+This is a **read-only** command — no plugin code is invoked beyond
+manifest parsing. ``MemoryBackend.start()`` is not awaited, so no
+network / disk I/O happens against the plugin's runtime systems.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+from rich.markup import escape
+from rich.table import Table
+
+from raven.cli._helpers import load_runtime_config
+
+console = Console()
+
+plugin_app = typer.Typer(help="Manage installed plugins (MCP auth, etc.)")
+
+
+@plugin_app.command("auth")
+def plugin_auth(
+    server: str = typer.Argument(..., help="MCP server name from tools.mcp_servers"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Run (or refresh) the browser OAuth flow for an MCP server.
+
+    Connects once with a throwaway registry: the flow opens your browser,
+    tokens land under ~/.raven/credentials/mcp/, and any running gateway
+    picks them up on its next connect.
+    """
+    import asyncio
+
+    from raven.config.loader import load_config
+
+    load_runtime_config(config_path)
+    cfg = load_config().tools.mcp_servers.get(server)
+    if cfg is None:
+        console.print(f"[red]no MCP server named '{server}' in tools.mcp_servers[/red]")
+        raise typer.Exit(1)
+    if not cfg.enabled:
+        console.print(f"[red]server '{server}' is disabled; set tools.mcp_servers.{server}.enabled first[/red]")
+        raise typer.Exit(1)
+    if cfg.auth != "oauth":
+        console.print(
+            f"[red]server '{server}' has auth='{cfg.auth}'; set tools.mcp_servers.{server}.auth to 'oauth' first[/red]"
+        )
+        raise typer.Exit(1)
+
+    async def _run() -> dict:
+        from raven.agent.tools.registry import ToolRegistry
+        from raven.mcp.manager import MCPConnectionManager
+
+        mgr = MCPConnectionManager(ToolRegistry())
+        try:
+            return await mgr.connect(server, cfg)
+        finally:
+            await mgr.aclose()
+
+    console.print(f"authorizing '{server}' — your browser will open…")
+    snap = asyncio.run(_run())
+    if snap["state"] == "connected":
+        console.print(f"[green]authorized[/green] — {snap['tool_count']} tools available, tokens saved")
+    else:
+        console.print(f"[red]authorization failed[/red] ({snap['state']}): {snap.get('error') or 'unknown error'}")
+        raise typer.Exit(1)
+
+
+def _discovered_by_id(config_path: str | None):
+    from raven.core.plugin_stack import discover_plugins
+
+    ec_config = _load_ec_config(config_path)
+    return ec_config, {d.manifest.id: d for d in discover_plugins(ec_config)}
+
+
+@plugin_app.command("access")
+def plugin_access(
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """What each plugin needs, what its role and grant give it, and whether it may activate."""
+    from raven.core.plugin_stack import plugin_access_policy
+
+    ec_config, found = _discovered_by_id(config_path)
+    policy = plugin_access_policy(ec_config)
+    table = Table(title="Plugin access", show_header=True, header_style="bold cyan")
+    for column in ("Plugin ID", "Version", "Role", "Needs", "Granted", "Activation"):
+        table.add_column(column)
+    for pid, d in sorted(found.items()):
+        dec = policy.decide(d)
+        state = (
+            "[green]allowed[/green]" if dec.allowed else f"[red]denied: needs {', '.join(sorted(dec.missing))}[/red]"
+        )
+        if pid in ec_config.plugins.disabled:
+            state = "[yellow]disabled[/yellow]"
+        table.add_row(
+            pid,
+            dec.version,
+            dec.role,
+            ", ".join(sorted(dec.required)) or "-",
+            ", ".join(sorted(dec.granted)) or ("-" if not dec.grant_note else escape(dec.grant_note)),
+            state,
+        )
+    console.print(table)
+
+
+@plugin_app.command("grant")
+def plugin_grant(
+    plugin_id: str = typer.Argument(..., help="The plugin id"),
+    permission: list[str] = typer.Option([], "--permission", "-p", help="A permission to grant; repeatable"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Consent to exactly the permissions a plugin needs, at its current version.
+
+    Without --permission this shows what would be granted and grants nothing.
+    """
+    from raven.plugins.access import GrantError, GrantStore, required_permissions
+
+    _, found = _discovered_by_id(config_path)
+    d = found.get(plugin_id)
+    if d is None:
+        console.print(f"[red]no plugin {plugin_id!r} is installed[/red]")
+        raise typer.Exit(1)
+    needed = sorted(required_permissions(d.manifest))
+    if not permission:
+        flags = " ".join(f"-p {p}" for p in needed)
+        console.print(f"{plugin_id} {d.manifest.version} needs: {', '.join(needed) or 'nothing'}")
+        console.print(f"To consent: raven plugin grant {plugin_id} {flags}")
+        return
+    try:
+        grant = GrantStore().grant(d.manifest, permission, location=d.location)
+    except GrantError as exc:
+        console.print(f"[red]not granted:[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"granted {', '.join(grant.permissions)} to {plugin_id} {grant.version} ({grant.granted_by}); "
+        "a running host picks it up when it reloads"
+    )
+
+
+@plugin_app.command("revoke")
+def plugin_revoke(plugin_id: str = typer.Argument(..., help="The plugin id")) -> None:
+    """Withdraw a plugin's grant; it is not activated again until it is granted again."""
+    from raven.plugins.access import GrantStore
+
+    if not GrantStore().revoke(plugin_id):
+        console.print(f"[yellow]{plugin_id} has no grant[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"revoked the grant of {plugin_id}")
+
+
+def _scheduler(config_path: str | None):
+    from raven.core.plugin_stack import build_plugin_registry, build_plugin_scheduler
+
+    ec_config = _load_ec_config(config_path)
+    registry = build_plugin_registry(ec_config)
+    workspace = Path(getattr(ec_config, "workspace_path", Path.cwd()))
+    return build_plugin_scheduler(workspace, ec_config, registry=registry)
+
+
+@plugin_app.command("schedule")
+def plugin_schedule(
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """The scheduled hooks of the active plugins, with their next and last runs."""
+    import time as _time
+
+    scheduler = _scheduler(config_path)
+    if scheduler is None:
+        console.print("no active plugin has a scheduled hook")
+        return
+    rows = scheduler.reconcile()
+    table = Table(title="Scheduled plugin hooks", show_header=True, header_style="bold cyan")
+    for column in ("Hook", "Cron", "Timezone", "Next run", "Last run"):
+        table.add_column(column)
+
+    def when(ms) -> str:
+        return _time.strftime("%Y-%m-%d %H:%M", _time.localtime(ms / 1000)) if ms else "-"
+
+    for key in sorted(scheduler.specs):
+        row = rows.get(key, {})
+        last = f"{when(row.get('last_run_ms'))} {row.get('last_status', '')}".strip()
+        table.add_row(key, row.get("cron", ""), row.get("timezone", ""), when(row.get("next_run_ms")), last)
+    console.print(table)
+
+
+@plugin_app.command("fire")
+def plugin_fire(
+    key: str = typer.Argument(..., help="The hook, as <plugin id>:<name>"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Run one scheduled hook now, outside its schedule (the run is journalled as manual)."""
+    import asyncio
+
+    scheduler = _scheduler(config_path)
+    if scheduler is None or key not in scheduler.specs:
+        console.print(f"[red]no active scheduled hook {key!r}[/red]")
+        raise typer.Exit(1)
+    status = asyncio.run(scheduler.fire_now(key))
+    detail = (scheduler.book.rows().get(key) or {}).get("last_detail", "")
+    console.print(f"{key}: {status}" + (f" -- {escape(detail)}" if detail else ""))
+    if status != "ok":
+        raise typer.Exit(1)
+
+
+@plugin_app.command("runs")
+def plugin_runs(
+    key: str = typer.Argument("", help="Only this hook"),
+    limit: int = typer.Option(30, "--limit"),
+) -> None:
+    """The scheduled hooks' journal: scheduled, fired, skipped, failed."""
+    import json as _json
+    import time as _time
+
+    from raven.plugins.schedule import ScheduleBook
+
+    rows = ScheduleBook().journal(limit=limit, key=key or None)
+    if not rows:
+        console.print("no runs yet")
+        return
+    for row in rows:
+        stamp = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(row["at"] / 1000))
+        rest = {k: v for k, v in row.items() if k not in ("at", "event", "hook")}
+        console.print(f"{stamp}  {row['hook']}  {row['event']:<11} {escape(_json.dumps(rest))}", highlight=False)
+
+
+def register(app: typer.Typer) -> None:
+    """Attach the ``plugins`` command to ``app``."""
+
+    @app.command()
+    def plugins(
+        config_path: Optional[str] = typer.Option(
+            None,
+            "--config",
+            "-c",
+            help="Path to config file (default: ~/.raven/config.json)",
+        ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose",
+            "-v",
+            help="Show manifest paths + factory references.",
+        ),
+    ) -> None:
+        """List installed plugins + the active memory backend."""
+        # Import lazily so ``raven --help`` doesn't pay for plugin
+        # discovery on every invocation.
+        from raven.core.plugin_stack import discover_plugins
+        from raven.plugins import PluginRegistry
+
+        ec_config = _load_ec_config(config_path)
+
+        # Discover separately from activation so the table can show
+        # both shadowed (lower-priority) plugins AND disabled ones,
+        # not just the live set. Same sources the live boot scans.
+        discovered = discover_plugins(ec_config)
+
+        from raven.core.plugin_stack import plugin_access_policy
+
+        registry = PluginRegistry()
+        disabled = frozenset(ec_config.plugins.disabled)
+        # The live boot's activation policy, so a plugin its role and grants do
+        # not cover reads here as failed with the same reason.
+        registry.activate(discovered, disabled=disabled, access=plugin_access_policy(ec_config))
+
+        _render_plugin_table(discovered, registry, disabled, verbose=verbose)
+        _render_backend_selection(ec_config, registry)
+
+
+def _load_ec_config(config_path: str | None):
+    """Load RavenConfig with the same fallback the other CLI
+    commands use. Lazy import so module import is cheap."""
+    from raven.config.raven import load_raven_config
+
+    # ``load_runtime_config`` is the canonical base-config loader; we
+    # need the extension blocks too, so pull via the dedicated
+    # raven loader. ``load_runtime_config`` is invoked for parity
+    # with other CLI commands (sets ``set_config_path`` so downstream
+    # readers see the same file).
+    load_runtime_config(config_path)
+    return load_raven_config(
+        Path(config_path) if config_path else None,
+    )
+
+
+def _render_plugin_table(
+    discovered,
+    registry,
+    disabled,
+    *,
+    verbose: bool,
+) -> None:
+    """Print one row per discovered plugin with its status."""
+
+    if not discovered:
+        console.print(
+            "[yellow]No plugins discovered.[/yellow] The everos backend is "
+            "its own distribution — install [bold]everos-memory[/bold] — "
+            "or drop a manifest under [bold]~/.raven/plugins/[/bold].",
+        )
+        return
+
+    table = Table(
+        title="Raven plugins",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Plugin ID")
+    table.add_column("Version")
+    table.add_column("Source")
+    table.add_column("Status")
+    table.add_column("Memory backends")
+    if verbose:
+        table.add_column("Factory")
+
+    activated_ids = set(registry.activated_ids())
+    failures = {f.plugin_id: f for f in registry.activation_failures()}
+    for record in discovered:
+        mf = record.manifest
+        pid = mf.id
+        if pid in disabled:
+            status = "[red]disabled[/red]"
+        elif pid in activated_ids:
+            status = "[green]activated[/green]"
+        elif pid in failures:
+            status = "[red]failed[/red]"
+        else:
+            status = "[yellow]not activated[/yellow]"
+        backends = ", ".join(c.name for c in mf.contributes.memory_backends) or "(none)"
+
+        row = [
+            pid,
+            mf.version,
+            _source_label(record.source),
+            status,
+            backends,
+        ]
+        if verbose:
+            factories = "; ".join(c.factory for c in mf.contributes.memory_backends)
+            row.append(factories or "(none)")
+        table.add_row(*row)
+    console.print(table)
+    for failure in failures.values():
+        console.print(
+            f"[red]{escape(failure.plugin_id)}[/red] failed to load: {escape(failure.reason)}", highlight=False
+        )
+
+
+def _source_label(source) -> str:
+    """Friendly label for a :class:`ManifestOrigin` enum value."""
+    from raven.plugins import ManifestOrigin
+
+    return {
+        ManifestOrigin.CHECKOUT: "project",
+        ManifestOrigin.ENTRY_POINTS: "entry_points",
+        ManifestOrigin.PROJECT: "project",
+        ManifestOrigin.USER: "user",
+        ManifestOrigin.BUNDLED: "bundled",
+    }.get(source, str(source))
+
+
+def _render_backend_selection(ec_config, registry) -> None:
+    """Show which memory backend the current config activates."""
+    selected = ec_config.memory.backend
+    if selected is None:
+        console.print(
+            "\n[bold]Active memory backend:[/bold] [dim]none[/dim] "
+            "([italic]memory.backend is null — AgentLoop uses its "
+            "legacy memory path[/italic])",
+        )
+        return
+
+    available = registry.memory_backend_names()
+    if selected not in available:
+        console.print(
+            f"\n[bold]Active memory backend:[/bold] [red]{selected}[/red] [red](not available)[/red]",
+        )
+        console.print(
+            f"  [dim]Registered: {', '.join(available) or '(none)'}[/dim]",
+        )
+        console.print(
+            "  [dim]AgentLoop will fall back to the legacy memory path.[/dim]",
+        )
+        return
+
+    # Find the plugin id that contributes the selected backend
+    owner_id = None
+    for pid in registry.activated_ids():
+        mf = registry.manifest_for(pid)
+        if mf is None:
+            continue
+        for c in mf.contributes.memory_backends:
+            if c.name == selected:
+                owner_id = pid
+                break
+        if owner_id:
+            break
+
+    console.print(
+        f"\n[bold]Active memory backend:[/bold] [green]{selected}[/green] [dim](from plugin: {owner_id})[/dim]",
+    )
+    console.print(
+        f"  [dim]User id:  {ec_config.memory.user_id}[/dim]",
+    )
+    console.print(
+        f"  [dim]Agent id: {ec_config.memory.agent_id}[/dim]",
+    )

@@ -1,0 +1,85 @@
+default_language_version:
+  python: python3.12
+
+exclude: '^(benchmarks/.*/(data|results|output)/.*|ui-tui/src/rpc/generated\.ts)$'
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        # The bundled brand marks are byte-identical copies of what their
+        # sources ship, and that is the attribution LICENSES keeps: checkable
+        # with `cmp` rather than by trust. Upstream writes some of them with no
+        # trailing newline, so appending one would quietly end that -- for
+        # whichever files a PR happened to touch, which is worse than a
+        # convention nobody follows. All three asset trees make the same claim.
+        exclude: ^ui-web/src/assets/(providers|agents|channels)/.*\.svg$
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+        # The ten bundled deck templates are tracked with the maintainer's
+        # explicit approval (AGENTS.md section 7): a clone that cannot build a
+        # deck is not an install, and seven of them clear the ceiling. The gate
+        # CI enforces is scripts/check_large_files.py, which allows these by
+        # pinned name out of its own PINNED_DECK_TEMPLATES roster rather than by
+        # directory, so an unpinned .pptx dropped here is still refused there.
+        exclude: ^plugins-dist/ppt-engine/raven_ppt/assets/templates/[^/]+\.pptx$
+      - id: check-merge-conflict
+      - id: detect-private-key
+        # The match is a bare header line with no key body, written as a
+        # fixture for the agent's own secret redaction.
+        exclude: ^tests/test_runtime_checkpoint_deep\.py$
+
+  - repo: local
+    hooks:
+      - id: conventional-commit-message
+        name: conventional commit message
+        entry: env PYTHONPATH=. python3 scripts/check_commit_file.py
+        language: system
+        stages: [commit-msg]
+
+
+      - id: ui-rpc-contract
+        name: ui rpc contract in sync
+        entry: bash -c '[ -d ui-web/node_modules ] || exit 0; npm run gen:check --prefix ui-web'
+        language: system
+        pass_filenames: false
+        files: '^rpc-schema/openrpc\.json$'
+
+      - id: eslint-ui-tui
+        name: eslint (ui-tui)
+        entry: bash -c '[ -d ui-tui/node_modules ] || exit 0; cd ui-tui && npm run lint'
+        language: system
+        pass_filenames: false
+        files: '^ui-tui/src/.*\.(ts|tsx)$'
+
+      - id: prettier-ui-tui
+        name: prettier (ui-tui)
+        entry: bash -c '[ -d ui-tui/node_modules ] || exit 0; cd ui-tui && npx prettier --check "src/**/*.{ts,tsx}"'
+        language: system
+        pass_filenames: false
+        files: '^ui-tui/src/.*\.(ts|tsx)$'
+
+      - id: eslint-bridge
+        name: eslint (bridge)
+        entry: bash -c '[ -d bridge/node_modules ] || exit 0; cd bridge && npm run lint'
+        language: system
+        pass_filenames: false
+        files: '^bridge/src/.*\.(ts|tsx)$'
+
+      - id: prettier-bridge
+        name: prettier (bridge)
+        entry: bash -c '[ -d bridge/node_modules ] || exit 0; cd bridge && npx prettier --check "src/**/*.{ts,tsx}"'
+        language: system
+        pass_filenames: false
+        files: '^bridge/src/.*\.(ts|tsx)$'

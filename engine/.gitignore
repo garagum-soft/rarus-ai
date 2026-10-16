@@ -1,0 +1,161 @@
+.worktrees/
+.assets
+.env
+node_modules/
+bridge/node_modules
+ui-tui/node_modules
+ui-web/node_modules
+bridge/dist/
+# Generated architecture/diagram SVGs at repo root (not source)
+/*.svg
+
+# Engineering working notes — plan + process records, never committed
+revice_notes/
+*.pyc
+dist/
+build/
+*.egg-info/
+*.egg
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzz
+.venv/
+venv/
+__pycache__/
+poetry.lock
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+coverage-baseline-candidate.json
+htmlcov/
+botpy.log
+nano.*.save
+swebench_jobs/
+*.env
+# The local override every env template points a credential at. It needs its
+# own rule: `*.env` above matches a name ending in `.env`, and these end in
+# `.local`, so nothing here reached them and `git add -A` would have staged a
+# real key. Whole family, not just docker's -- the agents ship `.env.example`
+# files that ask for the same neighbour, and the wheel publisher already treats
+# a packaged `.env.local` as a leaked secret.
+*.env.local
+key.env
+# The Compose template, and the only env file in the repo. It carries settings
+# and empty placeholders, never a credential -- a real key belongs in
+# docker/.env.local, which the `*.env.local` rule above ignores.
+!docker/.env
+sty_readme.md
+CLAUDE.local.md
+logs/
+.DS_Store
+.claude/
+.vscode/
+tmp.sh
+.work_context/
+# Runtime-discipline shadow checkpoint repo — never commit snapshots
+.raven/
+.hermes/
+
+# SkillForge dense retrieval cache (auto-built per-deployment, never tracked)
+.skill_index/
+.cache/skill_index/
+
+# Large benchmark datasets — download via `hf download gilfastino/PROBE` on demand
+benchmarks/proactivity_eval/data/probe/inputs/
+benchmarks/proactivity_eval/data/probe/outputs/
+benchmarks/proactivity_eval/data/probe/*.zip
+benchmarks/proactivity_eval/data/probe/.cache/
+
+# Eval run artifacts (benchmark products — reproducible via runners, no need to track)
+benchmarks/clawbench/results/
+benchmarks/pinchbench/benchmark.log
+benchmarks/pinchbench/results/*.json
+benchmarks/proactivity_eval/output/**/*.json
+benchmarks/proactivity_eval/output/**/*.md
+benchmarks/proactivity_eval/output/**/*.log
+benchmarks/proactivity_eval/output/**/*.jsonl
+
+# Local-only Streamlit inspector for output/ (depends on gitignored eval data)
+benchmarks/proactivity_eval/viewer/
+
+# Runner per-user config overrides (tracked: runners.config.yaml)
+benchmarks/proactivity_eval/runners.config.local.yaml
+benchmarks/proactivity_eval/runners/benchmarks/*/*.local.yaml
+benchmarks/proactivity_eval/runners/agents/*/*.local.yaml
+
+# Discovery-case simulator artifacts — regenerated per sim run, not fixtures
+benchmarks/proactivity_eval/data/discovery/*/sessions/
+benchmarks/proactivity_eval/data/discovery/*/.learnings/
+benchmarks/proactivity_eval/data/discovery/*/memory/*.lock
+
+# Discovery-case simulator: agent tool-use outputs from sim runs
+# (LLM emits these into the workspace; vary per run, not fixtures)
+benchmarks/proactivity_eval/data/discovery/*/auth_*.md
+benchmarks/proactivity_eval/data/discovery/*/auth_*.py
+benchmarks/proactivity_eval/data/discovery/*/cache_*.md
+benchmarks/proactivity_eval/data/discovery/*/rate_limit_*.py
+benchmarks/proactivity_eval/data/discovery/*/weekly_status_*.md
+
+# Skill-retrieval demo: the working directory and agent-home trees a local run writes.
+demos/skill_retrieval/output/
+demos/skill_retrieval/sessions/
+demos/skill_retrieval/user_memory/
+demos/skill_retrieval/agent_memory/
+
+# Scratch workspace for local sub-agent / DAG testing.
+/tmp/
+.omo/*
+.ruff_cache/
+
+# Sub-agents are opt-in, one folder at a time: a folder here can hold a docker
+# image tar or a private checkout, so the default stays "ignored" and each
+# tracked one is named. Everything unsafe *inside* a tracked folder - secrets,
+# rendered configs, run/session/cache/ledger state, the vendored .venv - is
+# covered by that folder's own .gitignore, which git only consults once the
+# parent stops being excluded.
+
+# Report assets AGENTS.md bars from the repo whatever carries them. The
+# vendored upstream trees ship benchmark PDFs, doc diagrams and a demo
+# screenshot; two of them are over the 1 MiB limit that CI enforces, and the
+# exemption for application source trees does not reach in here.
+#
+# Kept in step with BLOCKED_ASSET_EXTENSIONS in scripts/check_large_files.py,
+# which is the list CI actually enforces -- a narrower list here would let the
+# next upstream refresh track a file that then fails CI a long way from its
+# cause. These trees are web-adjacent, so an icon or a webp is a plausible
+# thing for the next release to carry.
+
+# Playwright MCP session artifacts (console logs, page snapshots, screenshots)
+.playwright-mcp/
+demos/oncall_heat2d/.raven-demo-home/
+
+# Generated benchmark reports (written by the real_llm integration tests).
+/reports/
+
+# Raven-PPT deck intermediates, left in the checkout when a session's workspace
+# is the agent's own folder; a dispatched run writes under the state root.
+agents/raven-ppt/deck/
+agents/raven-ppt/materials/
+
+# Model weights and dictionaries fetched by scripts/fetch_resources.py: the
+# word dictionary the tokenizer segments with, the corpora nltk reads beside
+# it, and the deepdoc vision models the PDF parser runs. Out of git because the
+# smallest of them is eight times the 1 MiB ceiling AGENTS.md section 7 sets --
+# `make install` and the image build download them instead.
+raven/core/res/
+raven/knowledge/res/
+# The deck template picker's covers, rendered from the templates beside them by
+# scripts/bake_deck_template_covers.py and carried by the ppt-engine wheel as a
+# hatch artifact. Generated from tracked inputs, and images besides
+# (AGENTS.md section 7), so they are built rather than committed.
+plugins-dist/ppt-engine/raven_ppt/assets/templates/covers/
+
+# MkDocs build output. The site is published from CI; HTML is never committed
+# (AGENTS.md section 7).
+docs-site/site/

@@ -1,0 +1,628 @@
+"""A scheduler lane's FIFO execution and its emit-guard and stamping rules."""
+
+import asyncio
+
+from loguru import logger
+
+from raven.spine import (
+    AnswerlessTurnError,
+    ChatType,
+    Notice,
+    NoticeKind,
+    Origin,
+    Source,
+    Text,
+    TurnEnded,
+    TurnFailed,
+    TurnOutcome,
+    TurnRequest,
+    TurnStarted,
+    Usage,
+)
+from raven.spine.scheduler import Lane, OriginPools
+
+
+def _req(text: str = "hi") -> TurnRequest:
+    src = Source(channel="t", chat_id="c", sender_id="u", chat_type=ChatType.DM)
+    return TurnRequest(origin=Origin.USER, source=src, text=text)
+
+
+def _collector():
+    events: list = []
+
+    async def sink(event) -> None:
+        events.append(event)
+
+    return events, sink
+
+
+def _lane(runner) -> Lane:
+    return Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=_collector()[1], conversation_id="c")
+
+
+# --- runners (fakes; the real runner is the agent loop) ---
+
+
+class SuccessRunner:
+    def __init__(self, outcome: TurnOutcome | None = None):
+        self.outcome = outcome or TurnOutcome(usage=Usage(1, 2, 3), explicit_reply=True)
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        await emit(Text(content="reply"))
+        return self.outcome
+
+
+class OrderRunner:
+    def __init__(self):
+        self.order: list[str] = []
+        self.live = 0
+        self.max_live = 0
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        self.live += 1
+        self.max_live = max(self.max_live, self.live)
+        self.order.append(req.text)
+        await asyncio.sleep(0)
+        self.live -= 1
+        return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+
+class HangingRunner:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        self.started.set()
+        await asyncio.Event().wait()  # hang until cancelled
+        return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+
+class FailingRunner:
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        raise ValueError("boom")
+
+
+class RecordingHangRunner:
+    def __init__(self):
+        self.ran: list[str] = []
+        self.first_started = asyncio.Event()
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        self.ran.append(req.text)
+        if len(self.ran) == 1:
+            self.first_started.set()
+            await asyncio.Event().wait()  # the first turn hangs until cancelled
+        return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+
+class LifecycleEmittingRunner:
+    def __init__(self):
+        self.rejected: bool | None = None
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        try:
+            await emit(TurnStarted())  # a runner must not emit lifecycle
+            self.rejected = False
+        except TypeError:
+            self.rejected = True
+        return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+
+class StampProbeRunner:
+    def __init__(self, source=None):
+        self._source = source
+
+    async def run(self, req, emit, drain) -> TurnOutcome:
+        await emit(Text(content="x", source=self._source))
+        return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+
+# --- tests ---
+
+
+async def test_lane_runs_fifo_one_at_a_time():
+    runner = OrderRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=5, system=5), sink=sink, conversation_id="c")
+    futs = [lane.submit(_req(t)) for t in ("a", "b", "c")]
+    await asyncio.gather(*futs)
+    assert runner.order == ["a", "b", "c"]  # FIFO
+    assert runner.max_live == 1  # single running turn even with a 5-slot pool
+
+
+async def test_success_emits_started_then_deliverables_then_ended():
+    runner = SuccessRunner(TurnOutcome(usage=Usage(5, 7, 12), explicit_reply=True))
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    await lane.submit(_req())
+    assert isinstance(events[0], TurnStarted)
+    assert isinstance(events[1], Text)
+    assert isinstance(events[-1], TurnEnded)
+    assert events[-1].usage == Usage(5, 7, 12)
+    assert events[-1].explicit_reply is True
+
+
+async def test_emit_guard_rejects_lifecycle_events_at_runtime():
+    # The only enforcement of "a runner cannot emit lifecycle" without a static
+    # checker: the emit closure must reject it at runtime.
+    runner = LifecycleEmittingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    await lane.submit(_req())
+    assert runner.rejected is True
+
+
+async def test_emit_stamps_source_when_absent_and_preserves_explicit():
+    src = Source(channel="t", chat_id="c", sender_id="u", chat_type=ChatType.DM)
+    other = Source(channel="x", chat_id="y", sender_id="z", chat_type=ChatType.GROUP)
+
+    events1, sink1 = _collector()
+    lane1 = Lane(
+        runner=StampProbeRunner(source=None), pools=OriginPools(user=1, system=1), sink=sink1, conversation_id="c"
+    )
+    await lane1.submit(TurnRequest(origin=Origin.USER, source=src, text="x"))
+    text1 = next(e for e in events1 if isinstance(e, Text))
+    assert text1.source == src  # stamped with the request's source
+
+    events2, sink2 = _collector()
+    lane2 = Lane(
+        runner=StampProbeRunner(source=other), pools=OriginPools(user=1, system=1), sink=sink2, conversation_id="c"
+    )
+    await lane2.submit(TurnRequest(origin=Origin.USER, source=src, text="x"))
+    text2 = next(e for e in events2 if isinstance(e, Text))
+    assert text2.source == other  # explicit source is not overwritten
+
+
+async def test_emit_stamps_source_on_a_non_text_deliverable():
+    # A Notice (like ToolEvent/Reasoning) carries no source from the runner;
+    # emit stamps the turn's source so the hub can route it.
+    src = Source(channel="tg", chat_id="1", sender_id="u", chat_type=ChatType.DM)
+    events, sink = _collector()
+
+    class R:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            await emit(Notice(kind=NoticeKind.PROGRESS))  # no source
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+    lane = Lane(runner=R(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:1")
+    await lane.submit(TurnRequest(origin=Origin.USER, source=src, text="x"))
+    notice = next(e for e in events if isinstance(e, Notice))
+    assert notice.source == src  # stamped with the turn's source
+
+
+async def test_emit_stamps_conversation_id_and_preserves_explicit():
+    src = Source(channel="tg", chat_id="1", sender_id="u", chat_type=ChatType.DM)
+
+    class EmitCid:
+        def __init__(self, cid):
+            self._cid = cid
+
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            await emit(Text(content="x", conversation_id=self._cid))
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+    events1, sink1 = _collector()
+    lane1 = Lane(runner=EmitCid(None), pools=OriginPools(user=1, system=1), sink=sink1, conversation_id="tg:1")
+    await lane1.submit(TurnRequest(origin=Origin.USER, source=src, text="x"))
+    text1 = next(e for e in events1 if isinstance(e, Text))
+    assert text1.conversation_id == "tg:1"  # stamped with the lane key
+
+    events2, sink2 = _collector()
+    lane2 = Lane(runner=EmitCid("explicit"), pools=OriginPools(user=1, system=1), sink=sink2, conversation_id="tg:1")
+    await lane2.submit(TurnRequest(origin=Origin.USER, source=src, text="x"))
+    text2 = next(e for e in events2 if isinstance(e, Text))
+    assert text2.conversation_id == "explicit"  # explicit conversation_id not overwritten
+
+
+async def test_worker_stamps_conversation_id_on_lifecycle_events():
+    # Lifecycle events carry no source (never routed) but do carry conversation_id
+    # — the key the hub correlates a stream by, e.g. to close it on TurnFailed.
+    runner = SuccessRunner(TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False))
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:7")
+    await lane.submit(_req())
+    started = next(e for e in events if isinstance(e, TurnStarted))
+    ended = next(e for e in events if isinstance(e, TurnEnded))
+    assert started.conversation_id == "tg:7"
+    assert ended.conversation_id == "tg:7"
+
+
+async def test_turn_failed_carries_conversation_id():
+    runner = FailingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:9")
+    await lane.submit(_req())
+    failed = next(e for e in events if isinstance(e, TurnFailed))
+    assert failed.conversation_id == "tg:9"
+
+
+async def test_worker_mints_a_turn_id_when_the_request_carries_none():
+    # Every submit path but turn.send leaves turn_id unset, so the lane is what
+    # makes those turns identifiable at all -- and a consumer that has to tell an
+    # announce turn's end from the client turn queued behind it on the same lane
+    # has nothing else to go on.
+    runner = SuccessRunner(TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False))
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:7")
+    await lane.submit(_req())
+    started = next(e for e in events if isinstance(e, TurnStarted))
+    ended = next(e for e in events if isinstance(e, TurnEnded))
+    assert started.turn_id
+    assert ended.turn_id == started.turn_id
+
+
+async def test_a_supplied_turn_id_is_not_re_minted():
+    # turn.send returns its id to the client and puts it on message.start, so the
+    # lifecycle events have to carry that same value or the client's correlation
+    # key stops matching the completion it is waiting for.
+    src = Source(channel="t", chat_id="c", sender_id="u", chat_type=ChatType.DM)
+    runner = SuccessRunner(TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False))
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:7")
+    await lane.submit(TurnRequest(origin=Origin.USER, source=src, text="hi", turn_id="t-known"))
+    started = next(e for e in events if isinstance(e, TurnStarted))
+    ended = next(e for e in events if isinstance(e, TurnEnded))
+    assert started.turn_id == "t-known"
+    assert ended.turn_id == "t-known"
+
+
+async def test_a_failed_turn_reports_its_own_turn_id():
+    runner = FailingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:9")
+    await lane.submit(_req())
+    started = next(e for e in events if isinstance(e, TurnStarted))
+    failed = next(e for e in events if isinstance(e, TurnFailed))
+    assert failed.turn_id and failed.turn_id == started.turn_id
+
+
+async def test_the_runner_sees_the_resolved_turn_id():
+    # The lane puts the id back on the request, so the runner and the lifecycle
+    # events agree on one value -- what lets the RPC runner stamp an approval
+    # binding and its synthetic tool_call_id from the turn instead of a side map.
+    seen: list[str | None] = []
+
+    class RecordingRunner:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            seen.append(req.turn_id)
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+    events, sink = _collector()
+    lane = Lane(runner=RecordingRunner(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:7")
+    await lane.submit(_req())
+    ended = next(e for e in events if isinstance(e, TurnEnded))
+    assert seen == [ended.turn_id] and seen[0]
+
+
+async def test_run_exception_yields_turn_failed_and_resolves_future():
+    runner = FailingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    result = await lane.submit(_req())
+    failed = next(e for e in events if isinstance(e, TurnFailed))
+    assert failed.cancelled is False
+    assert failed.error == "ValueError: boom"
+    # The future carries the same report, not a bare None: the awaiting
+    # submitter and the event subscriber learn the failure in one wording.
+    assert result is failed
+    # A crash, not a report the runner wrote: a consumer deciding what to show a
+    # stranger must not quote this text.
+    assert failed.reported is False
+
+
+async def test_a_turn_the_runner_worded_itself_is_marked_reported():
+    """``AnswerlessTurnError`` says the runner already worded the failure for a
+    reader. The flag is how a consumer tells that from a crash's message without
+    re-parsing the text: the gateway quotes the first and refuses the second."""
+
+    class ReportingRunner:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            raise AnswerlessTurnError("The model returned no content on 4 attempts.")
+
+    events, sink = _collector()
+    lane = Lane(runner=ReportingRunner(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    await lane.submit(_req())
+    failed = next(e for e in events if isinstance(e, TurnFailed))
+    assert failed.reported is True
+    assert failed.error == "The model returned no content on 4 attempts."
+
+
+async def test_a_failure_with_no_message_still_names_itself():
+    """A stalled model stream raises a bare TimeoutError, whose str() is empty;
+    the event used to carry that emptiness, and a client was told the turn
+    failed and nothing else."""
+
+    class SilentRunner:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            raise TimeoutError()
+
+    events, sink = _collector()
+    lane = Lane(runner=SilentRunner(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    await lane.submit(_req())
+    failed = next(e for e in events if isinstance(e, TurnFailed))
+    assert failed.error == "TimeoutError"
+
+
+def test_a_message_that_already_names_its_class_is_not_prefixed_twice():
+    """Several SDK errors open with their own class name; the event must read
+    `APIError: rate limited`, not `APIError: APIError: rate limited`."""
+    from raven.spine.scheduler import describe_failure
+
+    class APIError(Exception):
+        pass
+
+    assert describe_failure(APIError("APIError: rate limited")) == "APIError: rate limited"
+    assert describe_failure(APIError("rate limited")) == "APIError: rate limited"
+    assert describe_failure(APIError("")) == "APIError"
+    assert describe_failure(ValueError("boom")) == "ValueError: boom"
+
+
+def test_a_crash_message_is_bounded_before_it_becomes_the_report():
+    """This text reaches a cron job record and a session marker, not only a log,
+    and an SDK exception carries whatever it likes -- a chained trace, a whole
+    HTTP body. A runner's own report is not cut here: it arrives already bounded
+    by the layer that knows what it is cutting."""
+    from raven.spine.events import TURN_FAILURE_TEXT_MAX
+    from raven.spine.scheduler import describe_failure
+
+    crash = describe_failure(ValueError("z" * 5000))
+    assert len(crash) == TURN_FAILURE_TEXT_MAX and crash.endswith("...")
+    assert crash.startswith("ValueError: ")
+    assert describe_failure(AnswerlessTurnError("y" * 5000)) == "y" * 5000
+
+
+def test_a_turn_failure_is_reported_in_its_own_words():
+    """A runner that raises ``AnswerlessTurnError`` has already worded the failure for a
+    reader, so the event carries the text as it is, with no class name in front."""
+    from raven.spine import AnswerlessTurnError
+    from raven.spine.scheduler import describe_failure
+
+    assert describe_failure(AnswerlessTurnError("Error calling LLM (first_byte_timeout): no first byte")) == (
+        "Error calling LLM (first_byte_timeout): no first byte"
+    )
+    assert describe_failure(AnswerlessTurnError("")) == "AnswerlessTurnError"
+
+
+async def test_run_exception_is_logged_with_a_traceback():
+    # The failure event carries only str(exc) to the front-end, so without a log
+    # here the process side of a failed turn is completely silent.
+    runner = FailingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="tg:11")
+    lines: list[str] = []
+    sink_id = logger.add(lambda m: lines.append(str(m)), level="ERROR", format="{message}")
+    try:
+        await lane.submit(_req())
+    finally:
+        logger.remove(sink_id)
+    matched = [line for line in lines if "boom" in line]
+    assert matched, f"the failed turn logged nothing at ERROR; captured={lines}"
+    assert "tg:11" in matched[0]  # which conversation died
+    assert "ValueError" in matched[0]  # the traceback, not just str(exc)
+
+
+async def test_cancelled_turn_is_not_logged_as_an_error():
+    # A user /stop is a normal outcome, not a failure worth an ERROR line.
+    runner = HangingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    lines: list[str] = []
+    sink_id = logger.add(lambda m: lines.append(str(m)), level="ERROR", format="{message}")
+    try:
+        fut = lane.submit(_req())
+        await runner.started.wait()
+        lane.cancel()
+        await asyncio.wait_for(fut, timeout=1.0)
+    finally:
+        logger.remove(sink_id)
+    assert lines == []
+
+
+async def test_cancel_resolves_future_with_cancelled_terminal():
+    runner = HangingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    fut = lane.submit(_req())
+    await runner.started.wait()  # the turn is genuinely running
+    lane.cancel()
+    result = await asyncio.wait_for(fut, timeout=1.0)  # must resolve, not hang
+    assert result is None
+    assert any(isinstance(e, TurnFailed) and e.cancelled for e in events)
+
+
+async def test_cancel_after_completion_does_not_double_resolve():
+    # The dangerous twin of cancel-resolves: a cancel arriving after the turn
+    # already completed must not resolve the future a second time
+    # (set_result twice -> InvalidStateError). cancel only touches run_task,
+    # which is already done (a no-op), never the future.
+    runner = SuccessRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    fut = lane.submit(_req())
+    result = await fut  # turn completes, worker resolves exactly once
+    lane.cancel()  # late cancel: run_task is None/done -> no-op, future untouched
+    await asyncio.sleep(0)
+    assert isinstance(result, TurnOutcome)  # succeeded -> resolved with its outcome
+    assert fut.done() and fut.exception() is None
+
+
+async def test_cancel_drains_queue_resolving_pending_as_cancelled():
+    # cancel stops the running turn AND drains the queue: every queued turn's
+    # future resolves (as cancelled) and none of them runs. The dropped count
+    # feeds the "Stopped N" report.
+    runner = RecordingHangRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    f1 = lane.submit(_req("a"))  # runs, hangs
+    f2 = lane.submit(_req("b"))  # queued
+    f3 = lane.submit(_req("c"))  # queued
+    await runner.first_started.wait()
+    stopped = lane.cancel()
+    assert stopped == 3  # 1 running + 2 queued
+    for fut in (f1, f2, f3):
+        assert await asyncio.wait_for(fut, timeout=1.0) is None
+    assert runner.ran == ["a"]  # the queued turns never ran
+
+
+async def test_cancel_during_setup_window_stops_the_turn():
+    # The setup window (after a turn leaves the queue, before its body runs) is
+    # only observable with an awaiting sink. A cancel landing there must stop the
+    # turn, not let it run to completion. (Earlier no-await fakes hid this race.)
+    ran: list[str] = []
+    at_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def sink(event) -> None:
+        if isinstance(event, TurnStarted):
+            at_started.set()
+            await release.wait()
+
+    class R:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            ran.append(req.text)
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+    lane = Lane(runner=R(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    fut = lane.submit(_req("X"))
+    await at_started.wait()  # worker suspended mid-setup
+    stopped = lane.cancel()
+    release.set()
+    assert await asyncio.wait_for(fut, timeout=1.0) is None
+    assert stopped == 1  # cancel saw the in-flight turn
+    assert ran == []  # and the turn never ran
+
+
+async def test_cancel_before_turnstarted_still_reports_the_turns_end():
+    # A turn cancelled before it acquires the pool (hence before TurnStarted) still
+    # emits exactly one terminal event naming itself. It used to emit nothing, on
+    # the reasoning that an unpaired TurnFailed is an orphan -- but silence is worse
+    # than an orphan: a consumer that releases a turn's resources against the
+    # ending turn's id never learns this turn is over, and holds them for good.
+    ran: list[str] = []
+    events, sink = _collector()
+    pools = OriginPools(user=1, system=1)
+    await pools._for_origin(Origin.USER).acquire()  # exhaust the user pool
+
+    class R:
+        async def run(self, req, emit, drain) -> TurnOutcome:
+            ran.append(req.text)
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=False)
+
+    lane = Lane(runner=R(), pools=pools, sink=sink, conversation_id="c")
+    fut = lane.submit(_req("X"))
+    await asyncio.sleep(0.02)  # let the worker reach and block on pool acquire
+    stopped = lane.cancel()
+    assert await asyncio.wait_for(fut, timeout=1.0) is None
+    assert stopped == 1
+    assert ran == []
+    assert [type(e).__name__ for e in events] == ["TurnFailed"]  # its end, unpaired but named
+    assert events[0].cancelled is True
+    assert events[0].conversation_id == "c"
+    assert events[0].turn_id  # minted at submit, so it can name itself even here
+
+
+async def test_a_failure_before_turnstarted_still_reports_the_turns_end():
+    # Same class as the cancel above, one branch down: the pool acquire and the
+    # sink's own TurnStarted call both sit inside the try before ``started``, so a
+    # failure there used to emit nothing -- leaving a consumer holding this turn's
+    # slots and the client with a turn that never resolves. Latent in production
+    # (every origin is mapped and no production sink raises here), pinned so the
+    # branch cannot quietly go silent again.
+    events: list = []
+
+    async def sink(event) -> None:
+        if isinstance(event, TurnStarted):
+            raise RuntimeError("sink refused the start")
+        events.append(event)
+
+    lane = Lane(runner=SuccessRunner(), pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    assert await lane.submit(_req()) is events[0]
+    assert [type(e).__name__ for e in events] == ["TurnFailed"]
+    assert events[0].cancelled is False
+    assert "sink refused the start" in events[0].error
+    assert events[0].turn_id  # minted at submit, so it can name itself here too
+
+
+async def test_worker_exits_when_queue_drains():
+    runner = SuccessRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    await lane.submit(_req())
+    await asyncio.sleep(0)  # let the worker observe the empty queue and exit
+    assert lane._worker is None or lane._worker.done()
+
+
+async def test_cancel_is_scoped_to_its_lane():
+    r1, r2 = HangingRunner(), SuccessRunner()
+    _, sink1 = _collector()
+    _, sink2 = _collector()
+    lane1 = Lane(runner=r1, pools=OriginPools(user=1, system=1), sink=sink1, conversation_id="c")
+    lane2 = Lane(runner=r2, pools=OriginPools(user=1, system=1), sink=sink2, conversation_id="c")
+    fut1 = lane1.submit(_req())
+    fut2 = lane2.submit(_req())
+    await r1.started.wait()
+    lane1.cancel()  # cancelling lane1 must not disturb lane2
+    await asyncio.wait_for(fut1, timeout=1.0)
+    assert isinstance(await asyncio.wait_for(fut2, timeout=1.0), TurnOutcome)  # lane2 ran fine
+
+
+async def test_worker_self_cancellation_drains_the_payload_leaving_no_zombie():
+    # If the worker task itself is cancelled (process shutdown) while a turn
+    # hangs, the worker cascades to the payload AND awaits its cleanup: the future
+    # resolves (not a hang) and the payload's own TurnFailed(cancelled) is emitted
+    # (its finally ran) — proving it is not a zombie still producing events.
+    runner = HangingRunner()
+    events, sink = _collector()
+    lane = Lane(runner=runner, pools=OriginPools(user=1, system=1), sink=sink, conversation_id="c")
+    fut = lane.submit(_req())
+    await runner.started.wait()
+    run_task = lane._run_task
+    lane._worker.cancel()  # process-shutdown-style cancel of the worker itself
+    result = await asyncio.wait_for(fut, timeout=1.0)
+    assert result is None
+    assert run_task.cancelled() or run_task.cancelling() > 0
+    assert any(isinstance(e, TurnFailed) and e.cancelled for e in events)  # payload finally ran
+
+
+async def test_scheduler_cancel_conversation_stops_running_and_returns_count():
+    # /stop: cancel_conversation finds the lane and cancels its running
+    # turn (+ drains its queue), returning the count; unknown conversation -> 0.
+    from raven.spine.scheduler import Scheduler
+
+    runner = HangingRunner()
+    _events, sink = _collector()
+    sched = Scheduler(runner, OriginPools(user=1, system=1), sink)
+    handle = sched.submit(_req())  # no conversation -> cid = "t:c" (channel:chat_id)
+    await runner.started.wait()
+
+    assert sched.cancel_conversation("t:c") == 1  # running turn cancelled
+    assert sched.cancel_conversation("nope") == 0  # unknown conversation -> no-op
+
+    try:
+        await handle.result()
+    except (asyncio.CancelledError, Exception):
+        pass
+    await sched.shutdown(grace=0.0)
+
+
+async def test_scheduler_has_inflight_tracks_running_turn():
+    # has_inflight: True while a turn runs on the conversation's lane, False for
+    # an idle / unknown conversation — the inbound gate reads it to decide
+    # whether to inject a mid-turn message (BusyPolicy.INJECT) vs open a turn.
+    from raven.spine.scheduler import Scheduler
+
+    runner = HangingRunner()
+    _events, sink = _collector()
+    sched = Scheduler(runner, OriginPools(user=1, system=1), sink)
+    assert sched.has_inflight("t:c") is False  # no lane yet
+    handle = sched.submit(_req())  # no conversation -> cid = "t:c"
+    await runner.started.wait()
+    assert sched.has_inflight("t:c") is True  # turn running on the lane
+    assert sched.has_inflight("nope") is False  # unknown conversation
+
+    sched.cancel_conversation("t:c")
+    try:
+        await handle.result()
+    except (asyncio.CancelledError, Exception):
+        pass
+    await sched.shutdown(grace=0.0)

@@ -1,0 +1,548 @@
+"""Top-level ``agent`` command (one-shot ``-m`` mode).
+
+``raven agent -m "..."`` runs a single USER turn through the spine
+(submit -> lane -> run_turn -> hub -> CliOutlet) and exits. The
+interactive REPL was removed — ``raven tui`` is the interactive
+front-end; invoking ``raven agent`` without ``-m`` prints a pointer
+and exits non-zero.
+
+``commands.py`` registers the command via :func:`register`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.text import Text
+
+from raven import __logo__
+from raven.cli._helpers import (
+    load_runtime_config,
+    parse_fake_now,
+    print_config_migration_notices,
+    print_deprecated_allow_destructive_notice,
+    print_deprecated_memory_window_notice,
+    report_memory_write_outcome,
+)
+from raven.core.provider_stack import build_model_routing
+from raven.providers.factory import make_provider
+from raven.utils.workspace import sync_workspace_templates
+
+console = Console()
+
+
+# One-shot ``-m`` exit code: set by the error renderer, checked after the
+# turn. Module-level because the render callback runs inside the delivery
+# hub's worker task, where raising typer.Exit would be swallowed.
+_ONE_SHOT_EXIT = {"code": 0}
+
+# A run that finished but had calls refused because nobody could approve them.
+# Not 1: the turn did not fail, and a driver needs to tell "the model could not
+# run" from "the model ran without the mutations it asked for".
+EXIT_ACTIONS_REFUSED = 3
+
+
+def _report_refusals(refusals: list) -> None:
+    """Say which calls the gate turned down, once, after the reply.
+
+    Deduplicated by action: a refused call the model repeats is refused again
+    with an "earlier in this turn" reason, and that is one refusal to a reader.
+    Only a refusal nobody could answer sets the exit code; a builtin or user
+    deny rule is the policy the operator chose, doing what it was set to do.
+    """
+    from rich.markup import escape
+
+    from raven.contracts.permissions import DecisionSource
+
+    seen: dict[tuple[str, str], object] = {}
+    for refusal in refusals:
+        seen.setdefault((refusal.tool_name, refusal.action), refusal)
+    if not seen:
+        return
+    unattended = [r for r in refusals if r.source == DecisionSource.UNATTENDED.value]
+    console.print()
+    console.print(f"[yellow]{len(seen)} action(s) were refused in this run:[/yellow]")
+    for refusal in seen.values():
+        action = refusal.action if len(refusal.action) <= 160 else refusal.action[:157] + "..."
+        console.print(f"  - {escape(refusal.tool_name)}: {escape(action)}")
+        console.print(f"    [dim]{escape(refusal.reason[:200])}[/dim]")
+    if unattended:
+        console.print(
+            "[yellow]A one-shot run has nobody to approve a call. Re-run with "
+            "--permission-mode full to allow what needed approval.[/yellow]"
+        )
+        _ONE_SHOT_EXIT["code"] = _ONE_SHOT_EXIT["code"] or EXIT_ACTIONS_REFUSED
+
+
+def _report_unanswered(questions: list) -> None:
+    """Say which questions nobody could answer, once, after the reply.
+
+    Deduplicated by the question text: a repeat is the same question to a
+    reader. This does not change the exit code. The turn continued, which is
+    what the model was told to do; a refusal is the run that did not.
+    """
+    from rich.markup import escape
+
+    seen: dict[str, object] = {}
+    for item in questions:
+        text = str(getattr(item, "question", "") or "").strip()
+        if text:
+            seen.setdefault(text, item)
+    if not seen:
+        return
+    console.print()
+    console.print(f"[yellow]{len(seen)} question(s) went unanswered in this run:[/yellow]")
+    for text in seen:
+        shown = text if len(text) <= 160 else text[:157] + "..."
+        console.print(f"  - {escape(shown)}")
+    console.print(
+        "[yellow]A one-shot run has nobody to answer a question. "
+        "The model was told to proceed with its best judgment.[/yellow]"
+    )
+
+
+async def _wait_for_background_work(agent_loop, scheduler, conversation: str) -> None:
+    """Wait for sub-agents and their follow-up turns before one-shot teardown.
+
+    A sub-agent completion submits a ``SUBAGENT`` turn after its running count
+    drops, so the short second check closes that hand-off gap.
+    """
+    subagents = getattr(agent_loop, "subagents", None)
+    if subagents is None:
+        return
+    lanes = {conversation, "cli:direct"}
+
+    def busy() -> bool:
+        return subagents.get_running_count() > 0 or any(scheduler.has_inflight(lane) for lane in lanes)
+
+    while True:
+        if not busy():
+            await asyncio.sleep(2.0)
+            if not busy():
+                return
+        await asyncio.sleep(1.0)
+
+
+def _print_turn_failure(text: str) -> None:
+    """A turn the runtime gave up on: drawn as a failure rather than as the
+    reply, and a failed command for the exit code."""
+    from rich.markup import escape
+
+    if _print_llm_error(text):
+        return
+    console.print()
+    console.print(f"[red]Error: turn failed: {escape(text[:200])}[/red]")
+    console.print()
+    _ONE_SHOT_EXIT["code"] = 1
+
+
+def _print_agent_response(response: str, render_markdown: bool) -> None:
+    """Render assistant response with consistent terminal styling.
+
+    ``--no-markdown`` prints the reply soft-wrapped, which means the console
+    inserts no newlines of its own. It matters for a caller that parses what a
+    one-shot printed: hard-wrapping at the terminal width puts a line break
+    inside a JSON string literal, and the reply stops being parseable at all.
+    """
+    content = response or ""
+    if _print_llm_error(content):
+        return
+    console.print()
+    console.print(f"[cyan]{__logo__} Raven[/cyan]")
+    if render_markdown:
+        console.print(Markdown(content))
+    else:
+        console.print(Text(content), soft_wrap=True)
+    hint = _block_hint(content)
+    if hint:
+        console.print(Text(f"How to unblock: {hint}"), soft_wrap=True)
+    console.print()
+
+
+def _block_hint(content: str) -> str | None:
+    """The unblock step for a reply that is itself a block (the tool-iteration cap), from the config in force.
+
+    Only that rule: any other reply is the model's own prose, and one that
+    merely quotes a refusal must not be answered with a hint.
+    """
+    from raven.agent.block_hints import RULES, explain
+    from raven.config.live import LiveConfig
+
+    rules = tuple(r for r in RULES if r.id == "max_tool_iterations")
+    if not rules[0].pattern.search(content):
+        return None
+    try:
+        hint = explain(content, LiveConfig().raw(), rules=rules)
+    except Exception:
+        return None
+    return hint.text if hint else None
+
+
+# Category-apt hints for non-auth provider errors. Credential guidance would
+# mislead here: a rate limit or a network drop is not fixed by re-checking the
+# key. Categories absent from this map (invalid_request, unknown, ...) render
+# the error line alone.
+_NON_AUTH_HINTS = {
+    "rate_limit": "Hint: the provider is rate limiting; retry in a moment.",
+    "network": "Hint: network problem; check connectivity and the provider apiBase, then retry.",
+    "context_overflow": "Hint: the input exceeds the model's context window; shorten it.",
+    "server": "Hint: provider-side error; retry later or switch models.",
+    "model_unavailable": "Hint: model not served; pick another with raven provider use <name>/<model>.",
+    "billing": "Hint: billing or quota issue; check your provider account.",
+}
+
+
+def _print_llm_error(content: str) -> bool:
+    """Render a provider error as a diagnosis + fix hint instead of a fake
+    agent reply. Returns True when handled; marks the one-shot path to exit
+    non-zero.
+
+    The detail is printed whole: it arrives already cut to
+    ``providers.base.LLM_ERROR_DETAIL_MAX`` by the sentence's own constructor,
+    and a second bound here would only be a second number to keep in step."""
+    from rich.markup import escape
+
+    from raven.providers.base import parse_llm_error
+
+    parsed = parse_llm_error(content)
+    if parsed is None:
+        return False
+    category, provider, detail = parsed
+    console.print()
+    if category == "auth":
+        # No status code here: the auth bucket also fires on 403, on
+        # PermissionDeniedError and on substring matches, so naming one would
+        # be a guess. The detail carries the provider's own reason instead.
+        where = f" ({escape(provider)})" if provider else ""
+        console.print(f"[red]Error: provider rejected the credentials{where}: {escape(detail)}[/red]")
+        target = provider or "<name>"
+        console.print(f"Fix: raven provider test {escape(target)}  or  raven onboard")
+    else:
+        console.print(f"[red]Error: LLM call failed ({escape(category)}): {escape(detail)}[/red]")
+        hint = _NON_AUTH_HINTS.get(category)
+        if hint:
+            console.print(hint)
+    console.print()
+    _ONE_SHOT_EXIT["code"] = 1
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
+
+def register(app: typer.Typer) -> None:
+    """Attach the ``agent`` command to ``app``."""
+
+    @app.command()
+    def agent(
+        message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+        message_file: Path | None = typer.Option(
+            None,
+            "--message-file",
+            help=(
+                "Read the message from this file instead of the command line. An unattended "
+                "driver should prefer it: a prompt passed with -m sits in this process's argv, "
+                "where every other process in the sandbox can read it -- and be killed by it, "
+                "if something in the run matches on a command line."
+            ),
+        ),
+        permission_mode: str | None = typer.Option(
+            None,
+            "--permission-mode",
+            help=(
+                "How this turn reads the ask tier: ask, smart or full. A one-shot has nobody to "
+                "ask, so a call routed to approval fails closed, is listed after the reply, and "
+                "makes the run exit 3; `full` is how an unattended driver says it accepts that. "
+                "Builtin denies and user deny rules hold regardless."
+            ),
+        ),
+        session_id: str | None = typer.Option(
+            None,
+            "--session",
+            "-s",
+            help=(
+                "Full session key (channel:chat_id), any channel. By default "
+                "a fresh cli session is minted per invocation. The legacy "
+                "'direct' session remains reachable via --resume direct."
+            ),
+        ),
+        continue_: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent cli session"),
+        resume: str | None = typer.Option(None, "--resume", "-r", help="Resume session by bare id or unique prefix"),
+        workspace: str | None = typer.Option(
+            None,
+            "--workspace",
+            "-w",
+            help="Working directory for this run (default: current directory)",
+        ),
+        home: str | None = typer.Option(
+            None,
+            "--home",
+            help="Agent home directory (memory, skills, transcripts)",
+        ),
+        config: str | None = typer.Option(None, "--config", help="Config file path"),
+        markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
+        logs: bool = typer.Option(False, "--logs/--no-logs", help="Show Raven runtime logs during chat"),
+        fake_now: str | None = typer.Option(
+            None,
+            "--fake-now",
+            help=(
+                "ISO-8601 timestamp to freeze 'now' for the Sentinel stack. "
+                "Used by the proactivity-eval subprocess harness; leave unset "
+                "for normal operation."
+            ),
+        ),
+    ):
+        """Run a one-shot agent turn (requires -m); interactive chat lives in `raven tui`."""
+        if sum((session_id is not None, continue_, resume is not None)) > 1:
+            raise typer.BadParameter("--session, --continue and --resume are mutually exclusive")
+
+        if message is not None and message_file is not None:
+            raise typer.BadParameter("--message and --message-file are mutually exclusive")
+        if message_file is not None:
+            try:
+                message = message_file.read_text(encoding="utf-8")
+            except OSError as error:
+                raise typer.BadParameter(f"--message-file: {error}") from error
+            if not message.strip():
+                raise typer.BadParameter(f"--message-file: {message_file} is empty")
+
+        if permission_mode is not None:
+            from raven.contracts.permissions import PermissionMode
+
+            try:
+                permission_mode = PermissionMode(permission_mode.strip().lower()).value
+            except ValueError:
+                allowed = ", ".join(mode.value for mode in PermissionMode)
+                raise typer.BadParameter(f"--permission-mode: expected one of {allowed}") from None
+
+        if message is None:
+            console.print(
+                "[yellow]The interactive REPL was removed. Use [bold]raven tui[/bold] "
+                'for interactive chat, or [bold]raven agent -m "..."[/bold] for a '
+                "one-shot turn.[/yellow]"
+            )
+            raise typer.Exit(code=2)
+
+        from loguru import logger
+
+        from raven.agent.loop.bundles import HostWiring, TurnPolicy
+        from raven.agent.loop.recovery import limits_from_defaults
+        from raven.config.raven import load_raven_config
+        from raven.core.engine_stack import build_local_sessions
+        from raven.core.proactive_stack import (
+            attach_sentinel_decision_consumer,
+            attach_sentinel_spawn,
+            build_sentinel_stack,
+            sentinel_hooks,
+        )
+        from raven.session.manager import new_chat_id
+
+        # load_runtime_config must run FIRST: it calls set_config_path() so
+        # that subsequent load_raven_config() reads from --config, not the
+        # default ~/.raven/config.json. Otherwise skill_forge / sentinel
+        # from --config are silently ignored.
+        config = load_runtime_config(config, home=home)
+        ec_config = load_raven_config()
+        sentinel_cfg = ec_config.sentinel
+        print_deprecated_memory_window_notice(config)
+        print_deprecated_allow_destructive_notice(config)
+        print_config_migration_notices()
+        sync_workspace_templates(config.workspace_path, notify=lambda m: console.print(f"  [dim]{m}[/dim]"))
+
+        provider = make_provider(config)
+        # Model routing (config.routing). Returns the provider unchanged when
+        # routing is disabled, and wraps it for the knn backend so routed model
+        # names reach their own endpoints.
+        router, provider = build_model_routing(config, provider)
+        try:
+            session_manager, workdir_resolver = build_local_sessions(config, workspace=workspace)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+
+        # New-session-by-default: independent one-shots don't bleed into each other.
+        if resume is not None:
+            from raven.cli.session_commands import resolve_session
+
+            session_id = resolve_session(session_manager, resume)
+        elif continue_:
+            # Scoped to this checkout: resuming must not reopen a conversation
+            # started elsewhere just because it is the newer one.
+            recent = session_manager.find_most_recent_chat_id("cli", this_project_only=True)
+            if recent is None:
+                console.print("[dim]no previous cli session — starting fresh[/dim]")
+                recent = new_chat_id()
+            session_id = f"cli:{recent}"
+        elif session_id is None:
+            session_id = f"cli:{new_chat_id()}"
+        else:
+            from raven.cli.session_commands import resolve_session_cross_channel
+
+            session_id = resolve_session_cross_channel(session_manager, session_id)
+
+        if permission_mode is not None:
+            from raven.permissions import set_session_mode
+
+            set_session_mode(session_id, permission_mode)
+
+        # Build Sentinel stack if enabled — same wiring gateway uses, so the two
+        # processes share state via ~/.raven/sentinel/state.json. Discover
+        # triggers are dispatcher-side: only the gateway has real channel
+        # adapters, so this process must NOT drain them or feishu/slack triggers
+        # get consumed without delivery.
+        sentinel_runner, sentinel_response_modifier, sentinel_on_user_inbound = build_sentinel_stack(
+            config,
+            sentinel_cfg,
+            session_manager,
+            provider,
+            now_fn=parse_fake_now(fake_now),
+            include_discover_triggers=False,
+        )
+
+        if logs:
+            logger.enable("raven")
+        else:
+            logger.disable("raven")
+
+        # Build the plugin-provided memory backend (the bundled
+        # everos backend by default). Returns ``None`` when no plugin
+        # contributes the configured backend name — AgentLoop then runs
+        # without a memory backend. Lifecycle (start /
+        # stop) is handled in ``run_once`` so the awaits land in the
+        # right event loop context.
+        # Build the plugin registry once and reuse it for both the memory
+        # backend and the plugin-contributed tools so discovery/activation
+        # runs a single time.
+        from raven.core.runtime import build_runtime
+
+        runtime = build_runtime(
+            config,
+            ec_config,
+            provider=provider,
+            session_manager=session_manager,
+            router=router,
+            workdir_resolver=workdir_resolver,
+            policy=TurnPolicy(
+                now_fn=parse_fake_now(fake_now),
+                max_iterations=config.agents.defaults.max_tool_iterations,
+                empty_recovery=limits_from_defaults(config.agents.defaults),
+                interactive=False,
+            ),
+            host=HostWiring(
+                notify=lambda m: console.print(m, style="yellow", markup=False),
+                channels_config=config.channels,
+                hooks=sentinel_hooks(sentinel_on_user_inbound, sentinel_response_modifier),
+            ),
+        )
+        agent_loop = runtime.loop
+        backend = runtime.backend
+        attach_sentinel_spawn(sentinel_runner, agent_loop)
+        attach_sentinel_decision_consumer(sentinel_runner, agent_loop, sentinel_cfg=sentinel_cfg)
+        # One-shot mode has no real ChannelManager — provide a minimal shim
+        # that reports "cli" as the sole enabled channel so sentinel
+        # (sentinel:direct) resolution targets the terminal instead of being
+        # dropped.
+        from types import SimpleNamespace
+
+        cli_shim = SimpleNamespace(enabled_channels=["cli"])
+        if sentinel_runner is not None:
+            sentinel_runner.set_channel_manager(cli_shim)
+
+        # Show spinner when logs are off (no output to miss); skip when logs are on
+        def _thinking_ctx():
+            if logs:
+                from contextlib import nullcontext
+
+                return nullcontext()
+            return console.status("[dim]Raven is thinking...[/dim]", spinner="dots")
+
+        # Single message mode — one USER turn through spine (submit -> lane ->
+        # run_turn -> hub -> CliOutlet), with the cli/direct defaults
+        # (channel="cli", chat_id="direct", session_key=session_id). Progress
+        # renders via the CliOutlet, gated by the same two config flags the
+        # gateway honors (send_progress / send_tool_hints).
+        from raven.cli._one_shot_spine import build_one_shot_spine
+        from raven.spine import ChatType, Origin, Source, TurnRequest
+
+        refusals: list = []
+        unanswered: list = []
+
+        async def run_once():
+            # Bring the memory-backend plugin online before any turn
+            # runs. ``backend`` is ``None`` when no plugin is wired.
+            if backend is not None:
+                try:
+                    await backend.start()
+                except Exception:
+                    logger.exception(
+                        "memory backend start failed; continuing with legacy memory path",
+                    )
+            try:
+                # Build inside the running loop: Scheduler pins its home loop in
+                # __init__, so build_one_shot_spine must not run in the sync prologue.
+                ch = agent_loop.channels_config
+                scheduler, hub, teardown = build_one_shot_spine(
+                    agent_loop,
+                    "cli",
+                    lambda t: _print_agent_response(t, render_markdown=markdown),
+                    render_notice=lambda c: console.print(f"  [dim]↳ {c}[/dim]"),
+                    render_error=_print_turn_failure,
+                    send_progress=bool(ch.send_progress) if ch else False,
+                    send_tool_hints=bool(ch.send_tool_hints) if ch else False,
+                    on_refusals=refusals.extend,
+                    on_unanswered=unanswered.extend,
+                )
+                # A one-shot spawn rarely finishes before the hard-exit below,
+                # but wire submit for parity with the TUI.
+                agent_loop.subagents.set_submit(scheduler.submit)
+                with _thinking_ctx():
+                    handle = scheduler.submit(
+                        TurnRequest(
+                            origin=Origin.USER,
+                            source=Source(
+                                channel="cli",
+                                chat_id="direct",
+                                sender_id="user",
+                                chat_type=ChatType.DM,
+                            ),
+                            text=message,
+                            conversation=session_id,
+                        )
+                    )
+                    await handle.result()
+                    await _wait_for_background_work(agent_loop, scheduler, session_id)
+                await hub.wait_idle("cli")  # render barrier: CliOutlet caught up
+                await teardown()
+                await agent_loop.close_mcp()
+            finally:
+                # The loop's skill watcher is a daemon thread parked inside
+                # watchfiles' Rust watch(); left running, Py_FinalizeEx tears
+                # the interpreter down under that call and a one-shot that
+                # rendered its whole turn still exits 139.
+                agent_loop.context.skills.stop_file_watcher()
+                if backend is not None:
+                    try:
+                        # Drain queued writes first: stopping the backend
+                        # closes the HTTP client they still need.
+                        outcome = await agent_loop.drain_backend_stores()
+                        report_memory_write_outcome(outcome, console)
+                        await backend.stop()
+                    except Exception:
+                        logger.exception(
+                            "memory backend stop failed; continuing shutdown",
+                        )
+
+        _ONE_SHOT_EXIT["code"] = 0
+        asyncio.run(run_once())
+        _report_refusals(refusals)
+        _report_unanswered(unanswered)
+        if _ONE_SHOT_EXIT["code"]:
+            raise typer.Exit(_ONE_SHOT_EXIT["code"])
+
+
+__all__ = ["register"]

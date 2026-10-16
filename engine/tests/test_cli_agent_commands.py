@@ -1,0 +1,1020 @@
+"""CLI tests for ``raven agent``.
+
+The ``agent`` command is a one-shot ``-m`` single-turn runner (the
+interactive REPL was removed; ``raven tui`` is the interactive front-end).
+Smoke-level coverage: ``--help`` works, options are surfaced, the
+``no-API-key`` path exits cleanly, bare invocation points at the TUI.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from typer.testing import CliRunner
+
+from raven.cli.commands import app
+from raven.config.loader import set_config_path
+
+runner = CliRunner()
+
+
+@pytest.fixture
+def tmp_config(tmp_path: Path) -> Path:
+    cfg = tmp_path / "config.json"
+    set_config_path(cfg)
+    yield cfg
+    set_config_path(None)  # type: ignore[arg-type]
+
+
+def test_agent_help_works() -> None:
+    """``raven agent --help`` lists the key options."""
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "one-shot agent turn" in r.stdout
+    # core options surfaced
+    assert "--message" in r.stdout
+    assert "--session" in r.stdout
+    assert "--workspace" in r.stdout
+    assert "--config" in r.stdout
+    assert "--markdown" in r.stdout
+
+
+def test_home_flag_moves_agent_home(tmp_config: Path, tmp_path: Path):
+    from raven.core.config_stack import load_runtime_config
+
+    config = load_runtime_config(None, home=str(tmp_path / "elsewhere"))
+    assert config.agents.defaults.workspace == str(tmp_path / "elsewhere")
+
+
+def test_agent_help_documents_both_directories():
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "--home" in r.output
+    assert "Working directory" in r.output
+
+
+def test_agent_help_omits_removed_skill_extract_flags() -> None:
+    """The inert skill-extraction flags stay removed: the mechanism their
+    help text described was replaced by the MemoryBackend plugin, so the
+    flags never had any effect."""
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "--wait-skill-extract" not in r.stdout
+    assert "--flush-skill-buffer" not in r.stdout
+
+
+def test_agent_without_message_prints_pointer_and_exits_nonzero(tmp_config: Path) -> None:
+    """Bare ``raven agent`` no longer enters an interactive loop: it points
+    at ``raven tui`` / ``agent -m`` and exits non-zero."""
+    r = runner.invoke(app, ["agent"])
+    assert r.exit_code != 0
+    assert "REPL was removed" in r.stdout
+    assert "raven tui" in r.stdout
+    assert "-m" in r.stdout
+
+
+def test_agent_without_api_key_exits_cleanly(tmp_config: Path) -> None:
+    """With no provider configured, the command must exit non-zero — and
+    crucially must not raise a *crash* exception (NameError / AttributeError /
+    ImportError). ``typer.testing.CliRunner`` captures the exception, so the
+    only reliable way to detect a regression like a missing import is to
+    inspect ``r.exception`` directly.
+    """
+    from raven.config.loader import save_config
+    from raven.config.schema import Config
+
+    save_config(Config())  # default config, no keys
+
+    r = runner.invoke(app, ["agent", "-m", "hello"])
+    # Reject any crash-class exception: those signal a refactor regression,
+    # not user error. typer.Exit(...) is fine (intentional non-zero exit).
+    if r.exception is not None:
+        assert not isinstance(r.exception, (NameError, AttributeError, ImportError)), (
+            f"Crash-class exception leaked through: {r.exception!r}"
+        )
+    assert r.exit_code != 0
+
+
+# ============================================================================
+# Session binding flags (task 3.3)
+# ============================================================================
+
+
+def test_agent_help_shows_continue_flag() -> None:
+    """--continue flag appears in agent --help."""
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "--continue" in r.stdout
+
+
+def test_agent_help_shows_resume_flag() -> None:
+    """--resume flag appears in agent --help."""
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "--resume" in r.stdout
+
+
+async def _skip_background_grace(*_args, **_kwargs) -> None:
+    """Stand-in for ``_wait_for_background_work``: the stub subagents/scheduler
+    below never go busy, so the real 2 s sub-agent hand-off grace has nothing
+    to wait for and only adds wall time."""
+    return None
+
+
+def _invoke_agent_capturing_session(
+    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
+    extra_args: list[str],
+    *,
+    backend: object | None = None,
+    drain_outcome: object | None = None,
+    message_args: list[str] | None = None,
+    during_turn: Callable[[], None] | None = None,
+) -> tuple[object, dict[str, str]]:
+    """Run ``agent -m`` with the provider and AgentLoop stubbed out, capturing
+    the session_id that reaches the spine turn (req.conversation is the session
+    key, mirroring the old session_key arg). ``message_args`` replaces the
+    default ``-m hi`` so the --message-file path can be exercised too.
+    ``during_turn`` runs inside the turn's own task, where the gate would."""
+    from raven.config.loader import save_config
+    from raven.config.schema import Config
+    from raven.spine import Text, TurnOutcome, Usage
+
+    cfg = Config()
+    cfg.providers.openrouter.api_key = "stub-test-key"
+    save_config(cfg)
+
+    captured: dict[str, str] = {}
+
+    class _StubSubagents:
+        def set_submit(self, _submit) -> None:
+            pass
+
+        def get_running_count(self) -> int:
+            return 0
+
+    class _StubAgentLoop:
+        def __init__(self, **kwargs):
+            self.channels_config = kwargs.get("channels_config")
+            self.subagents = _StubSubagents()
+            # The teardown stops the loop's skill watcher, so the double
+            # carries the context the real loop always has.
+            self.context = SimpleNamespace(skills=SimpleNamespace(stop_file_watcher=lambda: None))
+
+        def configure_personalization(self, *_args) -> None:
+            pass
+
+        async def run_turn(self, req, emit, drain, *, stream, **_kw) -> TurnOutcome:
+            captured["session_id"] = req.conversation
+            captured["text"] = str(getattr(req, "text", ""))
+            if during_turn is not None:
+                during_turn()
+            await emit(Text(content="stub-response", source=req.source))
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+        async def await_pending_extractions(self, **_kw) -> None:
+            pass
+
+        async def close_mcp(self) -> None:
+            pass
+
+        async def drain_backend_stores(self, *_a, **_kw):
+            from raven.memory_engine import DrainOutcome
+
+            return drain_outcome if drain_outcome is not None else DrainOutcome(lost=0, in_flight=0)
+
+    monkeypatch.setattr("raven.cli.agent_commands.make_provider", lambda _: object())
+    monkeypatch.setattr("raven.agent.loop.AgentLoop", _StubAgentLoop)
+    monkeypatch.setattr("raven.cli.agent_commands._wait_for_background_work", _skip_background_grace)
+    # This test exercises session keying, not memory: don't boot the real
+    # (bundled) everos backend / plugin tools inside the CliRunner (the
+    # embedded everos runtime is heavy and not under test here).
+    monkeypatch.setattr(
+        "raven.core.plugin_stack.maybe_build_memory_backend",
+        lambda *a, **k: backend,
+    )
+    monkeypatch.setattr(
+        "raven.core.plugin_stack.build_plugin_tools",
+        lambda *a, **k: [],
+    )
+    message = message_args if message_args is not None else ["-m", "hi"]
+    r = runner.invoke(app, ["agent", *message, "--home", str(home), *extra_args])
+    return r, captured
+
+
+def test_agent_default_mints_fresh_session(tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare ``agent -m`` mints a fresh ``cli:{chat_id}`` per invocation."""
+    import re
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    r1, cap1 = _invoke_agent_capturing_session(monkeypatch, ws, [])
+    assert r1.exit_code == 0, r1.stdout
+    assert re.fullmatch(r"cli:\d{8}_\d{6}_[0-9a-f]{6}", cap1["session_id"]), (
+        f"expected freshly minted cli session key, got {cap1['session_id']!r}"
+    )
+
+    r2, cap2 = _invoke_agent_capturing_session(monkeypatch, ws, [])
+    assert r2.exit_code == 0
+    assert cap1["session_id"] != cap2["session_id"], "each bare invocation must mint a NEW session"
+
+
+def test_a_one_shot_shutdown_tells_the_user_what_the_drain_left(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``agent -m`` renders the drain outcome; it does not merely compute it.
+
+    The one-shot exit is the only place a CLI user learns a turn did not
+    settle -- there is no next screen to carry the notice. The same teardown
+    in ``tui_commands`` is driven by its own test and this copy was driven by
+    none, so dropping the render here would have cost nothing red.
+    """
+    from raven.memory_engine import DrainOutcome
+
+    class _Backend:
+        def __init__(self) -> None:
+            self.stopped = False
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    backend = _Backend()
+
+    r, _ = _invoke_agent_capturing_session(
+        monkeypatch,
+        ws,
+        [],
+        backend=backend,
+        drain_outcome=DrainOutcome(lost=2, in_flight=0),
+    )
+
+    assert r.exit_code == 0, r.stdout
+    assert "2 turn(s) were not written" in r.stdout
+    # The drain has to precede the stop: stopping closes the HTTP client the
+    # queued writes still need.
+    assert backend.stopped
+
+
+def test_agent_continue_binds_most_recent_cli_session(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``-c`` binds the agent to the most-recent persisted cli session."""
+    from raven.session.manager import SessionManager
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    mgr = SessionManager(ws)
+    seeded = "20990101_000000_aaaaaa"
+    s = mgr.get_or_create(f"cli:{seeded}")
+    s.add_message("user", "earlier turn")
+    mgr.save(s)
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["-c"])
+    assert r.exit_code == 0, r.stdout
+    assert captured["session_id"] == f"cli:{seeded}"
+
+
+def test_agent_resume_binds_resolved_session(tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--resume <prefix>`` resolves and binds that cli session."""
+    from raven.session.manager import SessionManager
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    mgr = SessionManager(ws)
+    seeded = "20990101_000000_bbbbbb"
+    s = mgr.get_or_create(f"cli:{seeded}")
+    s.add_message("user", "earlier turn")
+    mgr.save(s)
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["--resume", seeded[:20]])
+    assert r.exit_code == 0, r.stdout
+    assert captured["session_id"] == f"cli:{seeded}"
+
+
+def test_agent_session_key_passthrough(tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--session <key>`` passes a full key through unchanged (any channel)."""
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["--session", "feishu:ou_xyz"])
+    assert r.exit_code == 0, r.stdout
+    assert captured["session_id"] == "feishu:ou_xyz"
+
+
+def test_agent_bare_session_resolves_cross_channel(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--session <bare id>`` resolves to an existing session on a non-cli
+    channel — it must NOT be mis-routed to a colon-less/malformed key."""
+    from raven.session.manager import SessionManager
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    mgr = SessionManager(ws)
+    cid = "20990101_000000_cccccc"
+    s = mgr.get_or_create(f"tui:{cid}")
+    s.add_message("user", "earlier turn")
+    mgr.save(s)
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["--session", cid])
+    assert r.exit_code == 0, r.stdout
+    assert captured["session_id"] == f"tui:{cid}"
+
+
+def test_agent_unknown_bare_session_falls_back_to_cli(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--session <bare id>`` with no matching session falls back to a proper
+    ``cli:<id>`` key — never a colon-less/malformed path."""
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    cid = "20990101_000000_dddddd"
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["--session", cid])
+    assert r.exit_code == 0, r.stdout
+    assert captured["session_id"] == f"cli:{cid}"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-c", "--resume", "x"],
+        ["--session", "cli:abc", "-c"],
+        ["--session", "cli:abc", "--resume", "x"],
+        ["--session", "cli:abc", "-c", "--resume", "x"],
+    ],
+)
+def test_agent_session_binding_flags_mutually_exclusive(tmp_config: Path, args: list[str]) -> None:
+    """More than one of --session/--continue/--resume exits with usage error."""
+    r = runner.invoke(app, ["agent", "-m", "hi", *args])
+    assert r.exit_code == 2, f"expected usage error, got {r.exit_code}: {r.stdout}"
+    assert "mutually exclusive" in r.stdout
+
+
+def test_agent_continue_without_prior_session_starts_fresh(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``-c`` with no stored cli session prints a notice and mints fresh."""
+    import re
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["-c"])
+    assert r.exit_code == 0, r.stdout
+    assert re.fullmatch(r"cli:\d{8}_\d{6}_[0-9a-f]{6}", captured["session_id"])
+    assert "no previous cli session" in r.stdout
+
+
+@pytest.mark.asyncio
+async def test_wait_for_background_work_covers_subagent_follow_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One-shot teardown waits for a sub-agent and its submitted follow-up."""
+    from raven.cli import agent_commands
+
+    state = {"subagent_running": True, "follow_up_running": False}
+    sleeps: list[float] = []
+
+    class _Subagents:
+        def get_running_count(self) -> int:
+            return int(state["subagent_running"])
+
+    class _Scheduler:
+        def has_inflight(self, conversation: str) -> bool:
+            return conversation == "cli:direct" and state["follow_up_running"]
+
+    async def _sleep(delay: float) -> None:
+        sleeps.append(delay)
+        if delay == 1.0 and state["subagent_running"]:
+            state["subagent_running"] = False
+            state["follow_up_running"] = True
+        elif delay == 1.0:
+            state["follow_up_running"] = False
+        elif delay == 2.0:
+            state["follow_up_running"] = False
+
+    monkeypatch.setattr(agent_commands.asyncio, "sleep", _sleep)
+    from types import SimpleNamespace
+
+    await agent_commands._wait_for_background_work(SimpleNamespace(subagents=_Subagents()), _Scheduler(), "cli:session")
+
+    assert sleeps == [1.0, 1.0, 2.0]
+
+
+# ============================================================================
+# No cron on the one-shot path
+# ============================================================================
+
+
+def test_agent_message_mode_constructs_no_cron_service(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``agent -m`` must not build a CronService (and hence never registers
+    CronTool): with the REPL gone this process is never a cron runner, so a
+    cli-bound job it created would have nothing to fire it."""
+    import raven.proactive_engine.schedulers.cron.service as cron_mod
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    constructed: list[object] = []
+    orig_init = cron_mod.CronService.__init__
+
+    def _spy_init(self, *args, **kwargs) -> None:
+        constructed.append(self)
+        orig_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(cron_mod.CronService, "__init__", _spy_init)
+    r, _ = _invoke_agent_capturing_session(monkeypatch, ws, [])
+
+    assert r.exit_code == 0, r.stdout
+    assert constructed == [], "agent -m must not construct a CronService"
+
+
+# ============================================================================
+# Pure helper functions
+# ============================================================================
+
+
+def test_print_agent_response_with_markdown(capsys: pytest.CaptureFixture) -> None:
+    """``_print_agent_response`` renders the body — markdown mode."""
+    from raven.cli.agent_commands import _print_agent_response
+
+    _print_agent_response("# hi", render_markdown=True)
+    out = capsys.readouterr().out
+    # rich's Markdown renderer typically prints the heading text
+    assert "hi" in out
+
+
+def test_print_agent_response_plain(capsys: pytest.CaptureFixture) -> None:
+    """``_print_agent_response`` renders plain text — markdown disabled."""
+    from raven.cli.agent_commands import _print_agent_response
+
+    _print_agent_response("hello world", render_markdown=False)
+    out = capsys.readouterr().out
+    assert "hello world" in out
+
+
+# ============================================================================
+# agent -m single-shot mode (mocked)
+# ============================================================================
+
+
+def test_agent_message_mode_mocked_provider(tmp_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``agent -m 'hi'`` with a mocked provider must reach a clean exit
+    (no traceback). We mock ``make_provider`` so the agent loop builds
+    without contacting any LLM."""
+    from raven.config.loader import save_config
+    from raven.config.schema import Config
+
+    # Save a config with the openrouter key so the gateway-validation passes.
+    cfg = Config()
+    cfg.providers.openrouter.api_key = "stub-test-key"
+    save_config(cfg)
+
+    monkeypatch.setattr(
+        "raven.cli.agent_commands.make_provider",
+        lambda _: (_ for _ in ()).throw(RuntimeError("mock-no-provider")),
+    )
+
+    # We can't drive the full agent loop without a real provider; we only
+    # assert that the CLI exits cleanly (no uncaught traceback) when the
+    # provider build raises a controlled error.
+    r = runner.invoke(app, ["agent", "-m", "hello"])
+    if r.exception is not None:
+        assert not isinstance(r.exception, (NameError, AttributeError, ImportError)), (
+            f"Crash-class exception leaked through: {r.exception!r}"
+        )
+
+
+# ============================================================================
+# Provider error rendering
+# ============================================================================
+
+
+def test_agent_auth_error_exit_nonzero_with_guidance(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 401 from the provider must exit non-zero, show a fix hint, and must
+    not dump the duplicated exception name or the raw JSON error body.
+
+    The provider is a real ``LiteLLMProvider`` whose ``acompletion`` is stubbed
+    to raise the same exception shape litellm raises on an OpenRouter 401 —
+    no network involved.
+    """
+    from raven.config.loader import save_config
+    from raven.config.schema import Config
+    from raven.spine import Text, TurnOutcome, Usage
+
+    cfg = Config()
+    cfg.providers.openrouter.api_key = "sk-or-v1-stub-invalid"
+    save_config(cfg)
+
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    async def _raise_401(**_kwargs):
+        raise AuthenticationError(
+            "litellm.AuthenticationError: AuthenticationError: OpenrouterException - "
+            '{"error":{"message":"User not found.","code":401}}'
+        )
+
+    # Pre-register the env var with monkeypatch so the provider's _setup_env
+    # write is rolled back with the test instead of leaking a fake key.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-stub-invalid")
+    monkeypatch.setattr("raven.providers.litellm_provider.acompletion", _raise_401)
+    monkeypatch.setattr("raven.cli.agent_commands._wait_for_background_work", _skip_background_grace)
+
+    class _StubSubagents:
+        def set_submit(self, _submit) -> None:
+            pass
+
+        def get_running_count(self) -> int:
+            return 0
+
+    class _AuthFailAgentLoop:
+        def __init__(self, **kwargs):
+            self.channels_config = kwargs.get("channels_config")
+            self.subagents = _StubSubagents()
+            self.context = SimpleNamespace(skills=SimpleNamespace(stop_file_watcher=lambda: None))
+
+        def configure_personalization(self, *_args) -> None:
+            pass
+
+        async def run_turn(self, req, emit, drain, *, stream, **_kw) -> TurnOutcome:
+            from raven.providers.litellm_provider import LiteLLMProvider
+
+            provider = LiteLLMProvider(
+                api_key="sk-or-v1-stub-invalid",
+                default_model="anthropic/claude-opus-4-5",
+                provider_name="openrouter",
+            )
+            resp = await provider.chat_with_retry(messages=[{"role": "user", "content": req.text}])
+            await emit(Text(content=resp.content or "", source=req.source))
+            return TurnOutcome(usage=Usage(0, 0, 0), explicit_reply=True)
+
+        async def await_pending_extractions(self, **_kw) -> None:
+            pass
+
+        async def close_mcp(self) -> None:
+            pass
+
+    monkeypatch.setattr("raven.cli.agent_commands.make_provider", lambda _: object())
+    monkeypatch.setattr("raven.agent.loop.AgentLoop", _AuthFailAgentLoop)
+    monkeypatch.setattr("raven.core.plugin_stack.maybe_build_memory_backend", lambda *a, **k: None)
+    monkeypatch.setattr("raven.core.plugin_stack.build_plugin_tools", lambda *a, **k: [])
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    result = runner.invoke(app, ["agent", "-m", "hi", "-w", str(ws)])
+
+    assert result.exit_code != 0
+    assert result.output.count("AuthenticationError") <= 1
+    assert "raven provider" in result.output
+    assert '{"error"' not in result.output
+
+
+def test_print_turn_failure_draws_a_failure_not_a_reply(capsys: pytest.CaptureFixture) -> None:
+    """A failed turn's words are printed as a failure and the command exits
+    non-zero. The canonical error sentence still takes the diagnosis path; any
+    other text is marked as an error rather than drawn under the answer banner."""
+    from raven.cli import agent_commands
+
+    agent_commands._ONE_SHOT_EXIT["code"] = 0
+    try:
+        agent_commands._print_turn_failure("APIError: OpenrouterException - Cannot connect to host")
+        out = capsys.readouterr().out
+        assert "Error: turn failed: APIError: OpenrouterException - Cannot connect to host" in out
+        assert "Raven" not in out
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 1
+
+        # Provider text is not markup: a bracketed path must print, not raise.
+        agent_commands._print_turn_failure("APIError: bad value [/v1/chat] rejected")
+        out = capsys.readouterr().out
+        assert "[/v1/chat]" in out
+
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+        agent_commands._print_turn_failure("Error calling LLM (network@openrouter): connection refused")
+        out = capsys.readouterr().out
+        assert "Error: turn failed" not in out
+        assert "connection refused" in out
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 1
+    finally:
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+
+
+def test_print_llm_error_renders_diagnosis_and_marks_exit(capsys: pytest.CaptureFixture) -> None:
+    """``_print_llm_error`` turns the canonical error content into a
+    diagnosis + fix hint and marks the one-shot exit code; ordinary reply
+    content is left for the normal renderer."""
+    from raven.cli import agent_commands
+    from raven.providers.base import LLMProvider, format_llm_error
+
+    class _AuthError(Exception):
+        status_code = 401
+
+    exc = _AuthError(
+        "litellm.AuthenticationError: AuthenticationError: OpenrouterException - "
+        '{"error":{"message":"User not found.","code":401}}'
+    )
+    content = format_llm_error(exc, LLMProvider.classify_error(exc), provider="openrouter")
+
+    agent_commands._ONE_SHOT_EXIT["code"] = 0
+    try:
+        assert agent_commands._print_llm_error(content) is True
+        out = capsys.readouterr().out
+        assert "provider rejected the credentials" in out
+        assert "openrouter" in out
+        assert "User not found." in out
+        assert "raven provider test openrouter" in out
+        assert '{"error"' not in out
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 1
+
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+        assert agent_commands._print_llm_error("just a normal reply") is False
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 0
+    finally:
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+
+
+def test_print_llm_error_auth_does_not_fabricate_a_status_code(capsys: pytest.CaptureFixture) -> None:
+    """The auth bucket also fires on 403 / PermissionDeniedError, so the
+    rendered line must not claim 401; the provider's own reason is what the
+    user needs to tell an invalid key from a key without access."""
+    from raven.cli import agent_commands
+    from raven.providers.base import LLMProvider, format_llm_error
+
+    class _PermissionDeniedError(Exception):
+        status_code = 403
+
+    exc = _PermissionDeniedError("permission denied: your key has no access to anthropic/claude-opus-4-5")
+    classification = LLMProvider.classify_error(exc)
+    assert classification.category == "auth"
+    content = format_llm_error(exc, classification, provider="openrouter")
+
+    agent_commands._ONE_SHOT_EXIT["code"] = 0
+    try:
+        assert agent_commands._print_llm_error(content) is True
+        out = capsys.readouterr().out
+        assert "401" not in out
+        assert "provider rejected the credentials (openrouter)" in out
+        assert "no access to anthropic/claude-opus-4-5" in out
+        assert "raven provider test openrouter" in out
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 1
+    finally:
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+
+
+def test_print_llm_error_non_auth_categories_get_apt_hint_not_key_guidance(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Non-auth categories must not print the credential fix line: a rate
+    limit or a network drop is not fixed by re-checking the key. Each gets a
+    category-apt hint instead; categories with no apt one-liner render the
+    error line alone."""
+    from raven.cli import agent_commands
+
+    cases = {
+        "rate_limit": "retry",
+        "network": "connectivity",
+        "context_overflow": "shorten",
+        "server": "retry",
+        "model_unavailable": "provider use",
+        "billing": "account",
+    }
+    try:
+        for category, expected in cases.items():
+            agent_commands._ONE_SHOT_EXIT["code"] = 0
+            content = f"Error calling LLM ({category}@openrouter): something went wrong"
+            assert agent_commands._print_llm_error(content) is True, category
+            out = capsys.readouterr().out
+            assert "raven provider test" not in out, category
+            assert "raven onboard" not in out, category
+            assert expected in out, f"{category}: missing apt hint in {out!r}"
+            assert agent_commands._ONE_SHOT_EXIT["code"] == 1, category
+
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+        assert agent_commands._print_llm_error("Error calling LLM (unknown): boom") is True
+        out = capsys.readouterr().out
+        assert "raven provider test" not in out
+        assert "Fix:" not in out
+        assert "Hint:" not in out
+        assert agent_commands._ONE_SHOT_EXIT["code"] == 1
+    finally:
+        agent_commands._ONE_SHOT_EXIT["code"] = 0
+
+
+# ---------------------------------------------------------------------------
+# Workspace template sync prints one summary line, not one per file, and
+# the one-shot path renders a per-turn tokens/cost summary line.
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_sync_prints_single_summary(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    from raven.utils.workspace import sync_workspace_templates
+
+    ws = tmp_path / "workspace"
+    added = sync_workspace_templates(ws)
+    first = capsys.readouterr()
+    first_text = first.out + first.err
+    assert added
+    assert "Initialized workspace" in first_text
+    assert first_text.count("Created") == 0
+
+    added_again = sync_workspace_templates(ws)
+    second = capsys.readouterr()
+    assert added_again == []
+    assert (second.out + second.err).strip() == ""
+
+    (ws / added[0]).unlink()
+    re_added = sync_workspace_templates(ws)
+    third = capsys.readouterr()
+    assert len(re_added) == 1
+    assert "(1 file)" in (third.out + third.err)
+
+
+def test_workspace_sync_debug_detail_lifts_with_raven_logging(tmp_path: Path) -> None:
+    """The module-level logger.disable in helpers yields to a later
+    logger.enable('raven'): loguru drops descendant rules whenever a parent
+    rule is set, so callers that enable logging before syncing get the
+    per-file detail. Freezes the behavior the helpers comment relies on."""
+    from loguru import logger
+
+    from raven.utils.workspace import sync_workspace_templates
+
+    records: list[str] = []
+    sink_id = logger.add(lambda m: records.append(str(m)), level="DEBUG")
+    try:
+        logger.enable("raven")
+        sync_workspace_templates(tmp_path / "ws", silent=True)
+    finally:
+        logger.remove(sink_id)
+    assert any("workspace sync: created" in m for m in records)
+
+
+def _invoke_agent_with_usage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, turn_summary_off: bool = False):
+    """Run ``agent -m`` with a stub AgentLoop that reports LLM usage through
+    the TokenWise after-hook, mirroring how the real loop feeds UsageTracker."""
+    from raven.config.loader import save_config
+    from raven.config.schema import Config
+    from raven.contracts.token_strategy import UsageSnapshot
+    from raven.spine import Text, TurnOutcome, Usage
+    from raven.token_wise.registry import StrategyRegistry
+
+    cfg = Config()
+    cfg.providers.openrouter.api_key = "stub-test-key"
+    if turn_summary_off:
+        cfg.cli.turn_summary = False
+    save_config(cfg)
+
+    class _StubSubagents:
+        def set_submit(self, _submit) -> None:
+            pass
+
+        def get_running_count(self) -> int:
+            return 0
+
+    class _StubAgentLoop:
+        def __init__(self, **kwargs):
+            self.channels_config = kwargs.get("channels_config")
+            self.subagents = _StubSubagents()
+            self.context = SimpleNamespace(skills=SimpleNamespace(stop_file_watcher=lambda: None))
+            self.strategies = StrategyRegistry([])
+
+        def configure_personalization(self, *_args) -> None:
+            pass
+
+        async def run_turn(self, req, emit, drain, *, stream, **_kw) -> TurnOutcome:
+            await self.strategies.after_llm_call(
+                {"content": "stub"},
+                UsageSnapshot(
+                    model="stub-model",
+                    input_tokens=1200,
+                    output_tokens=340,
+                    cost_usd=0.004,
+                    session_key=req.conversation,
+                ),
+            )
+            await emit(Text(content="stub-response", source=req.source))
+            return TurnOutcome(usage=Usage(1200, 340, 1540), explicit_reply=True)
+
+        async def await_pending_extractions(self, **_kw) -> None:
+            pass
+
+        async def close_mcp(self) -> None:
+            pass
+
+    monkeypatch.setattr("raven.cli.agent_commands.make_provider", lambda _: object())
+    monkeypatch.setattr("raven.agent.loop.AgentLoop", _StubAgentLoop)
+    monkeypatch.setattr("raven.cli.agent_commands._wait_for_background_work", _skip_background_grace)
+    monkeypatch.setattr("raven.core.plugin_stack.maybe_build_memory_backend", lambda *a, **k: None)
+    monkeypatch.setattr("raven.core.plugin_stack.build_plugin_tools", lambda *a, **k: [])
+    return runner.invoke(app, ["agent", "-m", "hi", "-w", str(tmp_path / "ws")])
+
+
+def test_turn_summary_line_present(tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    r = _invoke_agent_with_usage(monkeypatch, tmp_path)
+    assert re.search(r"\d[\d.,k]*\s*(in|tokens)", r.output)
+
+
+def test_turn_summary_respects_config_off(tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    r = _invoke_agent_with_usage(monkeypatch, tmp_path, turn_summary_off=True)
+    assert not re.search(r"\d[\d.,k]*\s*(in|tokens)", r.output)
+
+
+def test_one_shot_teardown_stops_the_skill_file_watcher() -> None:
+    """The one-shot teardown must stop the skill watcher before exit.
+
+    The loop's ``ContextBuilder`` starts ``SkillFileWatcher``, a daemon thread
+    parked inside ``watchfiles``' Rust ``watch()``. Nothing here stopped it, so
+    ``Py_FinalizeEx`` tore the interpreter down under that native call:
+    measured 2026-09-18, a one-shot that rendered its whole turn and its own
+    teardown still exited 139.
+
+    This command used to carry its own ``os._exit(0)`` for that hazard. It was
+    traded for a hard-exit gate in ``raven.cli.commands.run``, and that gate has
+    since been removed, so the exit is an ordinary one again and the thread has
+    to actually be stopped.
+
+    The teardown is nested in the command with no import seam, so this pins the
+    call in the source.
+    """
+    import inspect
+
+    from raven.cli import agent_commands
+
+    src = inspect.getsource(agent_commands.register)
+    teardown = src.split("finally:", 1)[1]
+    assert "stop_file_watcher()" in teardown
+
+
+def test_agent_help_shows_the_message_file_and_permission_mode_flags() -> None:
+    r = runner.invoke(app, ["agent", "--help"])
+    assert r.exit_code == 0
+    assert "--message-file" in r.stdout
+    assert "--permission-mode" in r.stdout
+
+
+def test_message_file_is_read_instead_of_argv(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unattended driver passes the prompt in a file: it must reach the turn.
+
+    The point of the flag is that the prompt is NOT in this process's argv,
+    where every other process in the sandbox can read it.
+    """
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("judge the gates and write the report\n", encoding="utf-8")
+
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, [], message_args=["--message-file", str(prompt)])
+    assert r.exit_code == 0, r.stdout
+    assert "judge the gates" in captured["text"]
+
+
+def test_message_and_message_file_are_mutually_exclusive(tmp_config: Path, tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("hi\n", encoding="utf-8")
+    r = runner.invoke(app, ["agent", "-m", "hi", "--message-file", str(prompt)])
+    assert r.exit_code != 0
+    assert "mutually exclusive" in r.stdout
+
+
+def test_an_empty_message_file_is_a_usage_error(tmp_config: Path, tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("   \n", encoding="utf-8")
+    r = runner.invoke(app, ["agent", "--message-file", str(prompt)])
+    assert r.exit_code != 0
+    assert "is empty" in r.stdout
+
+
+def test_a_missing_message_file_is_a_usage_error(tmp_config: Path, tmp_path: Path) -> None:
+    r = runner.invoke(app, ["agent", "--message-file", str(tmp_path / "nope.md")])
+    assert r.exit_code != 0
+    assert "--message-file" in r.stdout
+
+
+def test_permission_mode_binds_the_mode_to_this_turns_session(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--permission-mode full`` is how an unattended run says it has no reader."""
+    from raven.permissions import session_mode
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    r, captured = _invoke_agent_capturing_session(monkeypatch, ws, ["--permission-mode", "full"])
+    assert r.exit_code == 0, r.stdout
+    assert session_mode(captured["session_id"]) == "full"
+
+
+def test_an_unknown_permission_mode_names_the_ones_that_exist(tmp_config: Path) -> None:
+    r = runner.invoke(app, ["agent", "-m", "hi", "--permission-mode", "yolo"])
+    assert r.exit_code != 0
+    assert "ask" in r.stdout and "full" in r.stdout
+
+
+def test_a_plain_reply_is_not_rewrapped_by_the_console(capsys: pytest.CaptureFixture) -> None:
+    """A driver parses what the one-shot printed, so the console adds no newlines.
+
+    Hard-wrapping at the terminal width lands a line break inside a JSON string
+    literal, and the reply the caller has to parse stops being JSON.
+    """
+    from raven.cli.agent_commands import _print_agent_response
+
+    line = '{"text": "' + "word " * 60 + '"}'
+    _print_agent_response(line, render_markdown=False)
+    printed = capsys.readouterr().out
+    assert line in printed
+
+
+def test_a_one_shot_whose_mutations_were_refused_says_so_and_exits_3(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Observed: an unattended ``-m`` under the ask tier had every write, spawn
+    and mutating exec refused, was told to carry on without them, and exited 0
+    with nothing on screen to say so. A driver reading the status code could not
+    tell that run from one that did the work."""
+    from raven.permissions.turn import note_refusal
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    def refuse_twice() -> None:
+        reason = "This call requires user approval (ask tier), but this turn is not interactive"
+        note_refusal("write_file", "write_file path=report.md", reason, "unattended")
+        note_refusal("write_file", "write_file path=report.md", "denied earlier", "denied_earlier")
+
+    r, _ = _invoke_agent_capturing_session(monkeypatch, ws, [], during_turn=refuse_twice)
+
+    assert r.exit_code == 3, r.stdout
+    assert "stub-response" in r.stdout
+    # One action, reported once, however many times the model repeated it.
+    assert "1 action(s) were refused" in r.stdout
+    assert "write_file path=report.md" in r.stdout
+    assert "--permission-mode full" in r.stdout
+
+
+def test_a_one_shot_refused_only_by_a_deny_rule_reports_it_and_exits_0(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deny rule is the operator's own policy doing what it was set to do:
+    worth saying, not a failed run, and no advice to widen permissions."""
+    from raven.permissions.turn import note_refusal
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    def deny() -> None:
+        note_refusal("exec", "git push origin main", "blocked by a deny rule", "user_deny")
+
+    r, _ = _invoke_agent_capturing_session(monkeypatch, ws, [], during_turn=deny)
+
+    assert r.exit_code == 0, r.stdout
+    assert "1 action(s) were refused" in r.stdout
+    assert "git push origin main" in r.stdout
+    assert "--permission-mode" not in r.stdout
+
+
+def test_a_one_shot_whose_questions_went_unanswered_says_so_and_exits_0(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A question nobody could answer used to vanish into the model's context.
+    The run still succeeded: the model was told to continue."""
+    from raven.permissions.turn import note_unanswered
+
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+
+    def ask_twice() -> None:
+        note_unanswered("Which base branch?")
+        note_unanswered("Which base branch?")
+
+    r, _ = _invoke_agent_capturing_session(monkeypatch, ws, [], during_turn=ask_twice)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout)
+
+    assert r.exit_code == 0, plain
+    assert "stub-response" in plain
+    assert "1 question(s) went unanswered" in plain
+    assert plain.count("Which base branch?") == 1
+    assert "best judgment" in plain
+    assert "were refused" not in plain
+    assert "--permission-mode" not in plain
+
+
+def test_a_one_shot_with_nothing_refused_prints_no_report(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = tmp_path / "chanwork"
+    ws.mkdir()
+    r, _ = _invoke_agent_capturing_session(monkeypatch, ws, [])
+    assert r.exit_code == 0, r.stdout
+    assert "were refused" not in r.stdout

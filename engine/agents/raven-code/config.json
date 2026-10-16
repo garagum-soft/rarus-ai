@@ -1,0 +1,96 @@
+{
+  "providers": {
+    "custom": {
+      "apiBase": "https://openrouter.ai/api/v1",
+      "models": [
+        "anthropic/claude-opus-5"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-5",
+      "provider": "custom",
+      "reasoningEffort": "high",
+      "temperature": 1.0,
+      "maxTokens": 32768,
+      "contextWindowTokens": 400000,
+      "maxToolIterations": 150,
+      "llmCallTimeout": 1800,
+      "compaction": {
+        "enabled": true
+      }
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": false,
+    "sandbox": {
+      "backend": "none"
+    },
+    "exec": {
+      "timeout": 600
+    },
+    "connectionAdd": true,
+    "web": {
+      "search": {
+        "maxResults": 5
+      }
+    },
+    "disabledTools": [
+      "spawn",
+      "message",
+      "hub",
+      "deep_research",
+      "image_generate",
+      "text_to_speech",
+      "video_generate",
+      "understand_media",
+      "create_playbook",
+      "deliver_files",
+      "load_playbook",
+      "plugin",
+      "raven_config",
+      "run_subagent_dag",
+      "cron",
+      "browser_click",
+      "browser_navigate",
+      "browser_press",
+      "browser_screenshot",
+      "browser_scroll",
+      "browser_snapshot",
+      "browser_tabs",
+      "browser_type"
+    ]
+  },
+  "memory": {
+    "backend": "everos",
+    "userId": "raven-code",
+    "agentId": "raven-code",
+    "memoryTopK": 5
+  },
+  "plugins": {
+    "config": {
+      "everos-memory": {
+        "user_id": "raven-code",
+        "agent_id": "raven-code",
+        "mode": "http",
+        "base_url": "http://localhost:18791"
+      },
+      "code-flow": {
+        "enabled": true,
+        "tools": {
+          "enabled": true,
+          "restrictToWorkspace": false,
+          "exec": {
+            "maxTimeout": 1200
+          }
+        },
+        "projectFiles": [
+          "AGENTS.md",
+          "CLAUDE.md",
+          "CONTEXT.md"
+        ]
+      }
+    }
+  }
+}
