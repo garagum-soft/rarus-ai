@@ -5,7 +5,7 @@
  * The chart is `subagents.org` (name, reports_to, department, title). A roster
  * agent that has no row is "free": drawn, but not in the chart yet. The engine
  * refuses a chart that is not a forest or is deeper than `MAX_DEPTH`
- * (raven/config/update_org.py); `setParent` refuses the same moves up front so
+ * (raven/agent/subagent/org_store.py); `setParent` refuses the same moves up front so
  * the page never sends one. */
 
 export interface OrgRow {

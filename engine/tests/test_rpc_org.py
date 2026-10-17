@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from raven.config import update_org
+from raven.agent.subagent import org_store
 from raven.rpc.dispatcher import Dispatcher
 from raven.rpc.errors import ConfigValidationError
 from raven.rpc.methods.org import org_get, org_set, register_org_methods
@@ -23,7 +23,7 @@ def _rows(*pairs):
 
 
 async def test_an_empty_chart_is_a_flat_roster():
-    assert await org_get({}) == {"members": [], "max_depth": update_org.MAX_DEPTH}
+    assert await org_get({}) == {"members": [], "max_depth": org_store.MAX_DEPTH}
 
 
 async def test_a_saved_chart_is_read_back_and_written_the_way_the_config_spells_it(tmp_path):

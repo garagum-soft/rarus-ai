@@ -22,7 +22,7 @@ from raven.utils.atomic_io import atomic_update
 MAX_DEPTH = 6
 
 
-class OrgRefused(ValueError):
+class OrgRefusedError(ValueError):
     """The rows cannot be saved; the message says why in plain words."""
 
 
@@ -45,18 +45,18 @@ def read_org(*, config_path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def check(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """The rows cleaned and verified, or :class:`OrgRefused`."""
+    """The rows cleaned and verified, or :class:`OrgRefusedError`."""
     clean = [_row(r) for r in rows]
     if any(not r["name"] for r in clean):
-        raise OrgRefused("every row needs a name")
+        raise OrgRefusedError("every row needs a name")
     try:
         chart = OrgChart.from_rows(clean)
     except OrgChartError as exc:
-        raise OrgRefused(str(exc)) from exc
+        raise OrgRefusedError(str(exc)) from exc
     for member in chart.members():
         levels = len(chart.chain_of_command(member.name)) + 1
         if levels > MAX_DEPTH:
-            raise OrgRefused(f"{member.name!r} would sit {levels} levels deep; the chart allows {MAX_DEPTH}")
+            raise OrgRefusedError(f"{member.name!r} would sit {levels} levels deep; the chart allows {MAX_DEPTH}")
     return clean
 
 
@@ -75,5 +75,5 @@ def write_org(rows: Iterable[Mapping[str, Any]], *, config_path: Path | None = N
         return json.dumps(data, indent=2, ensure_ascii=False), None
 
     atomic_update(path, _apply)
-    logger.info("config/update: org chart written ({} rows)", len(clean))
+    logger.info("org_store: org chart written ({} rows)", len(clean))
     return clean

@@ -209,6 +209,8 @@ REGISTERED_COMMAND_NAMES = {
     # Plumbing a sub-agent spawns, not something a person types: `rarus mcp
     # bridge <socket>` pumps frames to a server the host holds open.
     "mcp",
+    # Rarus only: brings a Raven home (chats, memory, settings) into this one.
+    "migrate-raven",
     # Operator notifications: rules route events to webhook, ntfy, sound or desktop.
     "notify",
     "onboard",

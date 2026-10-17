@@ -6,7 +6,7 @@ export interface CanvasData {
   /* One card per name: employees, roster agents and names only the chart holds. */
   agents: AgentNode[]
   org: OrgRow[]
-  /* The deepest level the engine accepts (raven/config/update_org.py). */
+  /* The deepest level the engine accepts (raven/agent/subagent/org_store.py). */
   maxDepth: number
 }
 

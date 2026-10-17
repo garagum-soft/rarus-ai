@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from raven.config import update_org
+from raven.agent.subagent import org_store
 from raven.rpc.errors import ConfigValidationError
 
 if TYPE_CHECKING:
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 
 async def org_get(params: dict) -> dict:
-    members = await asyncio.to_thread(update_org.read_org)
-    return {"members": members, "max_depth": update_org.MAX_DEPTH}
+    members = await asyncio.to_thread(org_store.read_org)
+    return {"members": members, "max_depth": org_store.MAX_DEPTH}
 
 
 async def org_set(params: dict) -> dict:
@@ -22,10 +22,10 @@ async def org_set(params: dict) -> dict:
     if not isinstance(rows, list):
         raise ConfigValidationError("members must be a list")
     try:
-        members = await asyncio.to_thread(update_org.write_org, rows)
-    except update_org.OrgRefused as exc:
+        members = await asyncio.to_thread(org_store.write_org, rows)
+    except org_store.OrgRefusedError as exc:
         raise ConfigValidationError(str(exc), data={"field": "subagents.org"}) from exc
-    return {"members": members, "max_depth": update_org.MAX_DEPTH}
+    return {"members": members, "max_depth": org_store.MAX_DEPTH}
 
 
 def register_org_methods(dispatcher: "Dispatcher") -> None:
