@@ -9,15 +9,29 @@ sign-out or a revoked key takes effect on the next turn.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
 from raven.providers.auth import MissingCredentialsError
 from raven.providers.base import ChatDelta, LLMProvider, LLMResponse
 from raven.providers.litellm_provider import LiteLLMProvider
-from raven.providers.rarus_session import default_api_base, load_key
+from raven.providers.rarus_session import API_PATH, DEFAULT_SITE, SITE_ENV, default_api_base, load_key
 
 PROVIDER_NAME = "rarus"
+
+
+def _api_base(passed: str | None) -> str:
+    """The address chat goes to.
+
+    The registry hands the production address over as the default, so a ``RARUS_SITE`` override (a
+    staging server, a local stand-in) would reach sign-in and balance but not chat. It wins over that
+    default; an address the reader configured themselves is never replaced.
+    """
+    production = DEFAULT_SITE + API_PATH
+    if os.environ.get(SITE_ENV, "").strip() and (not passed or passed.rstrip("/") == production):
+        return default_api_base()
+    return passed or default_api_base()
 
 
 class RarusProvider(LiteLLMProvider):
@@ -28,7 +42,7 @@ class RarusProvider(LiteLLMProvider):
         model_overrides: dict[str, dict[str, Any]] | None = None,
     ):
         super().__init__(
-            api_base=api_base or default_api_base(),
+            api_base=_api_base(api_base),
             default_model=default_model,
             provider_name=PROVIDER_NAME,
             model_overrides=model_overrides,

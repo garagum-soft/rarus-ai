@@ -67,6 +67,17 @@ class TestTheProviderObject:
         assert isinstance(provider, RarusProvider)
         assert provider.api_base == "https://alembox.com/api/agent/v1"
 
+    def test_a_site_override_reaches_chat_and_not_only_sign_in(self, monkeypatch):
+        monkeypatch.setenv(rarus_session.SITE_ENV, "http://127.0.0.1:47901")
+        rarus_session.save_session(KEY)
+        provider = make_provider(_config())
+        assert provider.api_base == "http://127.0.0.1:47901/api/agent/v1"
+
+    def test_an_address_the_reader_configured_is_not_replaced_by_the_override(self, monkeypatch):
+        monkeypatch.setenv(rarus_session.SITE_ENV, "http://127.0.0.1:47901")
+        provider = RarusProvider(default_model="rarus/deepseek-flash", api_base="https://proxy.example/v1")
+        assert provider.api_base == "https://proxy.example/v1"
+
     def test_the_factory_refuses_a_config_that_is_not_signed_in(self):
         with pytest.raises(MissingCredentialsError):
             make_provider(_config())
