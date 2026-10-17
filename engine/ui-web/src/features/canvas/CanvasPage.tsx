@@ -115,7 +115,6 @@ function CanvasBody(): JSX.Element {
         name: '', moved: false, additive: e.shiftKey,
       }
     }
-    stage.current?.setPointerCapture?.(e.pointerId)
   }
 
   const onMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -124,6 +123,11 @@ function CanvasBody(): JSX.Element {
     const dx = e.clientX - d.sx
     const dy = e.clientY - d.sy
     if (!d.moved && Math.hypot(dx, dy) < DRAG_SLOP) return
+    if (!d.moved) {
+      /* Captured only once it is a drag: a capture from the press would send the click and the
+         double click to the stage instead of the card they were on. */
+      stage.current?.setPointerCapture?.(e.pointerId)
+    }
     d.moved = true
     if (d.mode === 'pan') {
       store.setView({ ...s.view, x: d.from.x + dx, y: d.from.y + dy })
@@ -217,7 +221,6 @@ function CanvasBody(): JSX.Element {
       <div className="canvas-bar" role="toolbar" aria-label={t('gui.canvas.tools')}>
         <div className="canvas-title">{t('gui.canvas.page')}</div>
         <span className="canvas-grow" />
-        {notice ? <span className="canvas-notice" role="alert">{notice}</span> : null}
         <button type="button" className="canvas-tool" onClick={() => store.zoomBy(1 / 1.2)} aria-label={t('gui.canvas.zoom_out')}>−</button>
         <span className="canvas-zoom" aria-live="off">{Math.round(s.view.k * 100)}%</span>
         <button type="button" className="canvas-tool" onClick={() => store.zoomBy(1.2)} aria-label={t('gui.canvas.zoom_in')}>+</button>
@@ -226,6 +229,7 @@ function CanvasBody(): JSX.Element {
         <button type="button" className="canvas-tool" disabled={!s.undo.length} onClick={() => void store.undo()}>{t('gui.canvas.undo')}</button>
         <button type="button" className="canvas-tool" aria-pressed={panel} onClick={() => setPanel(!panel)}>{t('gui.canvas.file')}</button>
       </div>
+      {notice ? <div className="canvas-notice" role="alert">{notice}</div> : null}
       <div className="canvas-body">
         <div
           className="canvas-stage"
