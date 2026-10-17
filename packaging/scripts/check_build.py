@@ -40,9 +40,46 @@ ADDRESS_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ("an internal server port", re.compile(rb"127\.0\.0\.1:8115\b")),
 )
 
-#: (path suffix, pattern name) pairs a reviewer judged to be a false positive, each with its reason.
-#: Third-party packages ship version numbers and example addresses that look like private ones.
-ALLOW: tuple[tuple[str, str, str], ...] = ()
+#: (path suffix, pattern name, reason) triples a reviewer judged to be a false positive. They are
+#: reviewed findings of the first full build (2026-10-17): every one is example data inside a
+#: third-party package, none is ours. A new finding in a new file is a failure until it is reviewed.
+_NET10 = "private network address (10.)"
+_NET192 = "private network address (192.168.)"
+_SK = "provider key (sk-...)"
+ALLOW: tuple[tuple[str, str, str], ...] = (
+    ("botocore/data/ec2/2016-04-01/examples-1.json", _NET10, "botocore API example (10.0.0.82)"),
+    ("botocore/data/ec2/2016-09-15/examples-1.json", _NET10, "botocore API example (10.0.0.82)"),
+    ("botocore/data/ec2/2016-11-15/examples-1.json", _NET10, "botocore API example (10.0.0.82)"),
+    ("botocore/data/storagegateway/2013-06-30/examples-1.json", _NET10, "botocore API example (10.1.1.1)"),
+    (
+        "litellm/llms/huggingface/huggingface_llms_metadata/hf_text_generation_models.txt",
+        _SK,
+        "a model name on Hugging Face (sk-kogptv2-...), not a key",
+    ),
+    ("litellm/llms/ollama/completion/transformation.py", _NET10, "an example address in a litellm docstring"),
+    ("litellm/llms/vertex_ai/common_utils.py", _NET10, "an example address in a litellm docstring"),
+    (
+        "litellm/proxy/_experimental/out/_next/static/chunks/1etef47tue5fx.js",
+        _NET10,
+        "litellm admin page: private ranges list",
+    ),
+    (
+        "litellm/proxy/_experimental/out/_next/static/chunks/1etef47tue5fx.js",
+        _NET192,
+        "litellm admin page: private ranges list",
+    ),
+    ("litellm/proxy/_types.py", _NET10, "litellm's own list of private ranges"),
+    ("litellm/proxy/_types.py", _NET192, "litellm's own list of private ranges"),
+    ("litellm/proxy/auth/ip_address_utils.py", _NET10, "litellm's own list of private ranges"),
+    ("litellm/proxy/auth/ip_address_utils.py", _NET192, "litellm's own list of private ranges"),
+    ("litellm/proxy/custom_auth_auto.py", _SK, "a placeholder key in litellm's proxy example"),
+    (
+        "litellm/proxy/management_endpoints/key_management_endpoints.py",
+        _SK,
+        "an example key in litellm's API docstring",
+    ),
+    ("pythonnet/runtime/Python.Runtime.deps.json", _NET10, "a dependency version number (10.0.0.12)"),
+)
 
 #: Where the scan does not go: a sibling's metadata cannot hold ours, and the cache directories are
 #: not shipped.
@@ -51,7 +88,9 @@ SKIP_DIRS = frozenset({"__pycache__", ".git", "node_modules"})
 #: Python and its libraries print version triples as 10.x.y.z-looking runs in compiled tables; a
 #: binary file is read for key shapes only, which are anchored on a prefix, never for the numeric
 #: addresses -- the one pattern family that is noise in machine code.
-_BINARY_SUFFIXES = frozenset({".exe", ".dll", ".pyd", ".so", ".bin", ".onnx", ".pyc", ".lance", ".ico", ".png", ".jpg", ".woff2"})
+_BINARY_SUFFIXES = frozenset(
+    {".exe", ".dll", ".pyd", ".so", ".bin", ".onnx", ".pyc", ".lance", ".ico", ".png", ".jpg", ".woff2"}
+)
 
 
 @dataclass(frozen=True)
@@ -93,7 +132,9 @@ def scan_bytes(path: Path, data: bytes) -> list[Finding]:
     if path.suffix.lower() not in _BINARY_SUFFIXES:
         patterns += list(ADDRESS_PATTERNS)
     else:
-        patterns += [p for p in ADDRESS_PATTERNS if p[0] in {"dev secret", "the server's address", "an internal server port"}]
+        patterns += [
+            p for p in ADDRESS_PATTERNS if p[0] in {"dev secret", "the server's address", "an internal server port"}
+        ]
     found: list[Finding] = []
     for what, pattern in patterns:
         if _allowed(path, what):
