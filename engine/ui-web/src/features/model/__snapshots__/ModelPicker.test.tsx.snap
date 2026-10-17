@@ -63,7 +63,6 @@ exports[`the model picker > keeps its rendered shape 1`] = `
         span.ct
       button.row
         span.nm
-        span.tick
       button.row
         span.nm
     div.model-group[data-provider=anthropic]

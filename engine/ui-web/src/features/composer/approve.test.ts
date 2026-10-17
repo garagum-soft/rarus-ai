@@ -642,12 +642,12 @@ describe('the permission approval sheet', () => {
     expect(document.querySelector('.cp-json')!.textContent).toContain('"n": 3')
   })
 
-  it('names a sub-agent as the one asking, and Raven otherwise', () => {
+  it('names a sub-agent as the one asking, and Rarus otherwise', () => {
     setTranslator((key, vars) => `${key}|${String(vars?.who ?? '')}`)
     openApproval(fresh({ ...base, origin: { kind: 'subagent', name: 'raven-code' } }), handlers())
     expect(document.querySelector('.cp-why')!.textContent).toBe('gui.confirm.why.delete_command|raven-code')
     openApproval(fresh(base), handlers())
-    expect(document.querySelector('.cp-why')!.textContent).toBe('gui.confirm.why.delete_command|Raven')
+    expect(document.querySelector('.cp-why')!.textContent).toBe('gui.confirm.why.delete_command|Rarus')
   })
 
   it('answers at once and leaves nothing behind when there is nothing to do', () => {

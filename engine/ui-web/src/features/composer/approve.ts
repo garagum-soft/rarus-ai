@@ -251,7 +251,7 @@ function wordsFor(req: ApprovalReq): GateWords {
        it and leaves names, commands and paths alone (the same rule the
        sub-agent's own name rides on), so the default agent's name is a literal
        here rather than a key. */
-    who: req.origin?.kind === 'subagent' && req.origin.name ? req.origin.name : 'Raven',
+    who: req.origin?.kind === 'subagent' && req.origin.name ? req.origin.name : 'Rarus',
     cwd: str(ev.cwd) || str(ev.machine),
     /* The sentence gets the short form and the evidence block keeps the whole
        path: one absolute path is four lines of a small sheet, and printing it

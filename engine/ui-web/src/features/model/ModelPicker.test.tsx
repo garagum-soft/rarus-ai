@@ -394,8 +394,8 @@ describe('the model picker, choosing', () => {
     })
     /* Forward then back: the chip must never be left claiming a model the
        config did not take. */
-    expect(h.local).toEqual(['minimax-m2', 'minimax-m3'])
-    expect(h.model()).toBe('minimax-m3')
+    expect(h.local).toEqual(['minimax-m2', 'deepseek-flash'])
+    expect(h.model()).toBe('deepseek-flash')
     expect(h.toasts).toEqual(['gui.op.switch_failed {"detail":"no such model"}'])
   })
 

@@ -49,7 +49,7 @@ const CLOSED: OpenAt = { host: null, after: null, footer: false, scope: 'session
 
 let at: OpenAt = CLOSED
 let epoch = 0
-let selected = 'minimax-m3'
+let selected = 'deepseek-flash'
 /* The account the conversation is on. A pick names one, and two accounts can
    list the same id, so the model alone cannot say which row is the one in
    force. Empty means nothing has said -- the served frame, and a page that has
@@ -284,7 +284,7 @@ const detail = (e: unknown): string => {
 export function _resetForTests(): void {
   at = CLOSED
   epoch = 0
-  selected = 'minimax-m3'
+  selected = 'deepseek-flash'
   selectedAt = ''
   subs.clear()
 }
