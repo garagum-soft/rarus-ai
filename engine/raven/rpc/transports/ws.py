@@ -34,9 +34,9 @@ _PORT_PROBE_SPAN = 20
 _NONCE_TTL_S = 30 * 60.0
 
 _AUTH_PAGE = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Raven</title></head>
+<html><head><meta charset="utf-8"><title>Rarus AI</title></head>
 <body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0">
-<p id="s">Signing in to Raven...</p>
+<p id="s">Signing in to Rarus...</p>
 <script>
 (async () => {
   const nonce = location.hash.slice(1);

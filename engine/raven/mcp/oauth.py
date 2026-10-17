@@ -241,7 +241,7 @@ def _page(ok: bool, message: str) -> str:
     title = "Authorization complete" if ok else "Authorization failed"
     safe = html.escape(message)
     return (
-        "<!doctype html><meta charset='utf-8'><title>Raven</title>"
+        "<!doctype html><meta charset='utf-8'><title>Rarus AI</title>"
         "<body style='display:flex;align-items:center;justify-content:center;height:96vh;"
         "background:#16150f;color:#f7f2e4;font:15px/1.6 -apple-system,sans-serif'>"
         f"<div style='text-align:center'><div style='font-size:34px;color:{tone}'>{'✓' if ok else '✕'}</div>"
