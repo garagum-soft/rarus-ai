@@ -61,7 +61,7 @@ import pytest
 
 from tests.tui.autotest.raven_ux import READY_RE, exit_tui
 
-_EXPECTED = r"Raven Status"
+_EXPECTED = r"Rarus Status"
 
 
 @pytest.mark.e2e

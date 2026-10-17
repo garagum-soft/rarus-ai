@@ -34,7 +34,7 @@ _THREAD_CHUNK = 64 * 1024
 # interactive surface to discover it from: a client spawns it, and everything a
 # person needs in order to point it at the right instance, find its log, or drive
 # it by hand has nowhere else to appear.
-_HELP = """Serve Raven as an ACP agent over stdio.
+_HELP = """Serve Rarus as an ACP agent over stdio.
 
 A client -- an editor, or another agent -- spawns this process and
 speaks the Agent Client Protocol to its stdin and stdout:

@@ -30,14 +30,14 @@ def test_status_help_works() -> None:
     """``rarus status --help`` lists the command without error."""
     r = runner.invoke(app, ["status", "--help"])
     assert r.exit_code == 0
-    assert "Show Raven status" in r.stdout
+    assert "Show Rarus status" in r.stdout
 
 
 def test_status_without_config_still_runs(tmp_config: Path) -> None:
     """Status runs even when no config file exists (load_config returns defaults)."""
     r = runner.invoke(app, ["status"])
     assert r.exit_code == 0
-    assert "Raven Status" in r.stdout
+    assert "Rarus Status" in r.stdout
     assert "Config:" in r.stdout
     assert "Workspace:" in r.stdout
 

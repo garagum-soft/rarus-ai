@@ -373,7 +373,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
     gateway_app = typer.Typer(
         invoke_without_command=True,
         no_args_is_help=False,
-        help="Start the Raven gateway, or drive a running one (reload / status / stop).",
+        help="Start the Rarus gateway, or drive a running one (reload / status / stop).",
     )
     app.add_typer(gateway_app, name="gateway")
     gateway_control_commands.register(gateway_app)
@@ -416,7 +416,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
             False, "--dev", help="Developer launch: serve the trajectory view in the hosted page."
         ),
     ):
-        """Start the Raven gateway."""
+        """Start the Rarus gateway."""
         if ctx.invoked_subcommand is not None:
             return
         from raven.trajectory import policy as trajectory_policy
@@ -467,7 +467,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
         except GatewayAlreadyRunningError as exc:
             since = datetime.fromtimestamp(exc.info.started_at).strftime("%Y-%m-%d %H:%M:%S")
             console.print(
-                f"[red]✗[/red] Raven gateway already running for this instance "
+                f"[red]✗[/red] Rarus gateway already running for this instance "
                 f"(pid {exc.info.pid}, since {since}).\n"
                 f"  Stop it first, or use --config to run a separate instance."
             )
@@ -480,7 +480,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
         print_config_migration_notices()
         port = port if port is not None else config.gateway.port
 
-        console.print(f"{__logo__} Starting Raven gateway on port {port}...")
+        console.print(f"{__logo__} Starting Rarus gateway on port {port}...")
         console.print(f"[dim]📝 Logs → {log_path}[/dim]")
         banner = _risk_banner(config)
         if banner is not None:

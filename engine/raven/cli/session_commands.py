@@ -306,7 +306,7 @@ def switch_cmd(
     timeout: float = typer.Option(120.0, "--timeout", help="Seconds to wait for work in flight"),
     command: str = typer.Option("", "--command", help="The terminal resume command; must contain {agent_id}"),
 ) -> None:
-    """Hand an agent instance's conversation between Raven's chat and the agent's own terminal (a tmux pane)."""
+    """Hand an agent instance's conversation between Rarus's chat and the agent's own terminal (a tmux pane)."""
     import asyncio
 
     from raven.agent.subagent.instances import InstanceRegistry

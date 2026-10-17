@@ -16,7 +16,7 @@ import typer
 from raven.acp.stdio import claim_stdout
 from raven.mcp.bridge import run_bridge
 
-mcp_app = typer.Typer(name="mcp", help="MCP: the plumbing for sub-agents, and Raven's own MCP server.")
+mcp_app = typer.Typer(name="mcp", help="MCP: the plumbing for sub-agents, and Rarus's own MCP server.")
 
 
 @mcp_app.command("bridge")
@@ -29,7 +29,7 @@ def bridge(socket_path: str = typer.Argument(..., help="Unix socket the host is 
 
 @mcp_app.command("serve")
 def serve() -> None:
-    """Serve Raven's own tools (tasks, sessions, agents, channels) to an MCP client over stdio.
+    """Serve Rarus's own tools (tasks, sessions, agents, channels) to an MCP client over stdio.
 
     Drives the Raven running on this machine (`rarus web`): register this
     command as a stdio MCP server in the client, e.g. `rarus mcp serve`.

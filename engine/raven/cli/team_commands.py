@@ -121,7 +121,7 @@ def reject(
 
 @team_app.command("list")
 def list_teams() -> None:
-    """The teams (projects) sharing this Raven, their limits, and the conversations each one owns."""
+    """The teams (projects) sharing this Rarus, their limits, and the conversations each one owns."""
     from raven.agent.subagent.teams import TeamTable
     from raven.config.loader import load_config
     from raven.home import raven_home

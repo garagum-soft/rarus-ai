@@ -200,7 +200,7 @@ def _login_claude_subscription() -> None:
     if code != 0 or not claude.login_status():
         console.print("[red]✗ Not signed in to Claude[/red]")
         raise typer.Exit(1)
-    console.print("[green]✓ Signed in to Claude; Raven can use it as provider `claude_subscription`[/green]")
+    console.print("[green]✓ Signed in to Claude; Rarus can use it as provider `claude_subscription`[/green]")
 
 
 @_register_login("github_copilot")

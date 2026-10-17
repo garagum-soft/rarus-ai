@@ -863,7 +863,7 @@ def _render_permission_and_sandbox(features: FeaturesInfo) -> None:
 
 
 def _render_human_output(report: DoctorReport) -> None:
-    console.print(f"\n{__logo__} Raven Doctor\n")
+    console.print(f"\n{__logo__} Rarus Doctor\n")
 
     install = report.install
     if install is not None and not install.complete:
@@ -894,7 +894,7 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(f"  Workspace: {paths.workspace_path}  {mark}")
 
     if not paths.config_exists:
-        console.print("\n[yellow]⚠ Raven is not configured.[/yellow] Run [cyan]rarus onboard[/cyan] to set it up.")
+        console.print("\n[yellow]⚠ Rarus is not configured.[/yellow] Run [cyan]rarus onboard[/cyan] to set it up.")
         return
 
     if not report.config_loaded:
@@ -1088,7 +1088,7 @@ def register(app: typer.Typer) -> None:
             min=1,
         ),
     ) -> None:
-        """Health-check Raven config, routing, and (optionally) the LLM.
+        """Health-check Rarus config, routing, and (optionally) the LLM.
 
         ``--fix`` is consent, not a mode: without it the config findings are
         reported and nothing is written, because each one is a value somebody

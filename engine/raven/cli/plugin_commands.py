@@ -318,7 +318,7 @@ def _render_plugin_table(
         return
 
     table = Table(
-        title="Raven plugins",
+        title="Rarus plugins",
         show_header=True,
         header_style="bold cyan",
     )

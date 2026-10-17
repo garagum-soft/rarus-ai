@@ -152,7 +152,7 @@ def _print_agent_response(response: str, render_markdown: bool) -> None:
     if _print_llm_error(content):
         return
     console.print()
-    console.print(f"[cyan]{__logo__} Raven[/cyan]")
+    console.print(f"[cyan]{__logo__} Rarus AI[/cyan]")
     if render_markdown:
         console.print(Markdown(content))
     else:
@@ -287,7 +287,7 @@ def register(app: typer.Typer) -> None:
         ),
         config: str | None = typer.Option(None, "--config", help="Config file path"),
         markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-        logs: bool = typer.Option(False, "--logs/--no-logs", help="Show Raven runtime logs during chat"),
+        logs: bool = typer.Option(False, "--logs/--no-logs", help="Show Rarus runtime logs during chat"),
         fake_now: str | None = typer.Option(
             None,
             "--fake-now",
@@ -459,7 +459,7 @@ def register(app: typer.Typer) -> None:
                 from contextlib import nullcontext
 
                 return nullcontext()
-            return console.status("[dim]Raven is thinking...[/dim]", spinner="dots")
+            return console.status("[dim]Rarus is thinking...[/dim]", spinner="dots")
 
         # Single message mode — one USER turn through spine (submit -> lane ->
         # run_turn -> hub -> CliOutlet), with the cli/direct defaults

@@ -17,7 +17,7 @@ from rich.table import Table
 
 from raven.auth.pairing import default_store
 
-remote_app = typer.Typer(help="Pair remote devices with this Raven, list them, revoke them.")
+remote_app = typer.Typer(help="Pair remote devices with this Rarus, list them, revoke them.")
 console = Console()
 
 

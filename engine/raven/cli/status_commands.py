@@ -15,7 +15,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def status():
-        """Show Raven status."""
+        """Show Rarus status."""
         from raven.config.loader import (
             ConfigReadError,
             get_config_path,
@@ -27,7 +27,7 @@ def register(app: typer.Typer) -> None:
         config = load_config()
         workspace = config.workspace_path
 
-        console.print(f"{__logo__} Raven Status\n")
+        console.print(f"{__logo__} Rarus Status\n")
 
         # Three states, not two: a present-but-unparseable file used to show the
         # same checkmark as a healthy one, right before the provider walk below

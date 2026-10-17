@@ -548,7 +548,7 @@ def _refuse_incomplete_install(label: str = "rarus serve") -> None:
         # sound -- but not for this process to run. It already holds half of the
         # build that was replaced, and every import still to come would load off
         # disk from the other one.
-        typer.echo(f"{label}: the upgrade finished; start Raven again to run it.", err=True)
+        typer.echo(f"{label}: the upgrade finished; start Rarus again to run it.", err=True)
     elif fault.reason == "upgrading":
         typer.echo(
             f"{label}: the upgrade has not finished; not starting on a half-written installation.",
@@ -1640,7 +1640,7 @@ def register(app: typer.Typer) -> None:
         open_browser: bool = typer.Option(False, "--open", help="Open the served page in a browser."),
         dev: bool = typer.Option(False, "--dev", help="Developer launch: serve the trajectory view in the page."),
     ) -> None:
-        """Run the headless Raven gateway (WebSocket RPC, plus a page when one is built)."""
+        """Run the headless Rarus gateway (WebSocket RPC, plus a page when one is built)."""
         # A `rarus gateway` with the page mounted is already this engine, and
         # a second engine on the same agent home would race it over the same
         # sessions and the same store. Attach instead of starting; anything
@@ -1683,7 +1683,7 @@ def register(app: typer.Typer) -> None:
         ),
         dev: bool = typer.Option(False, "--dev", help="Developer launch: enable the trajectory view in the page."),
     ) -> None:
-        """Open Raven in a browser, on a gateway that stays up after you close the terminal."""
+        """Open Rarus in a browser, on a gateway that stays up after you close the terminal."""
         _web(port, foreground=foreground, stop=stop, supervise=supervise, dev=dev)
 
 

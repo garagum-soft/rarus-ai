@@ -30,7 +30,7 @@ def test_gateway_help_works() -> None:
     """``rarus gateway --help`` lists the documented options."""
     r = runner.invoke(app, ["gateway", "--help"])
     assert r.exit_code == 0
-    assert "Start the Raven gateway" in r.stdout
+    assert "Start the Rarus gateway" in r.stdout
     assert "--port" in r.stdout
     assert "--workspace" in r.stdout
     assert "--verbose" in r.stdout

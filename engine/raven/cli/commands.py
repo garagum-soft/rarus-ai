@@ -97,10 +97,10 @@ def main(
     dev: bool = typer.Option(
         False,
         "--dev",
-        help="Developer launch: enable the trajectory view in the web page (bare `raven` only).",
+        help="Developer launch: enable the trajectory view in the web page (bare `rarus` only).",
     ),
 ):
-    """Raven - Agent Framework.
+    """Rarus AI - Agent Framework.
 
     Bare ``raven`` (no subcommand) opens the page, the same as ``rarus web``:
     that is where the installer ends, so the command a reader types the next day

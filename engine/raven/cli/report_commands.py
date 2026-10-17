@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-report_app = typer.Typer(name="report", help="Reports, retrospectives and the run archive, from what Raven recorded.")
+report_app = typer.Typer(name="report", help="Reports, retrospectives and the run archive, from what Rarus recorded.")
 
 
 def _paths() -> tuple[Path, Path]:

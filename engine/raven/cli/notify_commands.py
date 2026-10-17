@@ -33,7 +33,7 @@ def test_channel(channel: str = typer.Argument(..., help="A channel name from ga
         daily_cap=settings.daily_cap,
     )
     [delivery] = notifier.dispatch(
-        Event(kind="test", priority="critical", title="Raven test notification", key=f"test:{time.time()}")
+        Event(kind="test", priority="critical", title="Rarus test notification", key=f"test:{time.time()}")
     ) or [None]
     if delivery is None or not delivery.sent:
         typer.echo(f"{channel}: not sent ({delivery.reason if delivery else 'no delivery'})", err=True)

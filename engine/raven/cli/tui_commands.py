@@ -33,7 +33,7 @@ from raven.i18n import t
 from raven.rpc.cron_events import build_cron_callback_spine, fanout_cron_missed
 from raven.utils import asyncio_runner as bounded_asyncio
 
-tui_app = typer.Typer(name="tui", help="Launch Raven native TUI (Ink+React).")
+tui_app = typer.Typer(name="tui", help="Launch Rarus native TUI (Ink+React).")
 
 # Path to the ui-tui/ source tree, relative to this file:
 # raven/cli/tui_commands.py -> ../../../ui-tui/. Only the `--dev` path (tsx from
@@ -929,7 +929,7 @@ def tui(
         help="Run the embedded engine even when a gateway already hosts the page.",
     ),
 ) -> None:
-    """Launch Raven native TUI."""
+    """Launch Rarus native TUI."""
     if ctx.invoked_subcommand is not None:
         return
 

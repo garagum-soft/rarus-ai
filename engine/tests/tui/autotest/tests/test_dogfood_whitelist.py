@@ -37,7 +37,7 @@ from tests.tui.autotest.raven_ux import READY_RE, exit_tui
 # One entry per rendering shape the stack can produce, not one per command:
 _WHITELIST = [
     # top-level command, panel output
-    ("status", r"Raven Status"),
+    ("status", r"Rarus Status"),
     # long output -> pager overlay, and a table header the welcome frame's own
     # "Available Skills (1)" line cannot satisfy
     ("skill list", r"Source.+Description"),
