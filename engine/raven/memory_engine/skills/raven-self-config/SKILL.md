@@ -7,14 +7,14 @@ metadata: {"raven":{"emoji":"🛠️","always":true,"inject":"description","requ
 # Configuring Raven itself
 
 `raven_config` is the only way you change Raven's configuration. Never edit
-`config.json`, an agent's `.env`, or anything under `~/.raven` with file or shell
+`config.json`, an agent's `.env`, or anything under `~/.rarus` with file or shell
 tools: those writes skip validation, skip the user's confirmation, and a config
 that fails validation stops Raven from starting.
 
 Raven's source code, logs and config files are not a manual. To find out what
 can be configured or why something is set up the way it is, use
 `raven_config` and nothing else: do not grep or read Raven's source, its logs,
-`~/.raven` or another Raven's files. If `raven_config` has no setting for it,
+`~/.rarus` or another Raven's files. If `raven_config` has no setting for it,
 tell the user it cannot be changed from here (and where, if Settings has it);
 that answer is correct and complete.
 

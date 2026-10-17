@@ -378,6 +378,6 @@ def test_with_no_config_path_to_stand_beside_the_home_is_the_answer(tmp_path, mo
         raise RuntimeError("no config")
 
     monkeypatch.setattr(paths, "get_config_path", no_config)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.delenv(connections.CONNECTIONS_ENV, raising=False)
     assert _REAL_STORE_PATH() == tmp_path / "home" / "connections.json"

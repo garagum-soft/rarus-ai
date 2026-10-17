@@ -21,7 +21,7 @@ Raven does not back with real functionality:
 * ``rollback.list`` / ``rollback.diff`` / ``rollback.restore`` — fs-level
   rollback (we point users at ``git`` instead)
 * ``tools.configure`` — TUI-side tool config editor; in Raven users edit
-  ``~/.raven/config.json`` directly
+  ``~/.rarus/config.json`` directly
 * ``session.{save, steer}`` — hermes session-mgmt slash commands Raven
   doesn't back yet (``session.{branch, compress, status, title, undo, usage}``
   were promoted to real handlers in methods/session.py)

@@ -6117,7 +6117,7 @@ export interface EmployeesListResult {
   employees: {
     name: string;
     /**
-     * The folder under <RAVEN_HOME>/employees.
+     * The folder under <RARUS_HOME>/employees.
      */
     folder: string;
     /**
@@ -6173,7 +6173,7 @@ export interface EmployeesHireResult {
   employee: {
     name: string;
     /**
-     * The folder under <RAVEN_HOME>/employees.
+     * The folder under <RARUS_HOME>/employees.
      */
     folder: string;
     /**

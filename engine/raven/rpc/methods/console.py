@@ -716,7 +716,7 @@ async def settings_set(params: dict, *, agent_loop_factory=None) -> dict:
         written = _write_raw_key(key, checker(value), merge=key in _MERGED_KEYS)
         if key in MIRRORED_KEYS:
             # cli/acp sub-agents read every web credential from the
-            # environment, not from the config, so the ~/.raven/env mirror has
+            # environment, not from the config, so the ~/.rarus/env mirror has
             # to follow the write or they keep running on the key this call
             # just replaced.
             refresh_env_file()
@@ -1092,7 +1092,7 @@ async def settings_usage(params: dict, *, agent_loop_factory=None) -> dict:
     """Aggregate API usage for the settings page.
 
     Both halves read the same UsageTracker telemetry files
-    (``~/.raven/telemetry/usage-YYYY-MM-DD.jsonl``, one JSON row per call, one
+    (``~/.rarus/telemetry/usage-YYYY-MM-DD.jsonl``, one JSON row per call, one
     per tool call), so one range means one thing across the whole reply. The
     scan is read-only and bounded by ``days`` (default 30, max 90). Session
     transcripts are read for their titles only.
@@ -1127,7 +1127,7 @@ async def settings_usage(params: dict, *, agent_loop_factory=None) -> dict:
     models: dict[str, dict[str, Any]] = {}
     total = empty_totals()
     # The same resolution the writer uses (usage_tracker._default_telemetry_dir):
-    # both used to hardcode ~/.raven, which held together only until RAVEN_HOME
+    # both used to hardcode ~/.rarus, which held together only until RARUS_HOME
     # moved one of them.
     from raven.config.loader import raven_home
 
@@ -1800,7 +1800,7 @@ def _workspace_root(loop, session_key: str = "") -> Path:
     """The directory the page's file panel is rooted at.
 
     The working directory the session's turns run in, not agent home: home is
-    ``~/.raven/workspace`` by default, which holds the agent's own memory and
+    ``~/.rarus/workspace`` by default, which holds the agent's own memory and
     is not where a launch-directory turn reads or writes anything. Resolved
     per session because a session can be pinned to its own directory (the
     persisted ``workdir`` override); an empty key falls through to the
@@ -1836,7 +1836,7 @@ def _resolve_inside(root: Path, rel: str) -> Path:
     The same fence the viewer and `fs.reveal` apply -- literally the same
     function, because a second copy of it drifted immediately: the first one
     here lacked the workspace carve-out, so with the root at the default
-    ``~/.raven/workspace`` it refused every file the agent had written, which is
+    ``~/.rarus/workspace`` it refused every file the agent had written, which is
     this bug mirrored. Anchored the same way, too: agent home decides what the
     fence exempts, and the session root is only added to that, never put in
     home's place -- which is how the viewer came to refuse the session directory.

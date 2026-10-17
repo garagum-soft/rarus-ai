@@ -34,7 +34,7 @@ from tests._tls import OpenAIModels, connect_proxy, https_endpoint, private_ca
 
 @pytest.fixture
 def cfg_path(tmp_path: Path) -> Path:
-    """Sandboxed config path; the real ``~/.raven/config.json`` is never touched."""
+    """Sandboxed config path; the real ``~/.rarus/config.json`` is never touched."""
     return tmp_path / "config.json"
 
 

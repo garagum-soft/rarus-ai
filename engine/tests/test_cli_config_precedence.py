@@ -6,7 +6,7 @@ Pre-fix, both subcommands called ``load_raven_config()`` BEFORE
 reads the module-global ``_current_config_path`` (which
 ``_load_runtime_config`` sets via ``set_config_path``), the extension
 blocks (``sentinel`` / ``skill_forge`` / ``context`` / ``token_wise``)
-silently fell back to ``~/.raven/config.json`` regardless of the
+silently fell back to ``~/.rarus/config.json`` regardless of the
 ``--config`` flag.
 
 Real-world impact: every claweval / PinchBench experiment passing a
@@ -76,15 +76,15 @@ def test_load_raven_config_reads_from_set_config_path(
     monkeypatch,
 ):
     """Contract: after ``set_config_path(X)``, ``load_raven_config()``
-    must read from X — not from ``~/.raven/config.json``.
+    must read from X — not from ``~/.rarus/config.json``.
 
     This is the invariant the CLI relies on. If a future refactor
     breaks it (e.g. ``load_raven_config`` starts reading
-    ``Path.home() / ".raven" / "config.json"`` directly), the CLI's
+    ``Path.home() / ".rarus" / "config.json"`` directly), the CLI's
     ``--config`` flag becomes a no-op for extension blocks again.
     """
     # Default global → summary
-    global_cfg = isolated_config_state / ".raven" / "config.json"
+    global_cfg = isolated_config_state / ".rarus" / "config.json"
     _write_json(
         global_cfg,
         _minimal_base_config(
@@ -115,7 +115,7 @@ def test_load_raven_config_reads_from_set_config_path(
     cfg_before = load_raven_config()
     assert cfg_before.skill_forge.injection_mode == "summary", (
         "Without set_config_path, load_raven_config must read the "
-        "default ~/.raven/config.json (which we stubbed to summary)."
+        "default ~/.rarus/config.json (which we stubbed to summary)."
     )
 
     # Action: set_config_path → reads custom (full_body)
@@ -147,13 +147,13 @@ def test_cli_subcommand_loads_extension_blocks_from_custom_config(
     monkeypatch,
 ):
     """``raven {agent,gateway} --config X`` must load skill_forge from
-    X, not from ``~/.raven/config.json``.
+    X, not from ``~/.rarus/config.json``.
 
     Before the fix, both subcommands called ``load_raven_config()``
     before ``_load_runtime_config(--config)``, so the global config
     won. This test:
 
-      1. Stubs ~/.raven/config.json with skill_forge.injection_mode=summary
+      1. Stubs ~/.rarus/config.json with skill_forge.injection_mode=summary
       2. Writes a custom config with injection_mode=full_body
       3. Patches ``load_raven_config`` to capture the loaded value
          then raise (so the rest of the subcommand prologue is skipped).
@@ -164,7 +164,7 @@ def test_cli_subcommand_loads_extension_blocks_from_custom_config(
     the assertion fails with a pointer to the bug.
     """
     # 1. Global config → summary (should be IGNORED when --config is passed)
-    global_cfg = isolated_config_state / ".raven" / "config.json"
+    global_cfg = isolated_config_state / ".rarus" / "config.json"
     _write_json(
         global_cfg,
         _minimal_base_config(

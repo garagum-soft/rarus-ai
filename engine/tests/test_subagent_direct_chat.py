@@ -886,7 +886,7 @@ async def test_a_direct_chat_runs_in_the_session_workdir_not_agent_home(tmp_path
 
     Agent home is raven's memory and skills; the session working directory is
     the work. Passing nothing fell back to the first, so a direct chat about the
-    checkout the user is sitting in ran its commands against ``~/.raven/workspace``
+    checkout the user is sitting in ran its commands against ``~/.rarus/workspace``
     and answered about that instead -- measured on a live codex turn, whose
     ``pwd`` came back as agent home.
 

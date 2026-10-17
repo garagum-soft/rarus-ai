@@ -971,7 +971,7 @@ The buffered response captured against `mirothinker-1-7-deepresearch` on
 `tests/fixtures/mirothinker/buffered_research.json`. If it is gone, re-capture
 with a `POST` to `https://api.miromind.ai/v1/chat/completions`, `stream: false`,
 one user message asking a question that forces a lookup, using the `apiKey` from
-the `openai` entry in `~/.raven/config.json`. Do not commit the key, and do not
+the `openai` entry in `~/.rarus/config.json`. Do not commit the key, and do not
 put it in the fixture - the response body carries none.
 
 - [ ] **Step 2: Write the failing test**

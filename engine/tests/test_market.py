@@ -280,7 +280,7 @@ async def test_every_catalog_mcp_template_is_valid(monkeypatch):
 def test_a_catalog_id_cannot_escape_the_ledger_directory(bad_id: str) -> None:
     """Both the hosted catalogue and the RPC caller supply these ids, and
     ``Path.__truediv__`` honours ``..`` and absolute strings alike. Without this
-    an id of ``../config`` resolves to ~/.raven/config.json, which uninstall then
+    an id of ``../config`` resolves to ~/.rarus/config.json, which uninstall then
     unlinks; ``../credentials/mcp/github`` takes a stored OAuth refresh token."""
     from raven.market.ledger import LedgerIdError, ledger_path
 

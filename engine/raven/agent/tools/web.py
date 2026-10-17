@@ -327,7 +327,7 @@ class WebSearchTool(Tool):
         if not key:
             # Reachable only if the key goes away after registration, since the
             # loops withhold this tool when there is none. Name the file actually
-            # in force: hard-coding ~/.raven/config.json sent anyone running with
+            # in force: hard-coding ~/.rarus/config.json sent anyone running with
             # --config to edit a file the process never reads.
             from raven.config.loader import get_config_path
 

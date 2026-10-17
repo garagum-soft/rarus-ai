@@ -204,7 +204,7 @@ def test_a_problem_raised_in_the_attention_queue_reaches_the_webhook_through_the
     from raven.config.loader import set_config_path
     from raven.proactive_engine.attention import AttentionQueue
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     config = tmp_path / "config.json"
     config.write_text(
         json.dumps(

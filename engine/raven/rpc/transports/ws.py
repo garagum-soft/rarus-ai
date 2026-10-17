@@ -92,7 +92,7 @@ class WsGateway:
         #
         # ``session_token`` is the shared secret. It mints nonces, and a holder
         # can issue itself durable credentials, so it never leaves the process
-        # except into ~/.raven/serve.json (0600) for a relauncher to read.
+        # except into ~/.rarus/serve.json (0600) for a relauncher to read.
         #
         # ``session_cookie`` is what the browser holds. Cookies ignore port
         # (RFC 6265 section 8.5), so anything the user's browser talks to on

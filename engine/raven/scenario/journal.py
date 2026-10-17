@@ -1,6 +1,6 @@
 """The record a scenario run leaves: what it ran, what came back, what it sent and received.
 
-One directory per run under ``<RAVEN_HOME>/scenario_runs/<run id>/``: an
+One directory per run under ``<RARUS_HOME>/scenario_runs/<run id>/``: an
 append-only ``journal.jsonl`` of events, ``meta.json`` (name, arguments,
 status, timing) rewritten as the run moves, and ``result.md``.
 """

@@ -7,7 +7,7 @@ the nudge suggested), the tracker records it against the original dispatch
 event.
 
 Persistence: append-only JSONL at ``{sentinel_dir}/feedback.jsonl``
-(default ``~/.raven/sentinel/feedback.jsonl``). The ledger feeds
+(default ``~/.rarus/sentinel/feedback.jsonl``). The ledger feeds
 NudgePolicy's user-level acceptance-rate model, so it lives next to
 ``state.json`` rather than under agent home.
 

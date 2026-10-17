@@ -592,7 +592,7 @@ class TestOwnershipReachesTheIdentityPrompt:
 
         Every case here goes through the real tool table, which reads
         ``tools.disabledTools`` from whatever config file is current -- so without
-        this they consult the developer's own ``~/.raven/config.json``, and a
+        this they consult the developer's own ``~/.rarus/config.json``, and a
         locally disabled ``spawn`` makes them red on one machine and green in CI.
         """
         self._switches = tmp_path / "config.json"

@@ -22,7 +22,7 @@ Three words carry precise, different meanings here:
 
 | Word | Means | Where it lives |
 |---|---|---|
-| **agent** | the thing itself: a folder the roster discovers, spawns, and dispatches to | `agents/<name>/` or `$RAVEN_HOME/agents/<name>/` |
+| **agent** | the thing itself: a folder the roster discovers, spawns, and dispatches to | `agents/<name>/` or `$RARUS_HOME/agents/<name>/` |
 | **harness** | the mechanism an agent steers the loop with: plugins contributing tools and hooks | `plugins/<id>/` inside the agent, or an engine wheel |
 | **subagent** | the protocol seat: the roster row the dispatching model picks, spoken over ACP | `subagent.json`, validated by `raven/config/schema.py` |
 
@@ -35,7 +35,7 @@ raven agents new my-agent
 That is the whole quick start. Five things happen, and the command prints a
 four-segment card as they do:
 
-1. **`1/4 wrote`** -- eleven files land under `$RAVEN_HOME/agents/my-agent/`
+1. **`1/4 wrote`** -- eleven files land under `$RARUS_HOME/agents/my-agent/`
    (assembled in a staging directory and renamed as a whole, so a failure
    never leaves a half-written agent). `--here` lands in `./agents/<name>`
    instead; `--dry-run` prints the tree and writes nothing.
@@ -55,7 +55,7 @@ four-segment card as they do:
 4. **`4/4 next`** -- restart the gateway so a live raven re-reads the tree;
    fill in the two TODO prompts in `subagent.json`; optionally pin the row.
 
-There is no registration step: a folder under `$RAVEN_HOME/agents/` is
+There is no registration step: a folder under `$RARUS_HOME/agents/` is
 discovered on every scan (the home tree is discovery's first priority, and it
 survives upgrades). Dispatch happens when the host's model reads your row's
 `description` and picks it -- which is why those TODOs matter.

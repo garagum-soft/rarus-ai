@@ -63,7 +63,7 @@ describe('about page', () => {
     ;(raw.agents as { defaults: Record<string, unknown> }).defaults.workspace = '/data/raven'
     expect(workspacePath(raw, '/home/me/.raven/config.json')).toBe('/data/raven')
     expect(workspacePath({}, '/home/me/.raven/config.json')).toBe('/home/me/.raven/workspace')
-    expect(workspacePath({}, '')).toBe('~/.raven/workspace')
+    expect(workspacePath({}, '')).toBe('~/.rarus/workspace')
   })
 
   it('offers the upgrade after the check, across the redraw that check does', async () => {

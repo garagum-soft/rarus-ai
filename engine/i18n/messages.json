@@ -286,7 +286,7 @@
     "reload": {
       "zh": {
         "name": "重载环境",
-        "help": "重新读取 ~/.raven/.env 到运行中的网关"
+        "help": "重新读取 ~/.rarus/.env 到运行中的网关"
       }
     },
     "browser": {
@@ -6948,8 +6948,8 @@
       "zh": "再按一次 d 删除"
     },
     "gui.panel.custom_agents": {
-      "en": "custom agents: web UI /subagents or ~/.raven/config.json",
-      "zh": "自定义子智能体：网页端 /subagents 或 ~/.raven/config.json"
+      "en": "custom agents: web UI /subagents or ~/.rarus/config.json",
+      "zh": "自定义子智能体：网页端 /subagents 或 ~/.rarus/config.json"
     },
     "gui.panel.server_addr": {
       "en": "Server address",
@@ -9704,8 +9704,8 @@
       "zh": "API key"
     },
     "gui.onb.key_s": {
-      "en": "The key is stored locally in ~/.raven/config.json and never leaves this machine.",
-      "zh": "密钥只保存在本机 ~/.raven/config.json，不会上传。"
+      "en": "The key is stored locally in ~/.rarus/config.json and never leaves this machine.",
+      "zh": "密钥只保存在本机 ~/.rarus/config.json，不会上传。"
     },
     "gui.onb.key_t": {
       "en": "Connect {name}",

@@ -178,7 +178,7 @@ async def test_ext_list_still_reports_skills_without_the_market(
             return [_Skill("alpha"), _Skill("beta")]
 
     # Both config loaders are stubbed: this asserts about skills, and reading
-    # the developer's own ~/.raven/config.json made the test fail on any machine
+    # the developer's own ~/.rarus/config.json made the test fail on any machine
     # whose config is newer than the schema on the branch under test.
     from raven.config import loader as config_loader
     from raven.config import raven as raven_config
@@ -793,7 +793,7 @@ def _loop_factory(loop):
 async def test_fs_list_roots_at_the_session_workdir(tmp_path: Path) -> None:
     """The panel lists where the session's turns actually read and write. Agent
     home is where the old code pointed, and with the default config that is
-    ``~/.raven/workspace`` -- a directory the launch-directory policy never
+    ``~/.rarus/workspace`` -- a directory the launch-directory policy never
     touches, so the tree showed a place no tool call would ever change."""
     launch = tmp_path / "proj"
     launch.mkdir()
@@ -922,7 +922,7 @@ async def test_fs_reveal_selects_the_file_in_the_host_file_manager(
     launch.mkdir()
     target = launch / "report.md"
     target.write_text("# hi")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -946,7 +946,7 @@ async def test_fs_reveal_finds_an_uploaded_attachment(tmp_path: Path, monkeypatc
     target.write_bytes(b"%PDF-1.4 x")
     launch = tmp_path / "proj"
     launch.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -970,7 +970,7 @@ async def test_fs_reveal_refuses_what_the_viewer_refuses(tmp_path: Path, monkeyp
     home.mkdir()
     secret = home / "serve.json"
     secret.write_text("{}")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -991,7 +991,7 @@ async def test_fs_reveal_shows_the_config_file_and_opens_agent_home(
 
     home = tmp_path / "raven-home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     get_config_path().write_text("{}")
     Path(load_config().workspace_path).mkdir(parents=True, exist_ok=True)
 
@@ -1014,7 +1014,7 @@ async def test_fs_reveal_refuses_a_place_that_is_not_there(tmp_path: Path, monke
     """A fresh install has no config file yet; that is an error to show, not a Finder window on nothing."""
     from raven.rpc.errors import ConfigValidationError
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
 
@@ -1065,7 +1065,7 @@ async def test_fs_reveal_names_only_its_own_places(tmp_path: Path, monkeypatch: 
     """A place is a name from a list of two, not a path in disguise."""
     from raven.rpc.errors import ConfigValidationError
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
 
@@ -1085,7 +1085,7 @@ async def test_fs_open_hands_the_file_to_the_named_application(tmp_path: Path, m
     launch.mkdir()
     target = launch / "deck.pptx"
     target.write_bytes(b"PK\x03\x04")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1106,7 +1106,7 @@ async def test_fs_open_without_an_application_uses_the_host_default(
     launch.mkdir()
     target = launch / "sheet.xlsx"
     target.write_bytes(b"PK\x03\x04")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1152,7 +1152,7 @@ async def test_fs_open_refuses_anything_that_is_not_an_application_name(
     launch = tmp_path / "proj"
     launch.mkdir()
     (launch / "deck.pptx").write_bytes(b"PK\x03\x04")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1175,7 +1175,7 @@ async def test_fs_open_accepts_the_names_real_applications_have(
     launch = tmp_path / "proj"
     launch.mkdir()
     (launch / "a.py").write_text("x = 1")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1203,7 +1203,7 @@ async def test_fs_open_refuses_what_the_viewer_refuses(tmp_path: Path, monkeypat
     home.mkdir()
     secret = home / "serve.json"
     secret.write_text("{}")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1221,7 +1221,7 @@ async def test_fs_open_on_linux_runs_the_application_and_falls_back_to_xdg(
     launch.mkdir()
     target = launch / "notes.odt"
     target.write_bytes(b"PK\x03\x04")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     spawned: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawned.append(argv))
@@ -1242,7 +1242,7 @@ async def test_fs_open_reports_a_launcher_that_is_not_there(tmp_path: Path, monk
     launch = tmp_path / "proj"
     launch.mkdir()
     (launch / "deck.pptx").write_bytes(b"PK\x03\x04")
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
 
     def boom(argv, **kw):
         raise OSError("no such file")
@@ -1461,8 +1461,8 @@ async def test_fs_refuses_the_state_dir_when_the_root_sits_above_it(
     from raven.rpc.methods import console as console_module
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    (tmp_path / ".raven").mkdir()
-    (tmp_path / ".raven" / "serve.json").write_text('{"token": "SECRET"}')
+    (tmp_path / ".rarus").mkdir()
+    (tmp_path / ".rarus" / "serve.json").write_text('{"token": "SECRET"}')
     (tmp_path / "notes.md").write_text("ordinary project file")
     loop = _fs_loop(tmp_path)
 
@@ -1480,14 +1480,14 @@ async def test_fs_refuses_the_state_dir_when_the_root_sits_above_it(
 async def test_fs_still_serves_the_workspace_when_it_is_inside_the_state_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The default workspace lives AT `~/.raven/workspace`, so a fence without
+    """The default workspace lives AT `~/.rarus/workspace`, so a fence without
     the viewer's carve-out refuses every file the agent itself wrote -- the same
     asymmetry as the leak above, mirrored: the viewer renders a file the panel
     will not list."""
     from raven.rpc.methods import console as console_module
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    ws = tmp_path / ".raven" / "workspace"
+    ws = tmp_path / ".rarus" / "workspace"
     ws.mkdir(parents=True)
     (ws / "report.md").write_text("the agent wrote this")
     loop = _fs_loop(ws)
@@ -1593,7 +1593,7 @@ async def test_deliverables_list_is_empty_without_a_key_or_a_store() -> None:
 def settings_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A config this suite may write, with ``~`` pointed somewhere disposable.
 
-    ``settings.set`` now refreshes ``~/.raven/env`` for every mirrored web
+    ``settings.set`` now refreshes ``~/.rarus/env`` for every mirrored web
     key, so an unisolated home would have this rewrite the developer's real one.
     """
     path = tmp_path / "config.json"
@@ -1638,7 +1638,7 @@ async def test_settings_set_refreshes_the_shell_env_mirror(
     """
     await console_module.settings_set({"key": key, "value": "rotated-1"})
 
-    mirror = tmp_path / ".raven" / "env"
+    mirror = tmp_path / ".rarus" / "env"
     assert f"export {env_var}=rotated-1" in mirror.read_text(encoding="utf-8")
 
     await console_module.settings_set({"key": key, "value": "rotated-2"})
@@ -1650,7 +1650,7 @@ async def test_settings_set_refreshes_the_shell_env_mirror(
 async def test_settings_set_of_an_unrelated_key_does_not_create_the_mirror(settings_cfg: Path, tmp_path: Path) -> None:
     await console_module.settings_set({"key": "tools.exec.timeout", "value": 42})
 
-    assert not (tmp_path / ".raven" / "env").exists()
+    assert not (tmp_path / ".rarus" / "env").exists()
 
 
 async def test_settings_set_writes_the_config_in_the_shared_formatting(settings_cfg: Path) -> None:
@@ -2040,7 +2040,7 @@ async def test_fs_dirs_starts_at_the_user_home_and_stops_at_the_root(tmp_path: P
     """No path means the home directory, which is where a person's projects
     are; the filesystem root has no parent to offer."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    _agent_home(monkeypatch, tmp_path / ".raven" / "workspace")
+    _agent_home(monkeypatch, tmp_path / ".rarus" / "workspace")
 
     r = await console_module.fs_dirs({})
     assert r["path"] == str(tmp_path.resolve())
@@ -2052,7 +2052,7 @@ async def test_fs_dirs_starts_at_the_user_home_and_stops_at_the_root(tmp_path: P
 async def test_fs_dirs_marks_the_listed_directory_itself(tmp_path: Path, monkeypatch) -> None:
     """The picker's "use this folder" button follows `ok` on the listing, so a
     person standing inside raven's data is told before pressing it."""
-    home = tmp_path / ".raven" / "workspace"
+    home = tmp_path / ".rarus" / "workspace"
     (home / "skills").mkdir(parents=True)
     (tmp_path / "proj").mkdir()
     _agent_home(monkeypatch, home)
@@ -2094,7 +2094,7 @@ async def test_fs_pick_dir_hands_back_the_chosen_folder_resolved_and_judged(tmp_
     puts on an entry, so the page needs no second call to know the create
     would take it. macOS prints the path with a trailing slash; it is gone."""
     (tmp_path / "proj").mkdir()
-    _agent_home(monkeypatch, tmp_path / ".raven" / "workspace")
+    _agent_home(monkeypatch, tmp_path / ".rarus" / "workspace")
     asked = _dialog_answers(monkeypatch, str(tmp_path / "proj") + "/")
 
     r = await console_module.fs_pick_dir({})
@@ -2103,7 +2103,7 @@ async def test_fs_pick_dir_hands_back_the_chosen_folder_resolved_and_judged(tmp_
 
 
 async def test_fs_pick_dir_marks_the_agents_own_data_not_ok(tmp_path: Path, monkeypatch) -> None:
-    home = tmp_path / ".raven" / "workspace"
+    home = tmp_path / ".rarus" / "workspace"
     (home / "skills").mkdir(parents=True)
     _agent_home(monkeypatch, home)
     _dialog_answers(monkeypatch, str(home / "skills"))
@@ -2128,7 +2128,7 @@ async def test_fs_pick_dir_refuses_a_host_with_no_dialog(monkeypatch) -> None:
 
 async def test_fs_pick_dir_refuses_a_path_that_is_not_a_directory(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "notes.md").write_text("x")
-    _agent_home(monkeypatch, tmp_path / ".raven" / "workspace")
+    _agent_home(monkeypatch, tmp_path / ".rarus" / "workspace")
     _dialog_answers(monkeypatch, str(tmp_path / "notes.md"))
     with pytest.raises(ConfigValidationError, match="not a directory"):
         await console_module.fs_pick_dir({})

@@ -83,7 +83,7 @@ def oauth_host(tmp_path, monkeypatch):
     home = tmp_path / "host"
     token_dir = home / "oauth" / "chatgpt"
     token_dir.mkdir(parents=True)
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.delenv("CHATGPT_TOKEN_DIR", raising=False)
     monkeypatch.delenv("CHATGPT_AUTH_FILE", raising=False)
     for name in ("MODEL", "PROVIDER", "PROTOCOL", "REASONING_EFFORT"):
@@ -217,7 +217,7 @@ def oauth_launcher(oauth_host, monkeypatch, product):
     import importlib.util
 
     host, _ = oauth_host
-    home = Path(os.environ["RAVEN_HOME"])
+    home = Path(os.environ["RARUS_HOME"])
     (home / "config.json").write_text(json.dumps(host), encoding="utf-8")
     path = Path(render.__file__).resolve().parents[2] / "agents" / product / "run.py"
     spec = importlib.util.spec_from_file_location(f"oauth_{product.replace('-', '_')}", path)
@@ -255,7 +255,7 @@ def test_launchers_inherit_oauth_and_resolve_host_credentials(
         token = relocated
         monkeypatch.setenv("CHATGPT_TOKEN_DIR", str(custom))
         monkeypatch.setenv("CHATGPT_AUTH_FILE", "account.json")
-    home = Path(os.environ["RAVEN_HOME"])
+    home = Path(os.environ["RARUS_HOME"])
     if product == "raven-code":
         rendered = oauth_launcher.render_acp_config(oauth_launcher.DEFAULT_CONFIG)
     else:
@@ -388,7 +388,7 @@ def test_an_empty_credential_summary_still_refuses_with_a_reason(oauth_host, mon
 
 
 def test_a_host_with_no_providers_gets_a_one_line_reason(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     for name in ("MODEL", "PROVIDER", "PROTOCOL", "REASONING_EFFORT"):
         monkeypatch.delenv(f"RAVEN_PARENT_{name}", raising=False)
 
@@ -399,7 +399,7 @@ def test_a_host_with_no_providers_gets_a_one_line_reason(tmp_path, monkeypatch):
 
 
 def test_inherit_llm_refuses_a_non_string_model_through_config_validation(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     host = {"providers": {"openrouter": {"apiKey": "synthetic-key"}}, "agents": {"defaults": {"model": 42}}}
 
     with pytest.raises(ValueError):
@@ -518,7 +518,7 @@ def test_inherit_llm_names_the_provider_from_the_model_prefix(monkeypatch):
 def test_design_ignores_own_key_and_inherits_parent_riders(monkeypatch, tmp_path):
     import importlib.util
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("DESIGN_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.setenv("DESIGN_API_KEY", "sk-own")
     monkeypatch.setenv("RAVEN_PARENT_MODEL", "vendor/parent-model")
@@ -548,7 +548,7 @@ def test_design_ignores_own_key_and_inherits_parent_riders(monkeypatch, tmp_path
 
 
 def test_state_root_prefers_the_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     assert render.product_state_root("prod-x", override=str(tmp_path / "s")) == tmp_path / "s"
     assert render.product_state_root("prod-x") == tmp_path / "home" / "workspace" / "subagent_sessions" / "prod-x"
 
@@ -720,10 +720,10 @@ def test_write_rendered_is_owner_only_and_pid_named(tmp_path):
 
 @pytest.fixture()
 def homed(tmp_path, monkeypatch):
-    """A scratch RAVEN_HOME with a host config the helper reads."""
+    """A scratch RARUS_HOME with a host config the helper reads."""
     home = tmp_path / "rhome"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     (home / "config.json").write_text("{}", encoding="utf-8")
     return home
 
@@ -737,7 +737,7 @@ def test_acp_home_defaults_into_the_data_dir_outside_the_host_home(homed):
 
 
 def test_acp_home_falls_beside_a_host_home_that_swallows_the_default(homed):
-    """An operator who points agents.defaults.workspace at RAVEN_HOME (or any
+    """An operator who points agents.defaults.workspace at RARUS_HOME (or any
     ancestor) puts the data directory inside the very tree being handed over;
     the seat then falls beside that home, tagged per instance."""
     (homed / "config.json").write_text(
@@ -788,7 +788,7 @@ def _case_insensitive_fs(tmp_path) -> bool:
 
 def test_acp_home_sees_through_a_case_variant_host_home(tmp_path, monkeypatch):
     """The HIGH-1 regression pin: a workspace spelled as a case variant of
-    RAVEN_HOME names the same physical tree on a case-insensitive volume;
+    RARUS_HOME names the same physical tree on a case-insensitive volume;
     resolve() keeps the given spelling, so a string comparison calls the
     default seat "outside" while it sits physically INSIDE the tree the host
     hands over. The guard asks the filesystem (samefile over existing
@@ -797,7 +797,7 @@ def test_acp_home_sees_through_a_case_variant_host_home(tmp_path, monkeypatch):
         pytest.skip("filesystem is case-sensitive; the alias cannot be built here")
     home = tmp_path / "rhome"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     variant = tmp_path / "RHOME"
     (home / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"workspace": str(variant)}}}), encoding="utf-8"
@@ -812,12 +812,12 @@ def test_acp_home_sees_through_a_case_variant_host_home(tmp_path, monkeypatch):
 
 def test_acp_home_instance_tag_tells_same_named_homes_apart(tmp_path, monkeypatch):
     """Two instances named alike under different parents must not share the
-    sibling seat (the isolation RAVEN_HOME exists to give)."""
+    sibling seat (the isolation RARUS_HOME exists to give)."""
     tags = []
     for parent in ("one", "two"):
         home = tmp_path / parent / "rhome"
         home.mkdir(parents=True)
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         tags.append(render._instance_tag())
     assert tags[0] != tags[1]
     assert all(tag.startswith("rhome-") for tag in tags)

@@ -19,7 +19,7 @@ def test_design_launcher_completes_handshake_and_session_creation(tmp_path: Path
     env = dict(os.environ)
     env.update(
         {
-            "RAVEN_HOME": str(tmp_path / "raven-home"),
+            "RARUS_HOME": str(tmp_path / "raven-home"),
             "DESIGN_API_KEY": "dummy-e2e-key",
             "DESIGN_STATE_ROOT": str(tmp_path / "state"),
         }

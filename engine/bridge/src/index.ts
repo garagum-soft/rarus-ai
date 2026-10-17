@@ -10,7 +10,7 @@
  *   npm run build && npm start
  *
  * Or with custom settings:
- *   BRIDGE_PORT=3001 AUTH_DIR=~/.raven/whatsapp npm start
+ *   BRIDGE_PORT=3001 AUTH_DIR=~/.rarus/whatsapp npm start
  */
 
 // Polyfill crypto for Baileys in ESM
@@ -25,7 +25,7 @@ import { join } from 'path'
 import { BridgeServer } from './server.js'
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10)
-const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.raven', 'whatsapp-auth')
+const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.rarus', 'whatsapp-auth')
 const TOKEN = process.env.BRIDGE_TOKEN?.trim()
 
 if (!TOKEN) {

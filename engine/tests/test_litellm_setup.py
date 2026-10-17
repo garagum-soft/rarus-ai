@@ -78,7 +78,7 @@ def test_import_litellm_points_copilot_tokens_at_raven(
 
     import_litellm()
 
-    assert os.environ["GITHUB_COPILOT_TOKEN_DIR"] == str(tmp_path / ".raven" / "oauth" / "github_copilot")
+    assert os.environ["GITHUB_COPILOT_TOKEN_DIR"] == str(tmp_path / ".rarus" / "oauth" / "github_copilot")
 
 
 def test_import_litellm_keeps_an_explicit_copilot_dir(tmp_path, monkeypatch) -> None:

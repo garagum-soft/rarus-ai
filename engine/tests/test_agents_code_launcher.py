@@ -45,7 +45,7 @@ def launcher():
 @pytest.fixture()
 def grounded(launcher, tmp_path, monkeypatch):
     """A launcher pointed at a scratch home and state root, secrets set."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("CODE_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.delenv("CODE_ACP_HOME", raising=False)
     monkeypatch.setenv("CODE_API_KEY", "sk-own")
@@ -801,7 +801,7 @@ def test_the_state_root_honours_the_hosts_configured_agent_home(grounded, tmp_pa
     moved = tmp_path / "moved-workspace"
     (home / "config.json").write_text(json.dumps({"agents": {"defaults": {"workspace": str(moved)}}}))
     assert grounded.state_root() == moved / "subagent_sessions" / "raven-code"
-    (home / "config.json").write_text(json.dumps({"agents": {"defaults": {"workspace": "~/.raven/workspace"}}}))
+    (home / "config.json").write_text(json.dumps({"agents": {"defaults": {"workspace": "~/.rarus/workspace"}}}))
     assert grounded.state_root() == home / "workspace" / "subagent_sessions" / "raven-code"
 
 

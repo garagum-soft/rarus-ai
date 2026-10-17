@@ -272,12 +272,12 @@ def _acp_host_override(cfg: Any, *, name: str) -> Any:
 
     The config row brings the transport choice and nothing else: ``command``
     defaults to this install's own ``raven acp``, ``env`` carries the host's
-    ``RAVEN_HOME`` (unless the row sets one) so the child engine reads the same
+    ``RARUS_HOME`` (unless the row sets one) so the child engine reads the same
     config and provider the host does, and a blank ``description`` gets the
     host-raven line rather than leaving the roster entry with the in-process
     description that no longer applies.
 
-    ``RAVEN_HOME`` alone does not carry a host started with ``--config``: that
+    ``RARUS_HOME`` alone does not carry a host started with ``--config``: that
     flag sets a path inside the loader and never touches the environment, so the
     child derived its config from a home the host was not using and came up on a
     different model and provider than the row promises.
@@ -285,8 +285,8 @@ def _acp_host_override(cfg: Any, *, name: str) -> Any:
     Two things stop that from overriding a choice somebody made. The flag is
     appended only to a command this function generated -- a row that brought its
     own command line chose it, and is not somewhere to inject arguments -- and
-    only when the row named no ``RAVEN_HOME`` of its own. An explicit one is the
-    row asking for a different instance, and ``--config`` outranks ``RAVEN_HOME``
+    only when the row named no ``RARUS_HOME`` of its own. An explicit one is the
+    row asking for a different instance, and ``--config`` outranks ``RARUS_HOME``
     in the child, so propagating regardless would serve that row the host's model
     and provider under its own name.
     """

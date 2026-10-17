@@ -114,7 +114,7 @@ def plugin_discovery_sources() -> dict:
     - bundled — ``raven/plugins/bundled/`` inside the installed package: the
       wheel's own plugin shelf (the playbook entry tools live there), scanned
       first and shadowed by nothing.
-    - user    — ``<raven home>/plugins/`` (``RAVEN_HOME`` or ``~/.raven``).
+    - user    — ``<raven home>/plugins/`` (``RARUS_HOME`` or ``~/.rarus``).
     - project — ``./.raven/plugins/``.
     - entry_points — the ``raven.plugins`` group.
 
@@ -179,7 +179,7 @@ def build_plugin_registry(
     Discovery spans three fixed sources plus the roots ``plugins.dirs``
     names (priority user > project = named roots > entry_points):
 
-    - **user** — ``~/.raven/plugins/<id>/`` drop-in directories.
+    - **user** — ``~/.rarus/plugins/<id>/`` drop-in directories.
     - **project** — ``./.raven/plugins/<id>/`` drop-in directories.
     - **entry_points** — the ``raven.plugins`` group, where
       third-party pip-installed plugins register their factories.

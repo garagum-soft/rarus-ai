@@ -67,7 +67,7 @@ class TestLintExternalPaths:
         assert lint_external_paths("run scripts/db.py --db ./data.db") == []
 
     def test_own_dotdir_allowed(self) -> None:
-        assert lint_external_paths("state lives in ~/.raven/skills") == []
+        assert lint_external_paths("state lives in ~/.rarus/skills") == []
 
     def test_foreign_dotdirs_flagged_deduped(self) -> None:
         body = (

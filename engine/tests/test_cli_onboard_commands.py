@@ -158,7 +158,7 @@ def tmp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     cfg = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
     set_config_path(cfg)
-    # Credentials live under ``~/.raven``, which ``set_config_path`` above does
+    # Credentials live under ``~/.rarus``, which ``set_config_path`` above does
     # not cover. Left un-isolated, the wizard reports "LLM provider already
     # configured" on a machine whose developer has signed in to one of them.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -1049,7 +1049,7 @@ def everos_isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # everos on 18791 these tests met an unscripted prompt and died on EOF.
     # Tests that are about that question patch this themselves, afterwards.
     monkeypatch.setattr(onboard_everos, "_port_is_free", lambda _p: True)
-    # Discovery scans the real ``~/.everos`` and ``~/.raven`` paths, so without
+    # Discovery scans the real ``~/.everos`` and ``~/.rarus`` paths, so without
     # this a developer box with an everos of its own decides which branch these
     # tests take -- and probes its /health while doing it. Tests about a found
     # root install their own candidate, afterwards.
@@ -4118,7 +4118,7 @@ def test_a_local_deployment_is_configured_by_address_not_by_key(tmp_path, monkey
     """
     from raven.cli import onboard_commands
 
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     written: dict[str, Any] = {}
     monkeypatch.setattr(onboard_commands, "_write_provider_fields", lambda p, f: written.update({p: f}))
@@ -4170,7 +4170,7 @@ def test_a_vendor_with_no_spec_is_configured_by_the_wizard_not_rejected(monkeypa
     from raven.providers.registry import find_by_name
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
 
     assert onboard_commands._validate_provider_name("deepinfra") == "deepinfra"
     assert find_by_name("deepinfra") is None, "deepinfra gained a spec; pick another spec-less vendor"
@@ -4198,7 +4198,7 @@ def test_resolve_model_with_test_runs_for_a_provider_with_no_spec(monkeypatch, t
     from raven.cli import onboard_commands
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
     monkeypatch.setattr(
         onboard_commands,
         "_verify_provider",
@@ -4472,7 +4472,7 @@ def test_a_spec_less_provider_can_have_its_default_model_changed(monkeypatch, tm
     """
     from raven.cli import onboard_commands
 
-    cfg_dir = tmp_path / ".raven"
+    cfg_dir = tmp_path / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps({"providers": {"mistral": {"apiKey": "sk-m"}, "openai": {"apiKey": "sk-o"}}})
@@ -4725,7 +4725,7 @@ def test_the_picker_result_goes_through_the_same_gate_as_the_flag(monkeypatch, t
     from raven.cli import onboard_commands
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
     validated: list[str] = []
     real = onboard_commands._validate_provider_name
 
@@ -4766,7 +4766,7 @@ def test_a_failed_setup_calls_the_rollback(monkeypatch, tmp_path) -> None:
     from raven.cli import onboard_commands
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
     rolled: list[tuple[str, Any]] = []
     monkeypatch.setattr(
         onboard_commands,
@@ -4863,7 +4863,7 @@ def test_switching_provider_discards_every_flag_not_just_the_provider(
     the previous provider's machine.
     """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".raven").mkdir()
+    (tmp_path / ".rarus").mkdir()
     seen: list[tuple[str, Any, Any, Any]] = []
 
     def _collect(provider: str, **kw: Any) -> Any:
@@ -7543,7 +7543,7 @@ def test_env_file_is_not_created_when_neither_key_is_set(tmp_env: Path) -> None:
     _set_keys(tmp_env)
 
     assert onboard_web.write_env_file() is None
-    assert not (Path.home() / ".raven" / "env").exists()
+    assert not (Path.home() / ".rarus" / "env").exists()
 
 
 def test_clearing_a_key_retires_it_rather_than_only_dropping_the_export(tmp_env: Path) -> None:
@@ -7760,7 +7760,7 @@ def test_rc_source_line_does_not_break_a_shell_without_the_env_file(tmp_path: Pa
     rc.write_text("", encoding="utf-8")
     onboard_web.ensure_rc_source_line(rc)
 
-    # No ~/.raven/env exists here: the guard is what keeps a deleted env file
+    # No ~/.rarus/env exists here: the guard is what keeps a deleted env file
     # from making every new shell print an error.
     done = subprocess.run(
         ["sh", "-c", f'HOME="{tmp_path}"; . "{rc}"; echo ok'],
@@ -7783,7 +7783,7 @@ def test_step5_skip_or_non_interactive_writes_nothing(tmp_env: Path) -> None:
     # that still materialised the section would leave `web_search` looking
     # configured-but-blank to anything reading the file.
     assert not tmp_env.exists()
-    assert not (Path.home() / ".raven" / "env").exists()
+    assert not (Path.home() / ".rarus" / "env").exists()
 
 
 def test_step5_writes_both_keys_and_the_env_file(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7800,7 +7800,7 @@ def test_step5_writes_both_keys_and_the_env_file(tmp_env: Path, monkeypatch: pyt
     assert web["search"]["provider"] == "serper" and web["fetch"]["provider"] == "jina"
     assert web["providers"]["serper"]["apiKey"] == "sk-serper"
     assert web["providers"]["jina"]["apiKey"] == "jina-abc"
-    body = (Path.home() / ".raven" / "env").read_text(encoding="utf-8")
+    body = (Path.home() / ".rarus" / "env").read_text(encoding="utf-8")
     assert "export SERPER_API_KEY=sk-serper" in body and "export JINA_API_KEY=jina-abc" in body
 
 
@@ -7825,7 +7825,7 @@ def test_step5_picking_a_vendor_asks_for_that_vendors_key(tmp_env: Path, monkeyp
     assert web["search"]["provider"] == "tavily" and web["fetch"]["provider"] == "tavily"
     assert web["providers"]["tavily"]["apiKey"] == "tv-key"
     assert prompts == ["Tavily API key"], "one account serves both tools, so the key is asked for once"
-    body = (Path.home() / ".raven" / "env").read_text(encoding="utf-8")
+    body = (Path.home() / ".rarus" / "env").read_text(encoding="utf-8")
     assert "export TAVILY_API_KEY=tv-key" in body
     assert "export SERPER_API_KEY" not in body
 
@@ -7866,7 +7866,7 @@ def test_step5_empty_answer_keeps_the_key_already_configured(tmp_env: Path, monk
     web = json.loads(tmp_env.read_text())["tools"]["web"]
     assert web["search"]["apiKey"] == "sk-existing"
     assert web["jinaApiKey"] == "jina-existing"
-    assert "export SERPER_API_KEY=sk-existing" in (Path.home() / ".raven" / "env").read_text(encoding="utf-8")
+    assert "export SERPER_API_KEY=sk-existing" in (Path.home() / ".rarus" / "env").read_text(encoding="utf-8")
 
 
 def test_step5_a_typed_search_key_is_spent_on_one_real_search(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -8063,7 +8063,7 @@ def test_step5_key_flags_are_written_even_though_the_step_is_skipped(tmp_env: Pa
     web = json.loads(tmp_env.read_text())["tools"]["web"]
     assert web["providers"]["serper"]["apiKey"] == "sk-flag"
     assert web["providers"]["jina"]["apiKey"] == "jina-flag"
-    assert "export SERPER_API_KEY=sk-flag" in (Path.home() / ".raven" / "env").read_text(encoding="utf-8")
+    assert "export SERPER_API_KEY=sk-flag" in (Path.home() / ".rarus" / "env").read_text(encoding="utf-8")
 
 
 def test_step5_refuses_an_unknown_vendor_flag_before_writing(tmp_env: Path) -> None:
@@ -8099,7 +8099,7 @@ def test_step5_role_flags_select_the_vendor_and_file_its_key(tmp_env: Path) -> N
     assert web["search"]["provider"] == "exa"
     assert web["providers"]["exa"]["apiKey"] == "exa-flag"
     assert web["providers"]["jina"]["apiKey"] == "jina-flag", "no --fetch-provider, so the configured reader (jina)"
-    body = (Path.home() / ".raven" / "env").read_text(encoding="utf-8")
+    body = (Path.home() / ".rarus" / "env").read_text(encoding="utf-8")
     assert "export EXA_API_KEY=exa-flag" in body and "export JINA_API_KEY=jina-flag" in body
 
 

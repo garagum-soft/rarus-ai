@@ -1,6 +1,6 @@
 """On-disk persistence for the model catalog (per-model pricing + context window).
 
-A single versioned JSON file under ``~/.raven/cache/``, written atomically
+A single versioned JSON file under ``~/.rarus/cache/``, written atomically
 (temp-file + ``os.replace``) so concurrent multi-process readers never observe a
 torn file. The catalog is a disposable, refetchable whole-blob cache with an
 authoritative network source, so a lost write race just costs one extra refetch
@@ -33,7 +33,7 @@ CACHE_VERSION = 3
 CACHE_FILENAME = "model-catalog.json"
 
 # Test seam: when set, overrides the on-disk location so tests never touch the
-# real ~/.raven/cache/. None → derive from get_cache_dir() lazily.
+# real ~/.rarus/cache/. None → derive from get_cache_dir() lazily.
 _CACHE_PATH: Path | None = None
 
 

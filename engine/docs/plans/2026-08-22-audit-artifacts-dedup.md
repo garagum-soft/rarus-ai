@@ -824,7 +824,7 @@ uv run raven tracing compact --dry-run
 ```
 
 Expected: a `dry run: scanned ..., folded ..., ...` line, no directory
-modified, and `du -sh ~/.raven/traces/logs/audit-artifacts` unchanged. Report
+modified, and `du -sh ~/.rarus/traces/logs/audit-artifacts` unchanged. Report
 the numbers to the maintainer and stop; running it for real is their call.
 
 - [ ] **Step 9: Commit** (only on the maintainer's word - AGENTS.md 3.4)

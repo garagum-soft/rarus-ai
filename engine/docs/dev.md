@@ -69,7 +69,7 @@ raven --help
 uv run raven onboard
 ```
 
-Creates `~/.raven/config.json` and the workspace directory. Edit the config to add your API key (default provider: OpenRouter — get a key at https://openrouter.ai/keys).
+Creates `~/.rarus/config.json` and the workspace directory. Edit the config to add your API key (default provider: OpenRouter — get a key at https://openrouter.ai/keys).
 
 ### 5. Common commands
 

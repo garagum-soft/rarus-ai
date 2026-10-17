@@ -20,7 +20,7 @@ Eight stores. Only one pair answers the same question.
 | `.../subagents/direct/<agent>/<handle>/<call_id>/` | `direct_chat.py` | `prompt.md`, `out.md`, `meta.json`, `transcript.jsonl` |
 | `<raven_home>/subagent_instances.json` | `subagent/instances.py` | a cross-session index: liveness, status, the external session id. No messages |
 | `.../subagents/direct/<agent>/<handle>/messages.json` | `instance_state.py` | an instance's mutable resume state |
-| `<tracing state>/logs/acp-frames/` -- `~/.raven/traces/logs/acp-frames` by default, moved by `RAVEN_TRACING_DIR` or `RAVEN_HOME` | `agent/acp/journal.py` (`journal_root`) | connection-scoped protocol traffic, spanning sessions. No messages, and deliberately outside any workspace a sub-agent can read |
+| `<tracing state>/logs/acp-frames/` -- `~/.rarus/traces/logs/acp-frames` by default, moved by `RAVEN_TRACING_DIR` or `RARUS_HOME` | `agent/acp/journal.py` (`journal_root`) | connection-scoped protocol traffic, spanning sessions. No messages, and deliberately outside any workspace a sub-agent can read |
 
 ## What is not a duplicate
 

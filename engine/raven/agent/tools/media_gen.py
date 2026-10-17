@@ -231,7 +231,7 @@ class _OpenRouterMediaTool(Tool):
         return json.dumps(
             {
                 "error": (
-                    f"{self.name}: no API key configured. Set it in ~/.raven/config.json under {where}; "
+                    f"{self.name}: no API key configured. Set it in ~/.rarus/config.json under {where}; "
                     f"it takes effect on the next call."
                 )
             },

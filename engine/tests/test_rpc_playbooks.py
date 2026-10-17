@@ -424,7 +424,7 @@ def _carried_spec(name: str = "carried") -> PlaybookSpec:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(mod, "_host_mcp_server_names", lambda: ["sentry"])
     return tmp_path / "home"
 

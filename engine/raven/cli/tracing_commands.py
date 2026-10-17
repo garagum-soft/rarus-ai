@@ -4,7 +4,7 @@ The dashboard is a dependency-free Node viewer bundled under
 ``raven/cli/tracing_viewer/`` -- a surface the CLI launches, kept out of the
 ``tracing`` kernel package. Instrumentation itself runs in-process (installed at
 CLI startup, see :mod:`raven.tracing`); this command only launches the viewer
-that reads the captured spans from ``~/.raven/traces``.
+that reads the captured spans from ``~/.rarus/traces``.
 
 ``raven tracing`` (bare) lazily starts the viewer if it is not already running,
 then opens the browser. It reuses raven's own Node discovery (:func:`find_node`),

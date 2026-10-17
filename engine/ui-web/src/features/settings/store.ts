@@ -163,7 +163,7 @@ export interface SettingsState {
 }
 
 const emptySnap = (): SettingsSnapshot => ({
-  raw: {}, configPath: '~/.raven/config.json', everos: null, providers: [],
+  raw: {}, configPath: '~/.rarus/config.json', everos: null, providers: [],
   curProvider: '', model: '', tools: [], skills: [], mcp: [],
 })
 

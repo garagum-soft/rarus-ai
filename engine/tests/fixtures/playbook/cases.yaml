@@ -6,7 +6,7 @@
 # open questions.
 #
 # Consumed by tests/integration/test_playbook_real_llm.py, which runs only
-# with an OpenRouter credential (OPENROUTER_API_KEY or ~/.raven/config.json).
+# with an OpenRouter credential (OPENROUTER_API_KEY or ~/.rarus/config.json).
 
 - id: twitter-one-liner            # product example 1 (was dag there)
   input: "make me a playbook for posting content to twitter"

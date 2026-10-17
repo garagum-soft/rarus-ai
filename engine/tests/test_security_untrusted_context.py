@@ -142,7 +142,7 @@ def test_a_key_raven_holds_never_reaches_the_model_through_a_tool_result(tmp_pat
     key = "sk-api-aIRsqgvgFxhqL2oxKe0S45Kx"
     raw = {"providers": {"minimax": {"apiKey": key, "apiBase": "https://api.minimax.io/v1"}}, "agents": {}}
     config.write_text(json.dumps(raw))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     b = ContextBuilder(workspace=tmp_path)
 
     printed = json.dumps({"providers": raw["providers"]}, indent=1)

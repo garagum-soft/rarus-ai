@@ -936,7 +936,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, scope, sessionId
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">
-          Saved to ~/.raven/.env{showBase ? ' · Tab switches field' : ''}
+          Saved to ~/.rarus/.env{showBase ? ' · Tab switches field' : ''}
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">

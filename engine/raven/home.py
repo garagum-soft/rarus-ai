@@ -48,7 +48,7 @@ def set_config_path(path: Path) -> None:
 def raven_home() -> Path:
     """The directory raven keeps everything in.
 
-    ``RAVEN_HOME`` decides where config.json, the cron store and every runtime
+    ``RARUS_HOME`` decides where config.json, the cron store and every runtime
     subdirectory live, the same way it steers the installer, the node runtime
     lookup, the tracing directory and the serve state file.
     """

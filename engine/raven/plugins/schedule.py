@@ -2,7 +2,7 @@
 
 A ``[[plugin.contributes.scheduled]]`` entry carries a cron expression and a
 timezone. The host keeps one durable row per hook in
-``<RAVEN_HOME>/plugin_schedules.json`` and a resident host's scheduler fires
+``<RARUS_HOME>/plugin_schedules.json`` and a resident host's scheduler fires
 the hook when its row comes due. After Multica's plugin hook schedules:
 
 - **Reconciled at activation.** A hook whose cron and timezone are unchanged

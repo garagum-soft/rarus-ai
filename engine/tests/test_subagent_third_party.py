@@ -61,7 +61,7 @@ def _isolated_instance_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     `tests/test_subagent_dag_runner.py`'s fixture of the same name): without
     this, any test whose manager spawn carries a session_key and a
     third-party agent name would accumulate junk rows in
-    `~/.raven/subagent_instances.json` on every test run, forever.
+    `~/.rarus/subagent_instances.json` on every test run, forever.
     """
     monkeypatch.setattr(
         instances_mod, "_registry", instances_mod.InstanceRegistry(path=tmp_path / "_autouse_inst.json")
@@ -4233,29 +4233,29 @@ class TestAcpMemoryBlock:
 
 
 def test_the_spawning_ravens_home_reaches_its_cli_subagent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``RAVEN_HOME`` overrides the login-shell capture, and is absent without one.
+    """``RARUS_HOME`` overrides the login-shell capture, and is absent without one.
 
     The capture answers "what can this child find" -- nvm, conda, a homebrew
-    PATH. It cannot answer "which raven spawned it", because ``RAVEN_HOME`` is
+    PATH. It cannot answer "which raven spawned it", because ``RARUS_HOME`` is
     normally given on the command line rather than exported from a profile, so a
     child that resolves it from the shell resolves the *default* home instead.
 
-    Measured 2026-08-26: a host started as ``RAVEN_HOME=~/.raven-main`` polls
+    Measured 2026-08-26: a host started as ``RARUS_HOME=~/.rarus-main`` polls
     that home's cron store, while a sub-agent handing a wake back to "the host's
-    store" wrote into ``~/.raven``. Both homes exist, so nothing errored -- the
+    store" wrote into ``~/.rarus``. Both homes exist, so nothing errored -- the
     hand-off simply landed in a file nobody reads and the wake never arrived.
     """
     from raven.agent.subagent.backends.env import host_identity_env
 
-    monkeypatch.delenv("RAVEN_HOME", raising=False)
+    monkeypatch.delenv("RARUS_HOME", raising=False)
     assert host_identity_env() == {}, "a raven on the default home must not pin one on its children"
 
-    monkeypatch.setenv("RAVEN_HOME", "/tmp/raven-main")
-    assert host_identity_env() == {"RAVEN_HOME": "/tmp/raven-main"}
+    monkeypatch.setenv("RARUS_HOME", "/tmp/raven-main")
+    assert host_identity_env() == {"RARUS_HOME": "/tmp/raven-main"}
 
     # Whitespace-only is how an unset variable often reaches a process through a
     # shell wrapper, and it must read as unset rather than as an empty home.
-    monkeypatch.setenv("RAVEN_HOME", "   ")
+    monkeypatch.setenv("RARUS_HOME", "   ")
     assert host_identity_env() == {}
 
 

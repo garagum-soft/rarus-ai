@@ -262,7 +262,7 @@ class TestWhereTheTreeIs:
         package = tmp_path / "site-packages" / "raven"
         (package / "agents").mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(package / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == home / "agents"
@@ -273,7 +273,7 @@ class TestWhereTheTreeIs:
         clone = tmp_path / "clone"
         (clone / "agents").mkdir(parents=True)
         (clone / "raven").mkdir()
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "empty-home"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "empty-home"))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == clone / "agents"
@@ -294,7 +294,7 @@ class TestWhereTheTreeIs:
         clone = tmp_path / "clone"
         (clone / "agents").mkdir(parents=True)
         (clone / "raven").mkdir()
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == clone / "agents"
@@ -309,7 +309,7 @@ class TestWhereTheTreeIs:
         clone = tmp_path / "clone"
         (clone / "agents").mkdir(parents=True)
         (clone / "raven").mkdir()
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == home / "agents"
@@ -330,7 +330,7 @@ class TestWhereTheTreeIs:
         clone = tmp_path / "clone"
         _product(clone / "agents", "raven-probe")
         (clone / "raven").mkdir()
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == clone / "agents"
@@ -352,7 +352,7 @@ class TestWhereTheTreeIs:
         clone = tmp_path / "clone"
         (clone / "agents").mkdir(parents=True)
         (clone / "raven").mkdir()
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == home / "agents"
@@ -369,7 +369,7 @@ class TestWhereTheTreeIs:
         package = tmp_path / "site-packages" / "raven"
         _product(package / "agents", "raven-probe")
         home = tmp_path / "home"
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.__file__", str(package / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() == home / "agents"
@@ -387,7 +387,7 @@ class TestWhereTheTreeIs:
 
         package = tmp_path / "site-packages" / "raven"
         _product(package / "agents", "raven-probe")
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "unwritable"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "unwritable"))
         monkeypatch.setattr("raven.__file__", str(package / "__init__.py"))
         monkeypatch.setattr(real_shutil, "copytree", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
 
@@ -484,7 +484,7 @@ class TestOnTheTable:
 
 def test_the_lending_test_reads_the_file_the_launcher_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Setup reads the same host credentials as the launcher."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
 
     assert va.host_can_lend_a_key() is False
 
@@ -497,7 +497,7 @@ def test_the_lending_test_reads_the_file_the_launcher_reads(tmp_path: Path, monk
 
 @pytest.mark.parametrize("signed_in", [False, True])
 def test_the_lending_test_uses_stored_oauth_credentials(tmp_path, monkeypatch, signed_in):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.delenv("CHATGPT_TOKEN_DIR", raising=False)
     monkeypatch.delenv("CHATGPT_AUTH_FILE", raising=False)
     host = {
@@ -740,7 +740,7 @@ class TestTheEdgesThatDegrade:
     def test_no_tree_anywhere_reads_as_no_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         clone = tmp_path / "clone"
         (clone / "raven").mkdir(parents=True)
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "no-home"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "no-home"))
         monkeypatch.setattr("raven.__file__", str(clone / "raven" / "__init__.py"))
 
         assert _REAL_AGENTS_ROOT() is None
@@ -748,7 +748,7 @@ class TestTheEdgesThatDegrade:
     def test_an_unparseable_host_config_is_nothing_to_lend(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path))
         (tmp_path / "config.json").write_text("{ truncated", encoding="utf-8")
 
         assert va.host_can_lend_a_key() is False
@@ -771,7 +771,7 @@ class TestTheEdgesThatDegrade:
     def test_an_invalid_host_config_is_nothing_to_lend(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: object
     ) -> None:
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path))
         (tmp_path / "config.json").write_text(json.dumps(host), encoding="utf-8")
 
         assert va.host_can_lend_a_key() is False
@@ -1167,7 +1167,7 @@ class TestTheShippedManifests:
 
     def test_no_manifest_ships_an_env_block(self) -> None:
         """``env`` is per-install: the ACP child is built from the login shell's
-        environment, so a value like ``RAVEN_HOME`` is needed but cannot be a
+        environment, so a value like ``RARUS_HOME`` is needed but cannot be a
         shipped constant. Leaving it out is what makes the default correct."""
         for folder, entry in self._manifests():
             assert not entry.get("env"), f"{folder}: manifest must not ship an env block"

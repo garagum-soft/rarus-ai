@@ -6,7 +6,7 @@ options) and ``put`` s it here. When the user replies, DecisionRouter
 calls ``get_recent`` to find a still-live menu on the same (channel,
 to). On match, ``mark_consumed`` records the pick.
 
-Backed by ``~/.raven/sentinel/pending_decisions.json`` via the same
+Backed by ``~/.rarus/sentinel/pending_decisions.json`` via the same
 ``JsonStateStore`` abstraction NudgePolicy uses — fcntl-advisory lock so
 TUI + gateway processes don't clobber each other.
 

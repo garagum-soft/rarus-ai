@@ -184,14 +184,14 @@ def test_a_directory_the_operator_added_is_reachable_by_variable(
     shared.mkdir()
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(shared))
+    monkeypatch.setenv("RARUS_HOME", str(shared))
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
         extra_allowed_dirs=(shared,),
     )
 
-    assert refusal(tool, "cat $RAVEN_HOME/config.json") is None
+    assert refusal(tool, "cat $RARUS_HOME/config.json") is None
 
 
 def test_the_fence_has_no_opinion_when_the_operator_did_not_raise_it(

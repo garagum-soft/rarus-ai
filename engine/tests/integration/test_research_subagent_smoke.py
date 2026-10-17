@@ -44,7 +44,7 @@ def test_launcher_serves_acp_with_the_capabilities_the_host_verifies(tmp_path: P
         "RESEARCH_NG_STATE_ROOT": str(state),
         # Sandbox the subprocess's raven home: the launcher derives the
         # product workspace from it, and a test must not write the real one.
-        "RAVEN_HOME": str(tmp_path / "home"),
+        "RARUS_HOME": str(tmp_path / "home"),
     }
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1, "clientCapabilities": {}}},

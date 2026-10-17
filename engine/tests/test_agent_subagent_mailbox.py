@@ -24,7 +24,7 @@ SESSION = "tui:mail-test"
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return home
 
 

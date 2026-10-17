@@ -70,7 +70,7 @@ def loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentLoop:
     """A real loop whose registry and agent home live under ``tmp_path``.
 
     The registry is repointed rather than mocked: this test asserts on the rows
-    it writes, and a developer's own ``~/.raven/subagent_instances.json`` must
+    it writes, and a developer's own ``~/.rarus/subagent_instances.json`` must
     never be touched by a test run.
     """
     from raven.agent.subagent import instances as instances_mod
@@ -79,7 +79,7 @@ def loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentLoop:
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
 
     from raven.config.schema import ThirdPartyCliSubagentConfig
 

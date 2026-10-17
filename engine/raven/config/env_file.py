@@ -1,6 +1,6 @@
 """The shell env file mirroring the web tool credentials out of ``config.json``.
 
-``~/.raven/env`` exists for consumers that never read raven's config: the
+``~/.rarus/env`` exists for consumers that never read raven's config: the
 user's own shell, and every ``cli`` / ``acp`` sub-agent, whose environment is a
 capture of ``$SHELL -lic`` (see ``raven.agent.subagent.backends.env``) rather
 than anything raven hands down. A ``kind: openai`` sub-agent is an HTTP call
@@ -74,7 +74,7 @@ def _stanza(var: str, value: str) -> str:
 
 
 def write_env_file() -> Optional[Path]:
-    """Rewrite ``~/.raven/env`` from config. Returns the path, or ``None``.
+    """Rewrite ``~/.rarus/env`` from config. Returns the path, or ``None``.
 
     ``None`` means there was nothing to say and no stale file to correct. An
     existing file is always rewritten: a key cleared in config has to be retired

@@ -7,7 +7,7 @@ providers section is forbidden.
 
 OAuth providers have a separate auth path via
 ``provider_commands._LOGIN_HANDLERS`` and keep their credentials in files under
-``~/.raven/oauth``, not in ``config.json``. ``set_provider_fields`` refuses to
+``~/.rarus/oauth``, not in ``config.json``. ``set_provider_fields`` refuses to
 write ``api_key`` for those providers; callers must invoke ``provider login`` for
 that. ``reset_provider`` handles both cases: schema-default rewrite for config
 fields, plus deleting the credential files when the provider has

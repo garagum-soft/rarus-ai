@@ -1069,7 +1069,7 @@ def reset_openrouter_cache() -> None:
     """Clear the in-process OpenRouter catalog cache.
 
     The tests' reset: pair it with the ``model_catalog_cache._CACHE_PATH`` seam
-    to exercise the disk tiers without touching the real ~/.raven/cache/.
+    to exercise the disk tiers without touching the real ~/.rarus/cache/.
     """
     global _OPENROUTER_CACHE, _OPENROUTER_CACHE_TIME, _WARM_AT
     _OPENROUTER_CACHE = {}

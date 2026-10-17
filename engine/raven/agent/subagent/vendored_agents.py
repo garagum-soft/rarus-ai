@@ -105,7 +105,7 @@ def agents_root() -> Path | None:
 
     Three places, checked in that order:
 
-    - **under the raven home** (``$RAVEN_HOME`` or ``~/.raven/agents``) -- an
+    - **under the raven home** (``$RARUS_HOME`` or ``~/.rarus/agents``) -- an
       installed tree. First because it is the only writable one that survives
       an upgrade: a product's ``.env`` credential lives inside its folder, so a
       tree under site-packages loses every key when the wheel is replaced;
@@ -390,15 +390,15 @@ def host_can_lend_a_key() -> bool:
     OAuth sign-in counts exactly when a launcher would accept it. An agent
     reaches a sign-in stored under the host's OAuth directory because it
     normally resolves the same home: it is spawned with the host's
-    ``RAVEN_HOME`` when the host has one set, and with none set both fall back
-    to ``~/.raven``.
+    ``RARUS_HOME`` when the host has one set, and with none set both fall back
+    to ``~/.rarus``.
 
     It can still answer True for a launch that is then refused, because the
     agent's environment and config are not this process's. It is spawned with
     the login shell's environment, and with raven's own environment only when
     that shell cannot be captured, so a token-location override
     (``CHATGPT_TOKEN_DIR``, ``CHATGPT_AUTH_FILE``) set only in this process's
-    environment reaches it only in that fallback. A ``RAVEN_HOME`` that the
+    environment reaches it only in that fallback. A ``RARUS_HOME`` that the
     login profile exports while this process has none, or that the agent's
     stored row carries in ``env`` (merged last, over the host's), sends it to
     that home's config and sign-ins instead of the host's. And a host config
@@ -609,10 +609,10 @@ def _read_route_notes(folder: Path, entry: dict) -> None:
 
 
 def employees_root() -> Path:
-    """``<RAVEN_HOME>/employees``: the agents a person hired (``raven agents hire``).
+    """``<RARUS_HOME>/employees``: the agents a person hired (``raven agents hire``).
 
     A tree of its own beside the products rather than a folder in theirs: a hire
-    written into ``<RAVEN_HOME>/agents`` would make that tree the products' tree
+    written into ``<RARUS_HOME>/agents`` would make that tree the products' tree
     and hide every product the checkout beside the package carries. Scanned after
     the products tree, and only when it exists, so a home with no hire discovers
     exactly what it did before.

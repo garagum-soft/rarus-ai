@@ -3,14 +3,14 @@
 An area names an owner (a roster agent), what it covers -- path patterns in a
 project and topic words -- and a charter: the standing instructions for what
 the owner looks after and what "good" means there. Areas live in
-``<RAVEN_HOME>/areas.json`` and outlive every conversation.
+``<RARUS_HOME>/areas.json`` and outlive every conversation.
 
 What makes an owner more than an agent called on demand:
 
 - **who** -- a path or a piece of text finds its owner (the most specific path
   pattern first, then topic words), so work can be routed to whoever owns it;
 - **a journal** -- every run in an area is appended to
-  ``<RAVEN_HOME>/areas/<name>.jsonl``, and the next run is handed the charter
+  ``<RARUS_HOME>/areas/<name>.jsonl``, and the next run is handed the charter
   and the latest entries, so the owner picks up where it left off in any
   conversation, on any day;
 - **a duty** -- an area with ``every_s`` set is looked after on its own: a

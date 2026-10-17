@@ -372,10 +372,10 @@ def sentinel_nudges(
     - What's currently in the dedup / quota / dismissal-cooldown state?
 
     Data sources:
-    - ~/.raven/sentinel/feedback.jsonl — every dispatched / engagement
+    - ~/.rarus/sentinel/feedback.jsonl — every dispatched / engagement
       signal (falls back to legacy ``<default-workspace>/sentinel_feedback.jsonl``
       if the sentinel stack hasn't yet migrated it)
-    - ~/.raven/sentinel/state.json — NudgePolicy fired_at / topic_fired_at /
+    - ~/.rarus/sentinel/state.json — NudgePolicy fired_at / topic_fired_at /
       dismissed_at / hour_quota_multiplier (or per-process state.json for eval).
     """
     import json as _json
@@ -820,7 +820,7 @@ def sentinel_routines(
     - "Which routines has the user actually confirmed?"
     - "Is a retired routine still in cooldown?"
 
-    Reads ``~/.raven/sentinel/routines.json`` (the persistent store
+    Reads ``~/.rarus/sentinel/routines.json`` (the persistent store
     written by RoutineStore at Planner runtime — distinct from the
     in-memory RoutineLearner pass that re-derives candidates from
     HISTORY.md without persisting).

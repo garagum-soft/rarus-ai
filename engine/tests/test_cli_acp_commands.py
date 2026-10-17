@@ -486,7 +486,7 @@ class TestHelp:
     def test_it_names_every_variable_that_changes_its_behaviour(self):
         out = self._rendered()
 
-        for name in ("RAVEN_ACP_LOG_LEVEL", "RAVEN_CLI_DEBUG", "RAVEN_HOME"):
+        for name in ("RAVEN_ACP_LOG_LEVEL", "RAVEN_CLI_DEBUG", "RARUS_HOME"):
             assert name in out, f"{name} changes how this command behaves and is not in its help"
 
     def test_it_names_every_method_that_requires_a_cwd(self):

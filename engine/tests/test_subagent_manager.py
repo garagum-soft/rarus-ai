@@ -3049,7 +3049,7 @@ def _third_party_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, age
     `everos_identity` and the non-trace resolver both read through
     `get_registry()`; without pointing it at a tmp_path-scoped file, a test
     dispatch would land a row in the developer's own
-    `~/.raven/subagent_instances.json`.
+    `~/.rarus/subagent_instances.json`.
     """
     from raven.agent.subagent.instances import InstanceRegistry
 

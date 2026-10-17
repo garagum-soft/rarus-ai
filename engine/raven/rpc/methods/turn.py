@@ -70,7 +70,7 @@ def _resolve_media(paths: list[str] | None) -> tuple[Media, ...]:
     try:
         cfg = load_config()
         # Through ``workspace_path``, not the raw field: the declared default is
-        # a literal that the property resolves against ``RAVEN_HOME``, and
+        # a literal that the property resolves against ``RARUS_HOME``, and
         # ``fs.upload`` deposits through that same property. Reading the field
         # directly put a second home's attachments under the first home's
         # workspace, where nothing resolved.

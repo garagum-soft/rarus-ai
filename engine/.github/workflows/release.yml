@@ -202,7 +202,7 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/gate/tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/gate/bin
           UV_CACHE_DIR: ${{ runner.temp }}/gate/cache
-          RAVEN_HOME: ${{ runner.temp }}/gate/home
+          RARUS_HOME: ${{ runner.temp }}/gate/home
         run: |
           gate="$RUNNER_TEMP/gate/release"
           mkdir -p "$gate"

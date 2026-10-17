@@ -13,7 +13,7 @@ The rendered copy lands under STATE_ROOT, and the location is load-bearing:
 Raven-X derives its runtime data dir from the config file's own parent, so
 transcripts, cache and logs follow the rendered file out of this folder. The
 workspace is pinned under the same root too - the schema's default is
-`~/.raven/workspace`, the host raven's own, which this agent must not share.
+`~/.rarus/workspace`, the host raven's own, which this agent must not share.
 
 After rendering, this process *execs* the checkout's own `raven acp`: the
 server inherits this pid, process group and stdio, so the host's
@@ -158,13 +158,13 @@ FETCH_PROVIDERS = {
 # what moves them.
 STATE_ROOT = Path(
     env_value("RESEARCH_STATE_ROOT")
-    or Path.home() / ".raven" / "workspace" / "subagent_sessions" / "raven-research"
+    or Path.home() / ".rarus" / "workspace" / "subagent_sessions" / "raven-research"
 )
 
 # The host raven's config file, read for the fallbacks below. Read as JSON, never
 # imported from raven: this launcher is standard-library only and has to run
 # under a bare python3 that may not have the runtime installed at all.
-HOST_CONFIG = Path(os.environ.get("RAVEN_HOME", "").strip() or Path.home() / ".raven") / "config.json"
+HOST_CONFIG = Path(os.environ.get("RARUS_HOME", "").strip() or Path.home() / ".rarus") / "config.json"
 
 
 def log(message: str) -> None:
@@ -465,7 +465,7 @@ def render_config(source: Path, mode: str | None = None) -> Path:
     require_fetch(config)
 
     # One workspace for the whole server, pinned under STATE_ROOT: the schema
-    # default is the host raven's own `~/.raven/workspace`, and sessions are
+    # default is the host raven's own `~/.rarus/workspace`, and sessions are
     # kept apart below it by their protocol-minted ids.
     defaults = config.setdefault("agents", {}).setdefault("defaults", {})
     if not defaults.get("workspace"):

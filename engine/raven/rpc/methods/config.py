@@ -2,7 +2,7 @@
 
 The v0.1 surface exposes only **four hot-changeable** keys; any other write
 target raises :class:`ConfigFieldReadonlyError` (-32010). Values are stored
-in ``~/.raven/config.json`` using dotted-path nesting (``tui.theme`` →
+in ``~/.rarus/config.json`` using dotted-path nesting (``tui.theme`` →
 ``{"tui": {"theme": "..."}}``) so that the same file is what ``raven.config.loader`` reads.
 
 Validation
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from raven.rpc.methods.session import AgentLoopFactory
 
 
-_CONFIG_DIR_NAME = ".raven"
+_CONFIG_DIR_NAME = ".rarus"
 _CONFIG_FILENAME = "config.json"
 
 # Default values returned by config.get when the on-disk config omits the key.
@@ -170,7 +170,7 @@ def _config_path() -> Path:
     """The config file this surface reads and writes.
 
     Asked of the loader rather than rebuilt from ``Path.home()``: the loader is
-    where ``--config`` and ``RAVEN_HOME`` are honoured, and building the path
+    where ``--config`` and ``RARUS_HOME`` are honoured, and building the path
     here ignored both -- so on a non-default home every ``config.set`` wrote
     into the default installation's file, which nothing running was reading.
     It also matters for the load-back check in :func:`_save_config`, which has

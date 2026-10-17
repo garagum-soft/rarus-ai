@@ -215,7 +215,7 @@ def _isolated_instance_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     Without this, any test whose DAG run carries a `session_key` (directly, or
     via `SubAgentDagTool.set_context`) resolves `get_registry()` to the
-    process-wide singleton, i.e. the real `~/.raven/subagent_instances.json` --
+    process-wide singleton, i.e. the real `~/.rarus/subagent_instances.json` --
     accumulating one junk row per node per run across every test run, forever
     (each run mints a fresh run_id, so nothing ever overwrites an old row).
     """

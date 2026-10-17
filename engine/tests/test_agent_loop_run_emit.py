@@ -1539,7 +1539,7 @@ async def test_an_observer_that_cannot_roll_back_keeps_the_chunks(tmp_path):
 
 
 class _LeakyTool(Tool):
-    """Prints a key Raven holds, the way `cat ~/.raven/config.json` would."""
+    """Prints a key Raven holds, the way `cat ~/.rarus/config.json` would."""
 
     KEY = "sk-or-held-0123456789"
 

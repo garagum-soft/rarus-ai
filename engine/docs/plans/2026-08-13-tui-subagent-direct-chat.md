@@ -3247,7 +3247,7 @@ async def test_direct_chat_round_trip_leaves_records_and_a_handoff(tmp_path, stu
 Write the `stub_loop` fixture in `tests/integration/conftest.py` if that file
 already hosts loop fixtures, otherwise inline it in this module. It must point
 the registry at `tmp_path` (monkeypatch `default_registry_path`) so the test
-never touches `~/.raven/subagent_instances.json`.
+never touches `~/.rarus/subagent_instances.json`.
 
 Run: `uv run pytest tests/integration/test_direct_chat_smoke.py -v`
 Expected: PASS

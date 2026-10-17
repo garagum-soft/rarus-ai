@@ -164,7 +164,7 @@ def find_node() -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
                 candidates.append(cand)
 
         # Priority 4: Raven-managed private runtime installed by the one-line
-        # installer into ~/.raven/runtime/. This is the zero-config fallback so
+        # installer into ~/.rarus/runtime/. This is the zero-config fallback so
         # a user who has no system Node still gets a working `raven tui` after
         # the installer provisioned a private Node here. Glob to tolerate the
         # versioned dir name. The on-disk layout differs by OS: POSIX tarballs

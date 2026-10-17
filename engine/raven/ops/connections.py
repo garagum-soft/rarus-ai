@@ -297,7 +297,7 @@ def store_path() -> Path:
 
     * **a sub-agent** (the host launched it with ``RAVEN_SUBAGENT``) reads the
       owner's home (``raven_home()``), which the host hands it as
-      ``RAVEN_HOME``, whenever the home holds a registry. Its config is a
+      ``RARUS_HOME``, whenever the home holds a registry. Its config is a
       rendered copy in a state directory of its own, and a registry beside it
       can only be a copy taken to keep it supplied -- the copy-once bug (five
       byte-identical registries on one computer, 2026-08-25). Read first, such

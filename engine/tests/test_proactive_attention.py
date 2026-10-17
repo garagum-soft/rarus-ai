@@ -90,7 +90,7 @@ def test_a_bad_priority_is_refused(path: Path) -> None:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     return tmp_path / "home"
 
 

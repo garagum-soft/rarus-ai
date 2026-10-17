@@ -112,7 +112,7 @@ def new_cmd(
     name: str = typer.Argument(..., help="Name for the scenario (letters, digits, '-')"),
     force: bool = typer.Option(False, "--force", help="Replace a scenario of that name in your scenarios"),
 ) -> None:
-    """Write a starting scenario to <RAVEN_HOME>/scenarios/ to edit."""
+    """Write a starting scenario to <RARUS_HOME>/scenarios/ to edit."""
     import re
 
     from raven.scenario.catalog import default_home_dir
@@ -139,7 +139,7 @@ def run_cmd(
     timeout: float = typer.Option(0, "--timeout", help="Stop the whole scenario after this many seconds (0: no limit)"),
     as_json: bool = typer.Option(False, "--json", help="Print the outcome as JSON"),
 ) -> None:
-    """Run a scenario to the end and print its result; the record is kept under <RAVEN_HOME>/scenario_runs/."""
+    """Run a scenario to the end and print its result; the record is kept under <RARUS_HOME>/scenario_runs/."""
     import asyncio
 
     from raven.scenario.api import ScenarioError

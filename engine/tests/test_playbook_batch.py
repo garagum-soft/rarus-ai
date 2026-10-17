@@ -75,7 +75,7 @@ def test_the_command_line_runs_a_playbook_once_per_input(tmp_path: Path, monkeyp
     (home / "config.json").write_text(
         json.dumps({"subagents": {"agents": [{"name": "echo", "kind": "cli", "command": echo}]}}), encoding="utf-8"
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.chdir(tmp_path)
 
     from raven.config.loader import load_config

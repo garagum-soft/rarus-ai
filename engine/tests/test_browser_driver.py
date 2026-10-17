@@ -601,7 +601,7 @@ async def test_the_profile_is_the_one_under_the_home_in_effect_at_launch(
     with pytest.raises(BrowserUnavailableError):
         await get_browser()._ensure()
 
-    assert profiles == [str(home / ".raven" / "browser-profile")]
+    assert profiles == [str(home / ".rarus" / "browser-profile")]
 
 
 # ── tabs ────────────────────────────────────────────────────────────────

@@ -708,7 +708,7 @@ and this autouse fixture, directly below `_free_port`:
 ```python
 @pytest.fixture(autouse=True)
 def _isolated_instance_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test here may touch the real ~/.raven/subagent_instances.json.
+    """No test here may touch the real ~/.rarus/subagent_instances.json.
 
     Same reasoning as the fixture of this name in
     `tests/test_subagent_third_party.py`: a stateful create commits a handle
@@ -1344,7 +1344,7 @@ import type { RavenSubagentProbe, RavenThirdPartySubagent } from '@/api';
 
 /**
  * Raven's third-party subagent config. Writes replace the whole list: the
- * gateway validates it, persists it to ~/.raven, and hot-applies it to the
+ * gateway validates it, persists it to ~/.rarus, and hot-applies it to the
  * running AgentLoop.
  *
  * Availability probes are a second, deliberately decoupled fetch: they are keyed

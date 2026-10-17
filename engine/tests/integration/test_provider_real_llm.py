@@ -38,7 +38,7 @@ pytestmark = pytest.mark.asyncio
 
 def _config_key(provider: str) -> str:
     """A key from the user's own config, so a configured machine needs no env."""
-    path = Path.home() / ".raven" / "config.json"
+    path = Path.home() / ".rarus" / "config.json"
     try:
         section = json.loads(path.read_text(encoding="utf-8")).get("providers", {}).get(provider) or {}
     except Exception:
@@ -48,7 +48,7 @@ def _config_key(provider: str) -> str:
 
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY") or _config_key("openrouter")
 
-requires_openrouter = pytest.mark.skipif(not OPENROUTER_KEY, reason="no OpenRouter credential (env or ~/.raven)")
+requires_openrouter = pytest.mark.skipif(not OPENROUTER_KEY, reason="no OpenRouter credential (env or ~/.rarus)")
 
 #: Long enough to clear every vendor's minimum cacheable prefix.
 FILLER = "You are a meticulous release engineer. Track every constraint stated below and never restate it. " * 420

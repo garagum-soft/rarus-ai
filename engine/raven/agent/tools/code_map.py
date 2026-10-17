@@ -4,7 +4,7 @@ Answers from the project's code index (:mod:`raven.codemap`), refreshed
 incrementally on every call: a ranked map of the files that matter for a
 question, each with the outline of what it defines, or where a name is defined.
 Reads only what ``read_file`` may read -- the same path fence, resolved the same
-way -- and writes nothing but the index under ``<RAVEN_HOME>/codemap/``.
+way -- and writes nothing but the index under ``<RARUS_HOME>/codemap/``.
 
 Registered only when ``tools.codeMap`` is on (see ``ToolsConfig.code_map``).
 """

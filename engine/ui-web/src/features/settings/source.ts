@@ -41,7 +41,7 @@ import type { AuthField, InstrSaved, ProviderOp, SettingsSnapshot, SettingsSourc
    inside its snapshot, which is the only reader. */
 let RAW: Record<string, unknown> = {}
 
-let configPathLive = '~/.raven/config.json'
+let configPathLive = '~/.rarus/config.json'
 let everosLive: ResultOf<'settings.everos'> | null = null
 
 /* The three members that need page chrome no island owns: the version the foot
@@ -478,7 +478,7 @@ export const watchMcp = (onStatus: () => void): (() => void) => gateway().on('mc
    registered are all the module's. */
 export function _resetForTests(): void {
   RAW = {}
-  configPathLive = '~/.raven/config.json'
+  configPathLive = '~/.rarus/config.json'
   everosLive = null
   chrome = { version: () => null, checkUpdate: async () => {}, newerVersion: () => null, upgrade: () => {}, setLang: () => {} }
 }

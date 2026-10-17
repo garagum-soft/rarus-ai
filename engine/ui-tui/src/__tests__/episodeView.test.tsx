@@ -204,7 +204,7 @@ describe('EpisodeView', () => {
 
   it('treats an "Error:" result as a failure, and omits an argument the row already shows', () => {
     const needle = 'Hermes Agent latest release'
-    const err = 'Error: Serper API key not configured. Set it in ~/.raven/config.json.'
+    const err = 'Error: Serper API key not configured. Set it in ~/.rarus/config.json.'
     const episodes = [
       step(0, 'searching', [
         call('q1', 'web_search', needle, { resultPreview: err }),
@@ -454,16 +454,16 @@ describe('EpisodeView', () => {
     // one case the block drops it -- but with no result to show in its place
     // that left the reader an empty slab.
     const episodes = [
-      step(0, 'looking', [call('l', 'list_dir', '~/.raven/sessions', { done: false, durationMs: undefined })])
+      step(0, 'looking', [call('l', 'list_dir', '~/.rarus/sessions', { done: false, durationMs: undefined })])
     ]
     const open = view(episodes, { live: true, openKeys: ['seg:l'] })
 
-    expect(open.split('~/.raven/sessions')).toHaveLength(3)
+    expect(open.split('~/.rarus/sessions')).toHaveLength(3)
   })
 
   it('caps a long result inside the detail block', () => {
     const long = Array.from({ length: 13 }, (_, i) => `entry-${i}`).join('\n')
-    const f = view([step(0, 'listing', [call('l', 'list_dir', '~/.raven', { resultPreview: long })])], {
+    const f = view([step(0, 'listing', [call('l', 'list_dir', '~/.rarus', { resultPreview: long })])], {
       openKeys: ['seg:l']
     })
 

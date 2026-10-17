@@ -7,7 +7,7 @@
 一个 playbook = 一个目录，目录里一个 `playbook.md`，分三区。
 
 ```
-~/.raven/playbooks/
+~/.rarus/playbooks/
   competitor-scan/
     playbook.md           # 一个目录一个文件，没有旁挂
 ```

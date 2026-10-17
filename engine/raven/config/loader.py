@@ -184,7 +184,7 @@ def _stamp_path(config_path: Path) -> Path:
     ``load_config`` raises on a validation error, so a key this build knows and
     an older one does not turns every older build into a hard boot failure --
     a reverted release, a pinned older version, or just a second checkout
-    sharing the same ~/.raven. A sidecar is ours to write and invisible to any
+    sharing the same ~/.rarus. A sidecar is ours to write and invisible to any
     build that has never heard of it, which also keeps a revert of this change
     clean.
 

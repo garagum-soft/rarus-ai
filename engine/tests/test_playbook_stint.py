@@ -120,10 +120,10 @@ class TestCompile:
         that, so the guard says where the work is and where it is not."""
         told = compile_round(_spec(), 2)[0]["prompt_template"]
 
-        assert "~/.raven" in told
+        assert "~/.rarus" in told
         assert ".raven/" in told
         assert _template_tail("stint_guard") in told
-        assert "~/.raven" in prompt("stint_guard"), "the constraint names the host's own directory"
+        assert "~/.rarus" in prompt("stint_guard"), "the constraint names the host's own directory"
 
     def test_what_a_role_owns_reaches_the_role_even_when_the_author_forgot_to_ask(self) -> None:
         """One declaration, read twice: here and by the pass that undoes a stray

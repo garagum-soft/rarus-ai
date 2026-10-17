@@ -27,7 +27,7 @@ from raven.token_wise import turn_spend
 
 
 def _default_telemetry_dir() -> Path:
-    # Through raven_home() rather than a literal ~/.raven: RAVEN_HOME moves the
+    # Through raven_home() rather than a literal ~/.rarus: RARUS_HOME moves the
     # whole installation, and telemetry written outside it is telemetry the
     # matching reader (settings.usage) will never find.
     from raven.config.loader import raven_home
@@ -163,7 +163,7 @@ class UsageTracker(TokenStrategy):
 
         Args:
             telemetry_dir: Where to write ``usage-YYYY-MM-DD.jsonl``. Defaults
-                to ``<raven home>/telemetry`` (``raven_home()``, so RAVEN_HOME
+                to ``<raven home>/telemetry`` (``raven_home()``, so RARUS_HOME
                 moves it).
             flush_every: Buffer N calls before writing to disk. 1 = write every
                 call (safest, default). Larger values amortize IO.

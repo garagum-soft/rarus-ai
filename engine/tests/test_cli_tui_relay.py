@@ -30,7 +30,7 @@ from raven.cli._tui_relay import (
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """An agent home of our own, so nothing here reads the developer's."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     return tmp_path / "home"
 
 

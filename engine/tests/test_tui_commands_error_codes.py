@@ -52,7 +52,7 @@ def test_typeerror_in_build_raises_internal_error_minus_32603(monkeypatch: pytes
     """AgentLoop ctor raising TypeError (kwargs drift) → InternalError(-32603).
 
     Reason data field = "tui_init_crash"; exception_type echoed; log_path
-    points to ~/.raven/logs/tui.log so the UI can hint the user.
+    points to ~/.rarus/logs/tui.log so the UI can hint the user.
     """
     monkeypatch.chdir(tmp_path)
     _patch_agent_loop_to_raise(

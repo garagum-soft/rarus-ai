@@ -148,7 +148,7 @@ This is a user-visible change: `stateful` appears in the roster text that
 **No UI surface writes this field, by decision.** Neither the `/subagents`
 overlay nor the web form nor `subagents.add` / `subagents.update` carries it, so
 every custom `openai` entry created through a UI is stateful; overriding that
-means editing `~/.raven/config.json`. The alternative - a checkbox on both forms
+means editing `~/.rarus/config.json`. The alternative - a checkbox on both forms
 plus an RPC field - would ask every user to answer a question about their
 endpoint that only an operator who has already watched it ignore a replayed
 transcript can answer, and would answer it wrongly by default for everyone else.

@@ -48,7 +48,7 @@ lsof -nP -iTCP:$PORT -sTCP:LISTEN && { echo "port busy"; exit 1; }
   `npm ci && npm run build && python3 build.py`.
 - Start the gateway from a neutral directory, never from the repository (the
   gateway inherits the shell's cwd):
-  `(cd "$(mktemp -d)" && RAVEN_HOME="$RV" raven serve --port $PORT & echo $! > "$RV/serve.pid")`.
+  `(cd "$(mktemp -d)" && RARUS_HOME="$RV" raven serve --port $PORT & echo $! > "$RV/serve.pid")`.
   The start goes under the shell's `trap ... EXIT` and a hard lifetime cap;
   the shape is the POSIX watchdog in the machine rules.
 - Confirm the port holder is this process, not another session's:

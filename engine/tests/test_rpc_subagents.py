@@ -26,7 +26,7 @@ from raven.rpc.methods.subagents import (
 
 @pytest.fixture
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A config file the handlers write to instead of the real ~/.raven."""
+    """A config file the handlers write to instead of the real ~/.rarus."""
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps(
@@ -217,7 +217,7 @@ async def test_list_groups_an_installed_but_untested_acp_preset_as_installed(
     exe = bindir / "hermes"
     exe.write_text("#!/bin/sh\n", encoding="utf-8")
     exe.chmod(0o755)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.setattr("raven.agent.subagent.probe._login_path", lambda: str(bindir))
     result = await subagents_list({})
     by_name = {row["name"]: row for row in result["rows"]}
@@ -242,7 +242,7 @@ async def test_a_missing_row_names_the_executable_to_install(config_path: Path, 
     exe = bindir / "hermes"
     exe.write_text("#!/bin/sh\n", encoding="utf-8")
     exe.chmod(0o755)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.setattr("raven.agent.subagent.probe._login_path", lambda: str(bindir))
     by_name = {row["name"]: row for row in (await subagents_list({}))["rows"]}
     assert by_name["Codex"]["probe_status"] == "missing"
@@ -276,7 +276,7 @@ async def test_a_recheck_finds_an_agent_installed_after_the_gateway_started(
     monkeypatch.setattr(env_mod, "_LOGIN_ENV_FAILED", False)
     monkeypatch.setattr(env_mod, "_capture", lambda *, consequence: dict(shell))
     monkeypatch.setattr("raven.agent.subagent.probe._login_path", lambda: env_mod.login_shell_env().get("PATH", ""))
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
 
     def kimi(result: dict) -> dict:
         return next(row for row in result["rows"] if row["name"] == "Kimi Code")

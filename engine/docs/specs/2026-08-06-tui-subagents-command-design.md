@@ -9,7 +9,7 @@
 Give the TUI a `/subagents` command that configures third-party sub-agents from
 the built-in presets, so a user in `raven tui` can see what is installed, add a
 preset, name it, enable or disable it, and confirm it actually answers - without
-leaving the TUI for the web UI or hand-editing `~/.raven/config.json`.
+leaving the TUI for the web UI or hand-editing `~/.rarus/config.json`.
 
 ## Why this is needed
 
@@ -58,7 +58,7 @@ sub-agent semantics are reimplemented for the TUI:
                                                       |
                         update_subagents / presets / probe / test_state
                                                       |
-                        ~/.raven/config.json  +  agent_loop.apply_third_party_subagents()
+                        ~/.rarus/config.json  +  agent_loop.apply_third_party_subagents()
 ```
 
 ### RPC surface
@@ -148,7 +148,7 @@ The form is two fields (three for openai kind), Tab to move:
 
 ```
 ┌ Add OpenCode ──────────────────────────────────┐
-│ Saved to ~/.raven/config.json · Tab switches   │
+│ Saved to ~/.rarus/config.json · Tab switches   │
 │                                                │
 │ ▸ Name:                                        │
 │   opencode▎                                    │
@@ -178,7 +178,7 @@ reinvents:
 
 Two deliberate departures:
 
-1. **Storage path.** The model picker writes LLM keys to `~/.raven/.env`; a
+1. **Storage path.** The model picker writes LLM keys to `~/.rarus/.env`; a
    sub-agent's key is a field on its config entry
    (`subagents.thirdParty[].apiKey`). Only the input logic is shared - relocating
    storage would break the schema and the web UI's contract. The header line

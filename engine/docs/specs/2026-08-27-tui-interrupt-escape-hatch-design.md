@@ -60,7 +60,7 @@ The rendering path's cost must be a function of the viewport, not of how long
 the session has run. This is the tier the accompanying fix restored, and it is
 the only tier that prevents the symptom rather than surviving it. The loop-lag
 monitor (`ui-tui/src/lib/loopLag.ts`) exists to say when it has been violated:
-each stalled tick appends a line to `$RAVEN_HOME/tui-stalls.log`.
+each stalled tick appends a line to `$RARUS_HOME/tui-stalls.log`.
 
 ### Tier 1: an escape that does not run on the blocked thread
 

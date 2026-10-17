@@ -106,7 +106,7 @@ def test_the_command_line_runs_attempts_on_a_roster_agent(tmp_path: Path, monkey
     (home / "config.json").write_text(
         json.dumps({"subagents": {"agents": [{"name": "writer", "kind": "cli", "command": writer}]}}), encoding="utf-8"
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     project = _project(tmp_path)
 
     result = CliRunner().invoke(

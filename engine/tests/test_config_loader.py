@@ -227,18 +227,18 @@ def test_config_read_error_is_not_runtimeerror() -> None:
 
 
 # ---------------------------------------------------------------------------
-# RAVEN_HOME decides where everything lives, including this
+# RARUS_HOME decides where everything lives, including this
 # ---------------------------------------------------------------------------
 
 
 def test_raven_home_moves_the_config_path(tmp_path, monkeypatch) -> None:
-    """Five other places already honoured RAVEN_HOME -- the installer, the node
+    """Five other places already honoured RARUS_HOME -- the installer, the node
     runtime lookup, the tracing directory, the serve state file and the file
     server -- and this one did not. Setting it gave a split installation: the
     runtime in one place, the configuration in another."""
     from raven.config.loader import get_config_path
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
 
     assert get_config_path() == tmp_path / "elsewhere" / "config.json"
 
@@ -248,7 +248,7 @@ def test_the_runtime_subdirs_follow_it(tmp_path, monkeypatch) -> None:
     the config has to move them with it or the split is only narrower."""
     from raven.config.paths import get_cron_dir
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
 
     assert get_cron_dir() == tmp_path / "elsewhere" / "cron"
 
@@ -258,7 +258,7 @@ def test_an_explicit_path_still_wins(tmp_path, monkeypatch) -> None:
     environment variable must not override a caller who was specific."""
     from raven.config.loader import get_config_path, set_config_path
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "env"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "env"))
     explicit = tmp_path / "explicit" / "config.json"
     set_config_path(explicit)
     try:
@@ -268,14 +268,14 @@ def test_an_explicit_path_still_wins(tmp_path, monkeypatch) -> None:
 
 
 def test_an_empty_value_is_not_a_home(tmp_path, monkeypatch) -> None:
-    """`RAVEN_HOME=` in a shell profile is unset, not "the current directory"."""
+    """`RARUS_HOME=` in a shell profile is unset, not "the current directory"."""
     from pathlib import Path
 
     from raven.config.loader import get_config_path
 
-    monkeypatch.setenv("RAVEN_HOME", "   ")
+    monkeypatch.setenv("RARUS_HOME", "   ")
 
-    assert get_config_path() == Path.home() / ".raven" / "config.json"
+    assert get_config_path() == Path.home() / ".rarus" / "config.json"
 
 
 def test_home_implements_the_layout_paper(tmp_path, monkeypatch) -> None:
@@ -307,7 +307,7 @@ def test_the_workspace_follows_raven_home_too(tmp_path, monkeypatch) -> None:
     """
     from raven.config.loader import load_config
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
 
     assert load_config().workspace_path == tmp_path / "elsewhere" / "workspace"
 
@@ -320,7 +320,7 @@ def test_both_derivations_of_the_workspace_agree(tmp_path, monkeypatch) -> None:
     from raven.config.loader import load_config
     from raven.config.paths import get_workspace_path
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
 
     assert get_workspace_path() == tmp_path / "elsewhere" / "workspace"
     assert get_workspace_path() == load_config().workspace_path
@@ -330,7 +330,7 @@ def test_a_named_workspace_still_wins_over_the_home(tmp_path, monkeypatch) -> No
     """Same rule on this side as on the config's: only the default follows."""
     from raven.config.paths import get_workspace_path
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
 
     assert get_workspace_path(str(tmp_path / "mine")) == tmp_path / "mine"
 
@@ -344,7 +344,7 @@ def test_a_configured_workspace_is_used_as_written(tmp_path, monkeypatch) -> Non
     home = tmp_path / "elsewhere"
     home.mkdir()
     (home / "config.json").write_text(json.dumps({"agents": {"defaults": {"workspace": str(tmp_path / "mine")}}}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
     assert get_config_path() == home / "config.json"
     assert load_config().workspace_path == tmp_path / "mine"
@@ -1098,7 +1098,7 @@ def test_the_stamp_never_lands_in_the_user_config(tmp_path: Path) -> None:
     """``Config`` is ``extra='forbid'`` and ``load_config`` raises rather than
     falling back, so a key this build knows and an older one does not is a hard
     boot failure for the older build -- a reverted release, a pinned version, or
-    a second checkout sharing the same ~/.raven. The watermark is ours to keep in
+    a second checkout sharing the same ~/.rarus. The watermark is ours to keep in
     a sidecar, not the user's file."""
     p = tmp_path / "config.json"
     _write(p, {"agents": {"defaults": {"contextWindowTokens": 65536}}})

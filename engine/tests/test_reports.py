@@ -196,7 +196,7 @@ def _usage(home: Path) -> None:
 async def recorded(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     workspace, home = tmp_path / "ws", tmp_path / "home"
     workspace.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     await _graph_runs(workspace)
     await _spawns(workspace, monkeypatch)
     _stint(workspace)

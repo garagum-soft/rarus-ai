@@ -1,5 +1,5 @@
 """``raven cron`` subapp — operator-facing CLI for the CronService
-state at ``~/.raven/cron/jobs.json``.
+state at ``~/.rarus/cron/jobs.json``.
 
 Commands:
 
@@ -38,7 +38,7 @@ from raven.proactive_engine.schedulers.cron.service import CronService
 from raven.proactive_engine.schedulers.cron.types import CronJob, CronSchedule
 
 cron_app = typer.Typer(
-    help="Inspect and manage scheduled cron jobs (~/.raven/cron/jobs.json)",
+    help="Inspect and manage scheduled cron jobs (~/.rarus/cron/jobs.json)",
     no_args_is_help=True,
 )
 console = Console()
@@ -806,7 +806,7 @@ def cron_add(
 
 
 cron_config_app = typer.Typer(
-    help="Read / write the cron section of ~/.raven/config.json",
+    help="Read / write the cron section of ~/.rarus/config.json",
     no_args_is_help=True,
 )
 cron_app.add_typer(cron_config_app, name="config")

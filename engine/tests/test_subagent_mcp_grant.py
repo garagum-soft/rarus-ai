@@ -442,7 +442,7 @@ def test_a_carried_oauth_server_with_stored_tokens_is_granted_without_host_state
     # A run-scoped server has no host connection to read: the host's manager
     # never dials it. Its playbook's credential file is the only fact, and tokens
     # there mean the endpoint will dial with them.
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.mcp.oauth import credentials_path
 
     path = credentials_path("sentry", scope="playbooks/scan")
@@ -458,7 +458,7 @@ def test_a_carried_oauth_server_with_stored_tokens_is_granted_without_host_state
 
 
 def test_a_carried_oauth_server_without_tokens_names_the_playbook_that_owns_it(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     config = MCPServerConfig(type="streamableHttp", url="https://mcp.example.test", auth="oauth")
     source = _Source({"sentry": _view("sentry", config, state=None, scope="playbooks/scan")})
 
@@ -477,7 +477,7 @@ def test_a_carried_oauth_server_never_reads_the_hosts_token_file(tmp_path, monke
     # Same name as a host server that IS authorized: the carried one must not
     # borrow that file, or a carried definition pointing elsewhere would send
     # the host's bearer to another service.
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.mcp.oauth import credentials_path
 
     credentials_path("sentry").write_text(json.dumps({"tokens": {"access_token": "host-token"}}))

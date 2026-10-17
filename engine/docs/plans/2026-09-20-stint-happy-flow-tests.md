@@ -70,7 +70,7 @@ Ship it as one pytest fixture and one shell function, used by every layer.
 
 ### 0.3 The agent home
 
-`RAVEN_HOME` per test. Stints live under the run root
+`RARUS_HOME` per test. Stints live under the run root
 (`plans_root -> <run root>/<STINTS_DIRNAME>`) and `_already_running` searches
 **every peer store on the machine** (`raven/playbook/stint.py:338`), so a stray
 stint from a previous run in a shared home will refuse the next test's start.
@@ -136,7 +136,7 @@ different policies, and they serve the same page:
 | Entry | Policy | Where a session lands |
 |---|---|---|
 | `raven serve` (what `raven web --supervise` starts) | `WorkdirPolicy.LAUNCH_DIR` (`raven/core/engine_stack.py:110`) | **the directory the process was launched from**, for every session, with no channel suffix |
-| `raven gateway` | `WorkdirPolicy.PER_CHANNEL` (`raven/cli/gateway_commands.py:373`) | `<session_root>/<channel>`; with no `-w` that is `~/.raven/tmp/tui`, because `session_root` defaults to `default_channel_root(workspace_path)` and every RPC-minted session is keyed `tui:<chat_id>` (`raven/rpc/methods/session.py:403`) |
+| `raven gateway` | `WorkdirPolicy.PER_CHANNEL` (`raven/cli/gateway_commands.py:373`) | `<session_root>/<channel>`; with no `-w` that is `~/.rarus/tmp/tui`, because `session_root` defaults to `default_channel_root(workspace_path)` and every RPC-minted session is keyed `tui:<chat_id>` (`raven/rpc/methods/session.py:403`) |
 
 Verified on the author's machine: `raven web --supervise --port 18792` ->
 `raven serve`, cwd `/Users/admin/workspace/ledger-demo`, and a fresh web
@@ -466,7 +466,7 @@ New file: `tests/integration/test_stint_conversation_e2e.py`.
 ### L3 -- the TUI, in a pty
 
 There is no headless TUI mode and no pty harness in the repo, so build a small
-one: python's `pty`, spawn `raven tui` in the fixture repo with `RAVEN_HOME` and
+one: python's `pty`, spawn `raven tui` in the fixture repo with `RARUS_HOME` and
 the scripted-provider config in the environment, write keystrokes to the master
 fd, and tee everything read back to a file.
 
@@ -560,7 +560,7 @@ on the repository.
 
 **The caveat, because the sentence is not true of both entry points.**
 `raven gateway` resolves `PER_CHANNEL` instead, so a stint started from its page
-lands in `~/.raven/tmp/tui` rather than anywhere the operator chose. Two ways to
+lands in `~/.rarus/tmp/tui` rather than anywhere the operator chose. Two ways to
 close that, neither urgent: say in the docs that the page is served by
 `raven web` / `raven serve`, or give `gateway` the same launch-directory
 default. Until one of them happens, "wherever you started it" is a rule with an
@@ -573,7 +573,7 @@ the next person does not re-derive it.
 
 Today a stint's project is derived -- `_stint_workspace` -> `peek_session_workdir`
 (`raven/agent/loop/wiring.py:1523`) -- so it is whatever directory the *session*
-resolves to: the server's launch directory under `raven serve`, `~/.raven/tmp/tui`
+resolves to: the server's launch directory under `raven serve`, `~/.rarus/tmp/tui`
 under `raven gateway` (see S2). Either way the person cannot choose, and the two
 differ. Two ways to let them say otherwise, and they are not alternatives so much
 as different scopes:

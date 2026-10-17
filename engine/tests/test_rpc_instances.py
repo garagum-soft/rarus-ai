@@ -30,7 +30,7 @@ from raven.rpc.methods.instances import (
 
 @pytest.fixture(autouse=True)
 def _isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> instances_mod.InstanceRegistry:
-    """Never the developer's real ``~/.raven/subagent_instances.json``."""
+    """Never the developer's real ``~/.rarus/subagent_instances.json``."""
     reg = instances_mod.InstanceRegistry(path=tmp_path / "inst.json")
     monkeypatch.setattr(instances_mod, "_registry", reg)
     return reg

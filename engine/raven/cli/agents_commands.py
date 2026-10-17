@@ -409,7 +409,7 @@ def _doctor(
         console.print(f"  discovery: row '{display}' listed, enabled={row.enabled}, readiness=ready")
     if here:
         console.print(
-            "  note: this scan read ./agents directly; a live raven reads $RAVEN_HOME/agents first, "
+            "  note: this scan read ./agents directly; a live raven reads $RARUS_HOME/agents first, "
             "and an existing home tree shadows this checkout's tree"
         )
     return failures, row, state
@@ -538,7 +538,7 @@ def _smoke_handshake(row: object) -> tuple[str, str]:
 def new(
     name: str = typer.Argument(..., help="Machine id for the new agent: kebab-case (e.g. my-agent), never renamed"),
     display: str | None = typer.Option(None, "--display", help="Display name; defaults to Title-Case of NAME"),
-    here: bool = typer.Option(False, "--here", help="Scaffold into ./agents/NAME instead of $RAVEN_HOME/agents/NAME"),
+    here: bool = typer.Option(False, "--here", help="Scaffold into ./agents/NAME instead of $RARUS_HOME/agents/NAME"),
     kind: str = typer.Option("acp", "--kind", help="Agent protocol; only 'acp' today ('cli' is reserved for v2)"),
     register: bool = typer.Option(
         False,

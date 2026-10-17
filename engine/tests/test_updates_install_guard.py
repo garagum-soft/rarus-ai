@@ -23,7 +23,7 @@ from raven.updates import install_guard as guard
 def raven_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return home
 
 
@@ -71,7 +71,7 @@ class TestTheMarker:
         guard.clear_marker()
 
     def test_it_survives_a_home_that_does_not_exist_yet(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "not-created"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "not-created"))
         guard.write_marker()
         assert guard.read_marker() is not None
 

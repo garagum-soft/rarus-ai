@@ -1,7 +1,7 @@
 """CLI integration tests for ``raven channels {enable,disable,set,get,reset,help}``.
 
 Uses ``typer.testing.CliRunner``; redirects the config to a tmp path via
-``raven.config.loader.set_config_path`` so the real ``~/.raven/config.json``
+``raven.config.loader.set_config_path`` so the real ``~/.rarus/config.json``
 is never touched.
 """
 

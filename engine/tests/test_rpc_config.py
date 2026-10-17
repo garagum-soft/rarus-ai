@@ -64,8 +64,8 @@ async def test_config_get_unknown_keys_silently_omitted(fake_home: Path) -> None
 
 
 async def test_config_get_reads_persisted_values(fake_home: Path) -> None:
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(json.dumps({"tui": {"theme": "solarized-dark"}}))
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(json.dumps({"tui": {"theme": "solarized-dark"}}))
     result = await config_get({"keys": ["tui.theme"]})
     assert result["config"]["tui.theme"] == "solarized-dark"
 
@@ -102,7 +102,7 @@ async def test_config_set_invalid_temperature_raises_validation(fake_home: Path)
 
 async def test_config_set_persists_to_config_json(fake_home: Path) -> None:
     await config_set({"key": "tui.theme", "value": "dracula"})
-    cfg_path = fake_home / ".raven" / "config.json"
+    cfg_path = fake_home / ".rarus" / "config.json"
     assert cfg_path.exists()
     payload = json.loads(cfg_path.read_text())
     assert payload["tui"]["theme"] == "dracula"
@@ -120,10 +120,10 @@ async def test_config_set_previous_value_returned(fake_home: Path) -> None:
 
 
 async def test_config_set_creates_config_when_missing(fake_home: Path) -> None:
-    """When ~/.raven/config.json doesn't exist yet, set must create it."""
-    assert not (fake_home / ".raven" / "config.json").exists()
+    """When ~/.rarus/config.json doesn't exist yet, set must create it."""
+    assert not (fake_home / ".rarus" / "config.json").exists()
     await config_set({"key": "tui.theme", "value": "ok"})
-    assert (fake_home / ".raven" / "config.json").exists()
+    assert (fake_home / ".rarus" / "config.json").exists()
 
 
 async def test_config_set_missing_key_param_raises_validation(fake_home: Path) -> None:
@@ -209,7 +209,7 @@ async def test_config_set_model_reassigns_loop_and_persists(fake_home: Path, mon
     # (pinned in test_agent_loop_model_switch, where the adopt path lives).
     assert loop.switches == [(new_provider, "anthropic/claude-opus-4-8")]
 
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["model"] == "anthropic/claude-opus-4-8"
     assert cfg["agents"]["defaults"]["provider"] == "anthropic"
 
@@ -229,7 +229,7 @@ async def test_config_set_model_without_a_provider_is_refused(fake_home: Path) -
         )
 
     # And nothing was written: a refused switch leaves the config alone.
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"].get("model") != "anthropic/claude-opus-4-8"
 
 
@@ -242,7 +242,7 @@ async def test_config_set_model_with_a_provider_writes_the_pair(fake_home: Path)
     )
 
     assert result["applied"] is True
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["provider"] == "anthropic"
     assert cfg["agents"]["defaults"]["model"] == "anthropic/claude-opus-4-8"
 
@@ -268,7 +268,7 @@ async def test_config_set_model_completes_a_first_run(fake_home: Path) -> None:
     requirements circular: the model could not be set because no model was set,
     so a new install could not be finished from either surface.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-deep"}}}), encoding="utf-8")
 
@@ -300,7 +300,7 @@ async def test_a_first_run_session_pick_says_why_it_was_refused(fake_home: Path)
     restart comes back to a gateway with no model either. Persisting the pick
     as the default instead would widen a choice made for one conversation.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-deep"}}}), encoding="utf-8")
 
@@ -324,7 +324,7 @@ async def test_config_set_model_on_a_first_run_still_needs_the_key(fake_home: Pa
     every other surface uses is asked directly -- otherwise the fix above would
     let a keyless provider be written as the default of a fresh install.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {"deepseek": {}}}), encoding="utf-8")
 
@@ -344,7 +344,7 @@ async def test_config_set_model_on_a_first_run_takes_an_oauth_login(fake_home: P
     about. Reading the config first and giving up when the section is missing
     would refuse exactly the first runs that never write one.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {}}), encoding="utf-8")
 
@@ -400,7 +400,7 @@ async def test_config_set_model_on_a_first_run_survives_an_unreadable_providers_
     credential, and neither may escape as something other than the refusal
     this call is about.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": providers}), encoding="utf-8")
 
@@ -435,8 +435,8 @@ async def test_config_set_model_is_scoped_to_the_session_that_asked(fake_home: P
     """
     import raven.rpc.methods.config as config_mod
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
     )
 
@@ -466,7 +466,7 @@ async def test_config_set_model_is_scoped_to_the_session_that_asked(fake_home: P
     assert "tui:b" not in loop.session_bindings, "another session must not move"
     assert loop.switches == [], "a session switch is not a default change"
 
-    on_disk = json.loads((fake_home / ".raven" / "config.json").read_text())
+    on_disk = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert on_disk["agents"]["defaults"]["model"] == "anthropic/claude-sonnet-4-5", (
         "a new session must still start on the configured default"
     )
@@ -497,8 +497,8 @@ async def test_config_set_model_is_not_refused_mid_turn(fake_home: Path, monkeyp
 async def test_config_set_model_unconstructable_preserves_previous(fake_home: Path, monkeypatch) -> None:
     import raven.rpc.methods.config as config_mod
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
     )
 
@@ -528,7 +528,7 @@ async def test_config_set_model_unconstructable_preserves_previous(fake_home: Pa
     assert loop.model == "anthropic/claude-sonnet-4-5"
     assert loop.provider == "keep-prov"
     assert loop.switches == []
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["model"] == "anthropic/claude-sonnet-4-5"
 
 
@@ -572,7 +572,7 @@ async def test_config_methods_registered_via_helper(fake_home: Path) -> None:
 async def test_config_set_refuses_malformed_config_and_preserves_file(fake_home: Path) -> None:
     # REGRESSION: TUI config.set must not clobber a malformed config down to one
     # key (same data-loss failure mode as the CLI write path).
-    cfg = fake_home / ".raven" / "config.json"
+    cfg = fake_home / ".rarus" / "config.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     original = '{\n  "tui": {"theme": "dark"},\n  // comment => invalid JSON\n}\n'
     cfg.write_text(original, encoding="utf-8")
@@ -583,7 +583,7 @@ async def test_config_set_refuses_malformed_config_and_preserves_file(fake_home:
 
 async def test_config_get_refuses_malformed_config(fake_home: Path) -> None:
     # The read path also surfaces a broken config (not a silent empty dict).
-    cfg = fake_home / ".raven" / "config.json"
+    cfg = fake_home / ".rarus" / "config.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text('{\n  "tui": {"theme": "dark"},\n  // bad\n}\n', encoding="utf-8")
     with pytest.raises(ConfigValidationError):
@@ -592,7 +592,7 @@ async def test_config_get_refuses_malformed_config(fake_home: Path) -> None:
 
 def _pin(home: Path, provider: str, providers: dict | None = None) -> None:
     """Write a config with a provider pinned, as the picker leaves it."""
-    cfg = home / ".raven"
+    cfg = home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(
         json.dumps(
@@ -626,7 +626,7 @@ async def test_a_bare_id_the_pinned_provider_does_not_serve_is_refused(fake_home
         )
     assert "mistral-large-latest" in str(excinfo.value)
 
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["model"] == "gpt-4o", "a refused switch must not write"
     assert cfg["agents"]["defaults"]["provider"] == "openai"
 
@@ -640,7 +640,7 @@ async def test_an_explicit_provider_is_never_second_guessed(fake_home: Path) -> 
         agent_loop_factory=lambda: None,
     )
     assert result["applied"] is True
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["provider"] == "azure_openai"
 
 
@@ -762,8 +762,8 @@ async def test_a_session_scope_without_a_session_id_is_refused_not_widened(fake_
     """
     import raven.rpc.methods.config as config_mod
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
     )
 
@@ -789,7 +789,7 @@ async def test_a_session_scope_without_a_session_id_is_refused_not_widened(fake_
 
     assert loop.switches == [], "a refused switch must not move the default binding"
     assert loop.session_bindings == {}
-    on_disk = json.loads((fake_home / ".raven" / "config.json").read_text())
+    on_disk = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert on_disk["agents"]["defaults"]["model"] == "anthropic/claude-sonnet-4-5"
 
 
@@ -803,8 +803,8 @@ async def test_a_default_scope_with_a_session_id_still_writes_the_default(fake_h
     """
     import raven.rpc.methods.config as config_mod
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
     )
 
@@ -831,7 +831,7 @@ async def test_a_default_scope_with_a_session_id_still_writes_the_default(fake_h
     assert result["scope"] == "default"
     assert loop.switches == [(new_provider, "anthropic/claude-opus-4-8")]
     assert "tui:a" not in loop.session_bindings, "a default switch is not a session override"
-    on_disk = json.loads((fake_home / ".raven" / "config.json").read_text())
+    on_disk = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert on_disk["agents"]["defaults"]["model"] == "anthropic/claude-opus-4-8"
 
 
@@ -933,7 +933,7 @@ async def test_language_is_readable_and_writable_over_rpc(fake_home: Path) -> No
 async def test_language_rejects_a_value_neither_front_end_can_render(fake_home: Path) -> None:
     # fake_home is not decoration: config_set writes through to a real file,
     # so without it a validator that stopped rejecting would put the bad
-    # value in the developer's own ~/.raven/config.json.
+    # value in the developer's own ~/.rarus/config.json.
     from raven.rpc.errors import ConfigValidationError
     from raven.rpc.methods.config import config_set
 
@@ -960,7 +960,7 @@ async def test_every_written_key_leaves_a_loadable_config(key: str, fake_home: P
 
     await config_set({"key": key, "value": _DEFAULTS[key]})
 
-    load_config(fake_home / ".raven" / "config.json")  # raises if the app would refuse to start
+    load_config(fake_home / ".rarus" / "config.json")  # raises if the app would refuse to start
 
 
 async def test_the_whitelist_and_the_storage_map_stay_in_lockstep() -> None:
@@ -977,7 +977,7 @@ async def test_temperature_lands_where_the_runtime_reads_it(fake_home: Path) -> 
     nothing even on the launches it did not break."""
     await config_set({"key": "agent.temperature", "value": 0.4})
 
-    payload = json.loads((fake_home / ".raven" / "config.json").read_text())
+    payload = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert payload["agents"]["defaults"]["temperature"] == 0.4
     assert "agent" not in payload
 
@@ -988,7 +988,7 @@ async def test_a_write_that_would_not_load_is_refused_and_rolled_back(fake_home:
     the user their install."""
     from raven.rpc.methods.config import _STORAGE_PATHS
 
-    cfg_path = fake_home / ".raven" / "config.json"
+    cfg_path = fake_home / ".rarus" / "config.json"
     await config_set({"key": "tui.theme", "value": "dracula"})
     before = cfg_path.read_text()
 
@@ -1006,15 +1006,15 @@ async def test_a_refused_first_write_leaves_no_file_behind(fake_home: Path, monk
     with pytest.raises(ConfigValidationError):
         await config_set({"key": "language", "value": "zh"})
 
-    assert not (fake_home / ".raven" / "config.json").exists()
+    assert not (fake_home / ".rarus" / "config.json").exists()
 
 
 async def test_the_write_target_follows_raven_home(tmp_path, monkeypatch) -> None:
     """``config.set`` used to rebuild the path from Path.home(), so with
-    RAVEN_HOME set it wrote into the default installation instead of the one
+    RARUS_HOME set it wrote into the default installation instead of the one
     running."""
     elsewhere = tmp_path / "custom-home"
-    monkeypatch.setenv("RAVEN_HOME", str(elsewhere))
+    monkeypatch.setenv("RARUS_HOME", str(elsewhere))
 
     await config_set({"key": "language", "value": "zh"})
 
@@ -1039,7 +1039,7 @@ async def test_config_unset_removes_a_stored_override(fake_home: Path) -> None:
 async def test_config_unset_prunes_the_emptied_parent_table(fake_home: Path) -> None:
     await config_set({"key": "tui.theme", "value": "dark"})
     await config_unset({"key": "tui.theme"})
-    payload = json.loads((fake_home / ".raven" / "config.json").read_text())
+    payload = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert "theme" not in payload.get("tui", {})
     assert "tui" not in payload
 
@@ -1081,7 +1081,7 @@ def own_mode():
 async def test_a_conversation_mode_stays_in_memory_and_off_the_default(fake_home: Path, own_mode) -> None:
     result = await config_set({"key": "permissions.mode", "value": "full", "session_id": "s-1"})
     assert result == {"applied": True, "previous": None}
-    assert not (fake_home / ".raven" / "config.json").exists()
+    assert not (fake_home / ".rarus" / "config.json").exists()
     own = await config_get({"keys": ["permissions.mode"], "session_id": "s-1"})
     assert own["config"]["permissions.mode"] == "full"
     other = await config_get({"keys": ["permissions.mode"], "session_id": "s-2"})
@@ -1100,7 +1100,7 @@ async def test_a_conversation_mode_moves_both_ways(fake_home: Path, own_mode) ->
 
 async def test_scope_default_writes_the_file_even_with_a_session(fake_home: Path, own_mode) -> None:
     await config_set({"key": "permissions.mode", "value": "smart", "session_id": "s-1", "scope": "default"})
-    saved = json.loads((fake_home / ".raven" / "config.json").read_text())
+    saved = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert saved["permissions"]["mode"] == "smart"
     # A conversation with no mode of its own follows the default it just moved to.
     own = await config_get({"keys": ["permissions.mode"], "session_id": "s-1"})
@@ -1171,8 +1171,8 @@ async def test_config_set_model_default_scope_persists_when_no_loop_can_be_built
     error; the first-run wizard's first default still has to land on disk."""
     from raven.rpc.errors import InternalError
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-x"}}}))
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-x"}}}))
 
     def _no_loop():
         raise InternalError("no provider is configured yet", data={"reason": "missing_credentials"})
@@ -1183,7 +1183,7 @@ async def test_config_set_model_default_scope_persists_when_no_loop_can_be_built
     )
 
     assert out["applied"] is True
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["agents"]["defaults"]["model"] == "deepseek/deepseek-chat"
     assert cfg["agents"]["defaults"]["provider"] == "deepseek"
 
@@ -1194,8 +1194,8 @@ async def test_config_set_model_surfaces_a_build_crash_instead_of_persisting(fak
     crash reported as saved would hide the crash behind a green save."""
     from raven.rpc.errors import InternalError
 
-    (fake_home / ".raven").mkdir()
-    (fake_home / ".raven" / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-x"}}}))
+    (fake_home / ".rarus").mkdir()
+    (fake_home / ".rarus" / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-x"}}}))
 
     def _crashed():
         raise InternalError("plugin init failed", data={"reason": "uncaught", "exception_type": "TypeError"})
@@ -1205,7 +1205,7 @@ async def test_config_set_model_surfaces_a_build_crash_instead_of_persisting(fak
             {"key": "model", "value": "deepseek-chat", "provider": "deepseek", "scope": "default"},
             agent_loop_factory=_crashed,
         )
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert "model" not in cfg.get("agents", {}).get("defaults", {})
 
 
@@ -1217,7 +1217,7 @@ async def test_a_first_run_assembles_the_stack_it_started_without(fake_home: Pat
     and the reply could only say the gateway had to come back. It now asks the
     host to assemble the stack that was skipped, and reports what came back.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-deep"}}}), encoding="utf-8")
 
@@ -1248,7 +1248,7 @@ async def test_a_first_run_that_cannot_be_assembled_still_says_restart(fake_home
     state as before, reached a different way. The flag is the honest answer for
     both, which is why it survives rather than being deleted with the limit.
     """
-    cfg = fake_home / ".raven"
+    cfg = fake_home / ".rarus"
     cfg.mkdir(exist_ok=True)
     (cfg / "config.json").write_text(json.dumps({"providers": {"deepseek": {"apiKey": "sk-deep"}}}), encoding="utf-8")
 

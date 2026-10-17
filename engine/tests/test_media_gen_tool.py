@@ -1044,7 +1044,7 @@ async def test_image_usage_reaches_runtime_tracker_and_telemetry(monkeypatch, tm
     from raven.token_wise.registry import StrategyRegistry
     from raven.token_wise.usage_tracker import UsageTracker
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     model = "google/test-image" if route in ("chat", "fallback") else "openai/gpt-image-2"
     base = "https://openrouter.ai/api/v1" if route in ("openrouter", "fallback") else "https://gateway.test/v1"
     seen = []

@@ -9,7 +9,7 @@
 //   logFrameEvent (ink.onFrame) → yoga / renderer / diff / optimize / write
 //                                 phases + yoga counters + scroll fast-path
 //
-// Both gate on RAVEN_DEV_PERF=1 and dump JSON-lines (default ~/.raven/perf.log,
+// Both gate on RAVEN_DEV_PERF=1 and dump JSON-lines (default ~/.rarus/perf.log,
 // override RAVEN_DEV_PERF_LOG). Tagged { src: 'react' | 'frame' } for jq.
 // RAVEN_DEV_PERF_MS (default 2) skips sub-ms idle frames; set 0 to capture all.
 //
@@ -28,9 +28,9 @@ import { markWriteLog } from './writeLog.js'
 
 const ENABLED = /^(?:1|true|yes|on)$/i.test((process.env.RAVEN_DEV_PERF ?? '').trim())
 const THRESHOLD_MS = Number(process.env.RAVEN_DEV_PERF_MS ?? '2') || 0
-// RAVEN_HOME first: a second install (its own state dir) would otherwise write
+// RARUS_HOME first: a second install (its own state dir) would otherwise write
 // its samples into the default one, where they read as the other install's.
-const STATE_HOME = process.env.RAVEN_HOME?.trim() || join(homedir(), '.raven')
+const STATE_HOME = process.env.RARUS_HOME?.trim() || join(homedir(), '.raven')
 const LOG_PATH = process.env.RAVEN_DEV_PERF_LOG?.trim() || join(STATE_HOME, 'perf.log')
 
 let logReady = false
@@ -124,7 +124,7 @@ export const PERF_LOG_PATH = LOG_PATH
  * that carries the evidence. Each dump gets its own file so a before/after pair
  * around `/redraw` can be diffed.
  *
- * Follows RAVEN_HOME when set, so a second install writes into its own state
+ * Follows RARUS_HOME when set, so a second install writes into its own state
  * directory rather than the default one.
  */
 export const writePaintDump = (dump: null | string): null | string => {

@@ -38,14 +38,14 @@ class ServiceLocator:
     capability grant, and the dataclass is frozen so adding one is an edit here."""
 
     workspace: Path
-    """Agent home (``~/.raven/<workspace>``): the global memory, skills and
+    """Agent home (``~/.rarus/<workspace>``): the global memory, skills and
     transcript root, not the per-session working directory a turn writes in."""
 
     user_id: str
     """User-track owner identity.
 
     The single source of truth is ``MemoryConfig.user_id`` (the ``userId``
-    key of the ``memory`` block in ``~/.raven/config.json``). A backend must
+    key of the ``memory`` block in ``~/.rarus/config.json``). A backend must
     never take this from its own plugin config slice: that is a second place
     holding the same value, and a user who edits only one silently splits
     store and recall onto different owner ids, making every written memory

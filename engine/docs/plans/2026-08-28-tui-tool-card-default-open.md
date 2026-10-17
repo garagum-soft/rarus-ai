@@ -56,14 +56,14 @@ Gates Task 3. Do not design a third fold level before this is answered.
 
 - [ ] Temporarily log `(error || summary || '').length` beside `turnController.ts:875`.
 - [ ] Run a tool whose output is long (`cat` a few hundred lines).
-- [ ] Read the number off `~/.raven/logs/tui.log`.
+- [ ] Read the number off `~/.rarus/logs/tui.log`.
 
 Outcomes:
 
 - **Gateway sends much more than 200 chars** -- raising `TOOL_RESULT_PREVIEW_CHARS` gives real content to expand into, and Task 3 stays a client-only change.
 - **Gateway also caps it short** -- Task 3 needs a protocol change (a `tool.output` fetch, or a larger preview field in `tool.complete`). That is backend work and belongs in its own plan.
 
-Note: `~/.raven/logs/tui.log` does not record RPC frames today, which is why this needs a temporary log line rather than a grep.
+Note: `~/.rarus/logs/tui.log` does not record RPC frames today, which is why this needs a temporary log line rather than a grep.
 
 ### Task 1: Teach the estimator to count an open card
 

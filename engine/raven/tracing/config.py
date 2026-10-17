@@ -67,9 +67,9 @@ def enabled() -> bool:
 
 
 def state_dir() -> Path:
-    """Trace state dir (``~/.raven/traces``). Spans land at ``<dir>/logs/audit-spans.log``.
+    """Trace state dir (``~/.rarus/traces``). Spans land at ``<dir>/logs/audit-spans.log``.
 
-    Overridable with ``RAVEN_TRACING_DIR`` (absolute) or ``RAVEN_HOME``.
+    Overridable with ``RAVEN_TRACING_DIR`` (absolute) or ``RARUS_HOME``.
     """
     override = os.environ.get("RAVEN_TRACING_DIR")
     if override:

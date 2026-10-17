@@ -165,7 +165,7 @@ def test_override_cannot_be_agent_home_itself(tmp_path: Path) -> None:
 def test_override_cannot_be_an_ancestor_of_agent_home(tmp_path: Path) -> None:
     """An ancestor is refused for a stronger reason than agent home itself.
 
-    The realistic ancestor is `~/.raven`, which is not merely agent home's
+    The realistic ancestor is `~/.rarus`, which is not merely agent home's
     parent but the instance data directory: `config.json` (provider keys),
     `oauth/`, `cron/`, `logs/`. The per-turn checkpoint runs `add -A` over the
     working directory, and the `.raven/` default exclude cannot help when

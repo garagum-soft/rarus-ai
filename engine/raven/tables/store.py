@@ -1,4 +1,4 @@
-"""Table apps on disk: one JSON file per table under ``<RAVEN_HOME>/tables``.
+"""Table apps on disk: one JSON file per table under ``<RARUS_HOME>/tables``.
 
 A table has a key column, its columns in order, its rows, the outside sources it
 syncs from, and a short log of past syncs. Each row remembers which source it

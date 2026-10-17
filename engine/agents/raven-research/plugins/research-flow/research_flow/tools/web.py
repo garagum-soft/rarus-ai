@@ -1033,7 +1033,7 @@ class WebSearchTool(Tool):
         if not self.api_key:
             return (
                 f"Error: {self.spec.label} API key not configured. Set it in "
-                '~/.raven/config.json under plugins.config["research-flow"].search.apiKey '
+                '~/.rarus/config.json under plugins.config["research-flow"].search.apiKey '
                 f"(or export {self.spec.env_var}), then restart the gateway.",
                 [],
                 dict(_NO_SHAPING),
@@ -1832,7 +1832,7 @@ class WebFetchTool(Tool):
             return json.dumps(
                 {
                     "error": (
-                        f"{self.spec.label} API key not configured. Set it in ~/.raven/config.json "
+                        f"{self.spec.label} API key not configured. Set it in ~/.rarus/config.json "
                         f'under plugins.config["research-flow"].fetch.apiKey (or export '
                         f"{self.spec.env_var}), then restart the gateway."
                     ),

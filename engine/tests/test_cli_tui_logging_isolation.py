@@ -46,7 +46,7 @@ def _isolate_logging(tmp_path, monkeypatch):
 
     Without this, ``redirect_loguru_to_file`` would: (a) leave the root
     InterceptHandler installed for subsequent tests, masking their logging;
-    (b) write to the real ``~/.raven/logs/tui.log``;
+    (b) write to the real ``~/.rarus/logs/tui.log``;
     (c) leave LiteLLM loggers stripped for the rest of the session, breaking
     the precondition of later parametrized cases.
     """
@@ -123,7 +123,7 @@ def test_propagation_to_root_intact_after_redirect(_isolate_logging):
 
     This guards a FUTURE regression: a maintainer might "optimize" the fix by
     flipping ``propagate=False`` on these loggers to short-circuit root, which
-    would silently drop the records from `~/.raven/logs/tui.log`. The fix
+    would silently drop the records from `~/.rarus/logs/tui.log`. The fix
     as shipped does not modify propagate, so this test is green; if it ever
     goes red, the proposed change must be rejected.
     """

@@ -560,7 +560,7 @@ async def test_the_gate_refuses_a_wrapped_command_a_deny_rule_names(mode: str, t
         # Two segments to answer for: nothing to suggest.
         ("git fetch origin && git rebase x", ("git fetch origin", "git rebase x"), ""),
         # The five vetoes, one each.
-        ("RAVEN_HOME=/x git push", ("RAVEN_HOME=/x git push",), ""),
+        ("RARUS_HOME=/x git push", ("RARUS_HOME=/x git push",), ""),
         ("make", ("make",), ""),
         ("sudo git push", ("sudo git push",), ""),
         ("python3 scripts/x.py", ("python3 scripts/x.py",), ""),

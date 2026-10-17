@@ -6,7 +6,7 @@ directory), so uninstall replays it in reverse and never guesses. It is
 also the provenance oracle: a PlugHub install writes a ledger, so a config
 entry with a ledger -> "market", without -> "manual".
 
-Layout (``~/.raven/plugins/<catalog_id>.json``):
+Layout (``~/.rarus/plugins/<catalog_id>.json``):
 
     {
       "catalog_id": "notion", "catalog_version": "1.2.0",
@@ -39,7 +39,7 @@ def _plugins_dir() -> Path:
 # A catalogue id names a file, so it may not be able to name a *place*. Both the
 # hosted catalogue and the RPC caller supply these ids, and `Path.__truediv__`
 # honours both `..` and an absolute string -- so without this an id of
-# `../config` resolves to ~/.raven/config.json, which uninstall would then
+# `../config` resolves to ~/.rarus/config.json, which uninstall would then
 # happily unlink, and `../credentials/mcp/github` would take the user's stored
 # OAuth refresh token with it.
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

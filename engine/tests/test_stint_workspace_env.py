@@ -115,7 +115,7 @@ class TestTheMainPath:
         from tests import test_playbook_stint as stint_tests
         from tests.test_playbook_stint import _spec
 
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
         project = _project(tmp_path)
         announced: list[str] = []
 

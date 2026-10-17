@@ -21,7 +21,7 @@ def runner() -> CliRunner:
 
 @pytest.fixture
 def fake_cron_dir(tmp_path: Path, monkeypatch) -> Path:
-    """Redirect ~/.raven/cron/ to a tmp dir for the test."""
+    """Redirect ~/.rarus/cron/ to a tmp dir for the test."""
     cron_dir = tmp_path / "cron"
     cron_dir.mkdir(parents=True)
     monkeypatch.setattr(

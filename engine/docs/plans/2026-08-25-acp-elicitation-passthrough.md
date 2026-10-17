@@ -1610,14 +1610,14 @@ Expected per agent: a clarify sheet whose question begins `<Agent>(<handle>): `,
 
 ```bash
 DAY=$(date -u +%Y-%m-%d)
-ls -t ~/.raven/logs/acp-frames/$DAY/ | head -3
+ls -t ~/.rarus/logs/acp-frames/$DAY/ | head -3
 ```
 
 Then, against the newest file:
 
 ```bash
-grep -c 'elicitation/create' ~/.raven/logs/acp-frames/$DAY/<newest>.jsonl
-grep -o '"action": *"[a-z]*"' ~/.raven/logs/acp-frames/$DAY/<newest>.jsonl | sort | uniq -c
+grep -c 'elicitation/create' ~/.rarus/logs/acp-frames/$DAY/<newest>.jsonl
+grep -o '"action": *"[a-z]*"' ~/.rarus/logs/acp-frames/$DAY/<newest>.jsonl | sort | uniq -c
 ```
 
 Expected: at least one `elicitation/create` inbound and one `"action": "accept"` outbound. The journal records both directions and is on by default.

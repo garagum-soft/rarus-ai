@@ -71,12 +71,12 @@ def isolated_raven_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     Both handoff paths write one before spawning, and their failure paths
     delete one. Unisolated, running this file writes a marker into the real
-    ~/.raven that makes a genuine `raven serve` refuse to start for the next
+    ~/.rarus that makes a genuine `raven serve` refuse to start for the next
     two minutes -- and, worse, deletes the marker of an upgrade that is
     actually in flight, disarming the guard it exists to arm.
     """
     home = tmp_path / "agent-home"
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return home
 
 

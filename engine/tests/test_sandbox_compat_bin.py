@@ -14,7 +14,7 @@ from raven.sandbox.direct_executor import DirectExecutor, baseline_env
 
 @pytest.fixture
 def no_host_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.setattr(compat_bin, "_checked", False)
     monkeypatch.setattr(compat_bin, "_dir", None)
     monkeypatch.setattr(compat_bin.shutil, "which", lambda name: None)

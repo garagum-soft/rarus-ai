@@ -18,7 +18,7 @@ RoutineStore remembers those decisions across ticks and processes:
   60).
 - ``get(id)`` / ``all_routines()`` for read access.
 
-Backed by ``~/.raven/sentinel/routines.json`` via JsonStateStore
+Backed by ``~/.rarus/sentinel/routines.json`` via JsonStateStore
 (fcntl + atomic rename). Sibling to pending_decisions.json + state.json
 so all sentinel persistence shares the same locking model.
 """

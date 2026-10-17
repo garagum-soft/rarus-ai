@@ -28,7 +28,7 @@ def fake_home(monkeypatch, tmp_path) -> Path:
 
 
 async def test_setup_status_provider_configured_true(fake_home: Path) -> None:
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps(
@@ -51,7 +51,7 @@ async def test_a_pinned_provider_name_is_not_credentials(fake_home: Path) -> Non
     nobody has -- an empty config would pass the gate and the first turn would
     fail with whatever the backend said about a missing key.
     """
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"provider": "anthropic", "model": "anthropic/claude-sonnet-4-5"}}})
@@ -62,7 +62,7 @@ async def test_a_pinned_provider_name_is_not_credentials(fake_home: Path) -> Non
 
 async def test_setup_status_provider_without_model_returns_false(fake_home: Path) -> None:
     # A provider but no default model can't drive a turn → not configured.
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(json.dumps({"agents": {"defaults": {"provider": "anthropic"}}}))
     result = await setup_status({})
@@ -76,7 +76,7 @@ async def test_setup_status_missing_config_is_a_first_run(fake_home: Path) -> No
 
 
 async def test_setup_status_malformed_config_falls_back_true(fake_home: Path) -> None:
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text("not-valid-json{{{")
     result = await setup_status({})
@@ -84,7 +84,7 @@ async def test_setup_status_malformed_config_falls_back_true(fake_home: Path) ->
 
 
 async def test_setup_status_provider_auto_returns_false(fake_home: Path) -> None:
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(json.dumps({"agents": {"defaults": {"provider": "auto"}}}))
     result = await setup_status({})
@@ -98,7 +98,7 @@ async def test_setup_status_minimax_oauth_token_returns_true(
 ) -> None:
     from raven.providers.minimax_oauth import MiniMaxOAuthToken, save_token
 
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"provider": "auto", "model": "minimax-global/MiniMax-M3"}}})
@@ -124,7 +124,7 @@ async def test_setup_status_ignores_minimax_token_for_other_model(
 ) -> None:
     from raven.providers.minimax_oauth import MiniMaxOAuthToken, save_token
 
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps({"agents": {"defaults": {"provider": "auto", "model": "anthropic/claude-sonnet-4-5"}}})
@@ -144,7 +144,7 @@ async def test_setup_status_ignores_minimax_token_for_other_model(
 
 
 async def test_setup_status_registered_via_helper(fake_home: Path) -> None:
-    cfg_dir = fake_home / ".raven"
+    cfg_dir = fake_home / ".rarus"
     cfg_dir.mkdir()
     (cfg_dir / "config.json").write_text(
         json.dumps(
@@ -202,10 +202,10 @@ def test_minimax_oauth_is_detected_from_either_spelling_of_the_prefix(monkeypatc
 
 
 async def test_setup_status_reads_the_config_raven_home_points_at(monkeypatch, tmp_path: Path) -> None:
-    """``RAVEN_HOME`` decides where config.json lives for every other reader;
-    the setup gate used to hand-derive ``~/.raven`` and answer for the wrong
+    """``RARUS_HOME`` decides where config.json lives for every other reader;
+    the setup gate used to hand-derive ``~/.rarus`` and answer for the wrong
     file when the variable was set."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
     (tmp_path / "elsewhere").mkdir()
     (tmp_path / "elsewhere" / "config.json").write_text(json.dumps({"agents": {"defaults": {"provider": "auto"}}}))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")

@@ -653,7 +653,7 @@ def _register_config_commands(app: typer.Typer) -> None:
     ):
         """Restore a provider to schema defaults. Key preserved, values reset.
 
-        For OAuth providers the credential files under ``~/.raven/oauth`` are
+        For OAuth providers the credential files under ``~/.rarus/oauth`` are
         deleted too, so the user is effectively logged out and must re-run
         ``provider login`` to use it.
         """

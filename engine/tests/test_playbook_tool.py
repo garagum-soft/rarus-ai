@@ -629,7 +629,7 @@ def test_a_stored_secret_is_advertised_as_stored_not_required(tmp_path, monkeypa
     """A model told a secret is "required" asks the user to type it into the
     conversation. One this machine already holds is filled in at load, so the
     listing says so and the tool description tells the model not to ask."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     from raven.config.schema import MCPServerConfig
     from raven.playbook.credentials import set_secret_param
 

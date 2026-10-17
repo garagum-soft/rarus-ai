@@ -185,7 +185,7 @@ export function createSettings(env: FixtureEnv, ext: ExtFixture): SettingsFixtur
       },
       'settings.get': () => ({
         settings: clone(config),
-        config_path: '~/.raven/config.json',
+        config_path: '~/.rarus/config.json',
         raven_version: '0.1.0',
       }),
       'settings.set': (p) => {
@@ -225,7 +225,7 @@ export function createSettings(env: FixtureEnv, ext: ExtFixture): SettingsFixtur
         ],
       }),
       'settings.everos': () => ({
-        sections: {}, config_path: '~/.raven/config.json', available: false, owned: true, supports: {},
+        sections: {}, config_path: '~/.rarus/config.json', available: false, owned: true, supports: {},
         required: ['llm', 'embedding'],
       }),
       'settings.everosSet': () => ({ applied: true, warning: null }),

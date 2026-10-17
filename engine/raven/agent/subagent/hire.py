@@ -1,6 +1,6 @@
 """Hiring an employee: an agent of one's own with a name, a role, a model and its own instructions.
 
-One step writes a folder agent under ``<RAVEN_HOME>/employees/<id>`` -- the
+One step writes a folder agent under ``<RARUS_HOME>/employees/<id>`` -- the
 same shape ``raven agents new`` scaffolds, without the plugin harness -- so the
 roster discovers it like any product and the main agent can delegate to it:
 

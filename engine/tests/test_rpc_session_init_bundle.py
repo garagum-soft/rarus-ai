@@ -109,7 +109,7 @@ def fake_agent_loop_no_tracker() -> _FakeAgentLoop:
 
 @pytest.fixture()
 def config(tmp_path):
-    """Defaults only -- a real ``~/.raven/config.json`` must never leak in here."""
+    """Defaults only -- a real ``~/.rarus/config.json`` must never leak in here."""
     return load_config(tmp_path / "does_not_exist.json")
 
 

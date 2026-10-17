@@ -318,7 +318,7 @@ def test_the_command_line_has_a_roster_agent_review_and_refuses_the_author(tmp_p
         {"name": "coder", "kind": "cli", "command": f'"{PY}" -c "print(1)"'},
     ]
     (home / "config.json").write_text(json.dumps({"subagents": {"agents": agents}}), encoding="utf-8")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     project, tree = repos
     runner = CliRunner()
 
@@ -395,7 +395,7 @@ def test_a_person_s_verdict_is_refused_without_a_terminal(tmp_path: Path, repos,
     from raven.cli import review_commands
     from raven.cli.commands import app
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     project, tree = repos
     rid = ReviewBook().request(project, tree, "stint/x", authors=["agent:coder"], checklist=["builds"]).id
     runner = CliRunner()

@@ -1,6 +1,6 @@
 """The code index of one project: its source files, what each defines and imports.
 
-Kept in SQLite under ``<RAVEN_HOME>/codemap/``, never inside the project, and
+Kept in SQLite under ``<RARUS_HOME>/codemap/``, never inside the project, and
 brought up to date incrementally: a file whose size and modification time are
 unchanged is not read again, so after the first pass a refresh of a large tree
 costs one ``stat`` per file. The file list is git's where there is a repository

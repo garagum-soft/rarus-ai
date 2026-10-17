@@ -277,5 +277,5 @@ Remaining for the standalone-OSS phase (P4), none blocking in-tree use:
 - Keep the Raven-specific extractors in `raven.observability.semconv`; package
   only the generic API + schema + viewer in the standalone distribution.
 - Decouple Raven-specific defaults and path resolution (`FRAMEWORK`, `RAVEN_*`
-  env, `~/.raven` paths) from the standalone package.
+  env, `~/.rarus` paths) from the standalone package.
 - Freeze `standard-api.v1`; publish `raven-tracing`; raven default-depends on it.

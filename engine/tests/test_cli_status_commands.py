@@ -62,7 +62,7 @@ def test_status_marks_oauth_providers_distinctly(tmp_config: Path, isolated_oaut
     from raven.config.loader import save_config
     from raven.config.schema import Config
 
-    codex_auth = isolated_oauth_home / ".raven" / "oauth" / "chatgpt" / "auth.json"
+    codex_auth = isolated_oauth_home / ".rarus" / "oauth" / "chatgpt" / "auth.json"
     codex_auth.parent.mkdir(parents=True, exist_ok=True)
     codex_auth.write_text('{"access_token": "test-oauth-token"}', encoding="utf-8")
     save_config(Config())
@@ -86,7 +86,7 @@ def isolated_oauth_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     """Point every OAuth token family at this test's tmp dir so a real login
     on the developer machine cannot leak into the logged-in/out premise."""
     home = tmp_path / "home"
-    oauth = home / ".raven" / "oauth"
+    oauth = home / ".rarus" / "oauth"
     oauth.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("CHATGPT_TOKEN_DIR", str(oauth / "chatgpt"))

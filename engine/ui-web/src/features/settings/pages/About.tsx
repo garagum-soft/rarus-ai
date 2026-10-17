@@ -17,7 +17,7 @@ export function workspacePath(raw: Record<string, unknown>, configPath: string):
   const stated = agents && agents.defaults && agents.defaults.workspace
   if (stated) return stated
   const dir = configPath.replace(/[\\/][^\\/]*$/, '')
-  return dir ? `${dir}/workspace` : '~/.raven/workspace'
+  return dir ? `${dir}/workspace` : '~/.rarus/workspace'
 }
 
 export function About(): JSX.Element {

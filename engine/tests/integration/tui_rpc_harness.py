@@ -66,7 +66,7 @@ async def make_loop(
     """A real loop whose registry, home and workspace live under ``tmp_path``.
 
     Repointed rather than mocked, like ``test_direct_chat_smoke``: the tests
-    read the records this writes, and a developer's own ``~/.raven`` must never
+    read the records this writes, and a developer's own ``~/.rarus`` must never
     be touched by a test run.
 
     ``measure`` records a capability snapshot for every ACP agent first, the
@@ -79,7 +79,7 @@ async def make_loop(
     monkeypatch.setattr(instances_mod, "_registry", instances_mod.InstanceRegistry(path=tmp_path / "instances.json"))
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     if measure:
         from raven.acp_client.capabilities import SnapshotStore, verify_agent
 

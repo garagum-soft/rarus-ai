@@ -46,7 +46,7 @@ def _isolated_env(tmp_path: Path) -> dict[str, str]:
         for key, value in os.environ.items()
         if not key.lower().endswith("_proxy") and not key.startswith(("SSL_CERT_", "RAVEN_"))
     }
-    env.update(HOME=str(tmp_path / "user"), RAVEN_HOME=str(tmp_path / "home"), RAVEN_NO_UPDATE_CHECK="1")
+    env.update(HOME=str(tmp_path / "user"), RARUS_HOME=str(tmp_path / "home"), RAVEN_NO_UPDATE_CHECK="1")
     return env
 
 

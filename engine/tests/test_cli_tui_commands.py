@@ -911,7 +911,7 @@ def tui_launch_spies(monkeypatch: pytest.MonkeyPatch, tmp_path):
     both launch paths. Returns the ``calls`` dict the tests inspect."""
     from raven.cli import _tui_relay, tui_commands
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     calls: dict[str, Any] = {}
 
     monkeypatch.setattr(tui_commands, "find_node", lambda: ("/usr/bin/node", (22, 0, 0)))

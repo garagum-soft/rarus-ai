@@ -12,7 +12,7 @@ them after the fact:
   from a record, so two builds over the same journals say the same thing.
 - :mod:`report` -- the period report (conversations, runs, failures, cost) as
   Markdown or JSON.
-- :mod:`archive` -- a durable one-line-per-run index under ``<RAVEN_HOME>/reports``
+- :mod:`archive` -- a durable one-line-per-run index under ``<RARUS_HOME>/reports``
   that outlives the records it summarises (retention may delete a session; its
   runs stay in the archive).
 """

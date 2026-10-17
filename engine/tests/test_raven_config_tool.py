@@ -35,7 +35,7 @@ def config_file(tmp_path: Path, monkeypatch) -> Path:
     home.mkdir()
     path = home / "config.json"
     path.write_text(json.dumps({"tools": {"exec": {"timeout": 60}}, "providers": {"openrouter": {"apiKey": "sk-x"}}}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return path
 
 

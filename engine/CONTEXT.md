@@ -320,7 +320,7 @@ other writers hold. Every save is an instruction revision -- the editor widens t
 for its own saves only, so `raven instructions` and the agent's file tools still keep the three
 instruction files -- and a change made on disk since the last revision is recorded first.
 
-**Run report** (`raven report build|runs|retro`, `raven/reports/`, `<RAVEN_HOME>/reports/`):
+**Run report** (`raven report build|runs|retro`, `raven/reports/`, `<RARUS_HOME>/reports/`):
 A period report, a retrospective and the run archive, read off the journals Raven already
 keeps -- nothing new is recorded while work runs. A run is a graph run, a spawn or a stint,
 read from the conversation's `subagents/` records (the `nodes.json` index first, then the
@@ -357,7 +357,7 @@ A change to who is on the roster -- `join` (with the agent's config row), `shutd
 (listed but disabled) or `remove` -- filed as a request and applied only when the leader
 (`subagents.leader`, default `owner`) approves it. The acting identity is stated (`--as`, or
 `RAVEN_TEAM_IDENTITY` for a process an agent runs); a decision from anyone else is refused,
-as is one on a request already decided. The ledger (`<RAVEN_HOME>/team/membership.json`)
+as is one on a request already decided. The ledger (`<RARUS_HOME>/team/membership.json`)
 keeps every request and its outcome.
 _Avoid_: reading it as the tool-approval broker (`rpc/approval_broker.py`) -- that rules on
 one tool call; this rules on who is on the team.
@@ -373,7 +373,7 @@ see is its own chain of command and everything below it. `assigned_by` appears i
 `spawn` schema only when a chart is configured, so a flat roster pays nothing for it.
 _Avoid_: reading it as a permission tier for tools — it rules who hands work to whom.
 
-**Area** (`raven areas`, `agent/subagent/areas.py`, `<RAVEN_HOME>/areas.json`, `<RAVEN_HOME>/areas/<name>.jsonl`):
+**Area** (`raven areas`, `agent/subagent/areas.py`, `<RARUS_HOME>/areas.json`, `<RARUS_HOME>/areas/<name>.jsonl`):
 A part of a project a roster agent owns rather than a task it was handed: path patterns,
 topic words and a charter (the standing instructions for what it looks after). It outlives
 every conversation. Its **journal** records every run in it -- a task, the standing duty, or a
@@ -386,21 +386,21 @@ _Avoid_: confusing it with `owns` on an agent row -- that is one clause naming a
 for the Delegation section; an area is a scope with a charter, a journal and an optional duty.
 Nor with a stint role's `owns` paths, which grade what a role may write within one stint.
 
-**Employee** (`raven agents hire`, the settings Team section, `agent/subagent/hire.py`, `<RAVEN_HOME>/employees/<id>`):
+**Employee** (`raven agents hire`, the settings Team section, `agent/subagent/hire.py`, `<RARUS_HOME>/employees/<id>`):
 An agent a person hired in one step: a name, the role the dispatching model reads to decide
 when to hand it work (`description`), what it owns, a model on the host's keys or on a key of
 its own (in its `.env` only), and a system prompt (`soul.md`, seeded into its own agent home on
 first launch, where its instructions live from then on). It is a folder agent run over ACP, so
 its sessions are its own and start from none. Hires live in a tree beside the products tree
 (`vendored_agents.employees_root`), scanned after it and only when it exists -- a hire written
-into `<RAVEN_HOME>/agents` would make that tree the products' and hide the checkout's products.
+into `<RARUS_HOME>/agents` would make that tree the products' and hide the checkout's products.
 `retire` moves the folder under `employees/.retired` rather than deleting it.
 _Avoid_: calling a built-in row with an overridden `model` an employee -- it has no prompt of
 its own and shares the host's sessions.
 
 **Sub-agent role** (`RAVEN_SUBAGENT` → `agent/subagent/role.py`):
 What a raven process knows about why it was started. The host sets it on every child it
-launches, beside the `RAVEN_HOME` it already sends, and a process that reads it as set
+launches, beside the `RARUS_HOME` it already sends, and a process that reads it as set
 registers none of the tools that hand work to a further agent (`spawn`, `run_subagent_dag`,
 the three graph controls) and builds no playbook funnel, so `load_playbook` and
 `create_playbook` unregister themselves. The `## Delegation` block and the DAG orchestration
@@ -451,7 +451,7 @@ manifest: the five shipped agents, and any folder `raven agents new` scaffolds
 (`agents/BUILDING.md` is the from-zero guide). Materialized as a row on every
 table build, so a folder that is deleted stops being an agent and a manifest
 that changes is picked up without a stored copy to contradict it. The tree resolves through `agents_root()` — the raven home
-(`~/.raven/agents`, installed out of the wheel so an agent's `.env` survives upgrades),
+(`~/.rarus/agents`, installed out of the wheel so an agent's `.env` survives upgrades),
 then beside the package in a checkout, then the wheel's own `raven/agents`. Readiness
 (the launcher files its command names on disk, and its manifest-declared engine wheel
 importable where raven runs) decides `enabled`, not whether the row exists: an unready
@@ -498,7 +498,7 @@ its work outside the dispatching Raven process — on a GPU box, a lab
 workstation, another machine entirely — and the host's whole part in that is
 keeping the registry and handing it over: a launcher points the agent's
 `RAVEN_CONNECTIONS` at the owner's store rather than copying rows into the
-agent's own home, and a sub-agent inherits `RAVEN_HOME` so it resolves the
+agent's own home, and a sub-agent inherits `RARUS_HOME` so it resolves the
 same file. Which machine a job lands on, and whether it can run at all, is
 settled inside the agent that runs it. Nothing on the dispatch path reads the
 registry, so no graph and no spawn is ever refused over the state of it.
@@ -574,7 +574,7 @@ one the dispatching turn's own tools get. Every dispatch supplies it — `spawn`
 `workdir.current()` at spawn time (the sub-agent outlives the turn whose binding it would
 read), a DAG node takes the same, and a Direct Chat resolves `session_workdir` because its
 branch returns before `workdir.bind` wraps the turn body. Distinct from **Agent home**
-(`SubagentManager.workspace`, `~/.raven/workspace`), which holds raven's memory and skills
+(`SubagentManager.workspace`, `~/.rarus/workspace`), which holds raven's memory and skills
 and is only the fallback for a dispatch that supplied nothing.
 _Avoid_: treating the fallback as the default — a sub-agent working in Agent home inspects
 raven's own memory instead of the user's checkout, and says nothing about having done so.
@@ -655,7 +655,7 @@ Who issues a web credential, as opposed to which tool spends it. Keys live at
 account serves both `web_search` and `web_fetch`; a key held per tool would have to be
 pasted twice and could drift into two values for one credential. The pre-vendor leaves
 (`tools.web.search.apiKey`, `tools.web.jinaApiKey`) are still read, after the vendor
-slot, and only for Serper and Jina. `~/.raven/env` mirrors every vendor key out under
+slot, and only for Serper and Jina. `~/.rarus/env` mirrors every vendor key out under
 its bare env var.
 _Avoid_: "provider" unqualified — that is the LLM Provider in this vocabulary; and
 "the web key" — there is one per vendor.
@@ -931,13 +931,13 @@ their connection rows' command runners; `--simulate DIR` stands each subdirector
 Typing text into a live terminal session (a tmux pane running an agent or a shell) only when it
 is safe: the pane's last line is an idle prompt, so the program waits for input, and nobody is
 using it -- the pane is not focused and its input line is empty. Otherwise the message is held in
-`<RAVEN_HOME>/panes/outbox.json`; a flush delivers what can go, in order per pane, and a new
+`<RARUS_HOME>/panes/outbox.json`; a flush delivers what can go, in order per pane, and a new
 message for a pane with held ones queues behind them.
 
 **Host guard** (`gateway.hostGuard` → `proactive_engine/host_guard.py`):
 A per-generation gateway loop that samples free disk, memory and CPU on an interval and, past a
 configured threshold, stops the agents -- every running sub-agent cancelled, delegation paused --
-and tells the owner through the heartbeat's system events and `<RAVEN_HOME>/notifications.log`.
+and tells the owner through the heartbeat's system events and `<RARUS_HOME>/notifications.log`.
 It acts once per breach and re-arms when every reading is back inside its threshold; resuming
 delegation is the owner's. Readings come from the standard library and the platform (no
 dependency); one the platform cannot give is skipped. Off by default.
@@ -1484,7 +1484,7 @@ tool. It checks, in order: the operator blocklist
 (`skillForge.blocklist`, matched case-insensitively against name / slug / native id), the
 `min_safety` bar against the *detail*-level `score_safety` (the catalog payload omits the
 score; a missing or malformed score passes), and an external home-dotdir lint over the
-skill body. `~/.raven` is allowed, and so is a generic root such as `~/.config` on its own
+skill body. `~/.rarus` is allowed, and so is a generic root such as `~/.config` on its own
 or `~/.config/raven` under it; a dotdir naming another product refuses the install and is
 reported down to the segment that names it (`~/.config/openclaw`).
 `refusal_for_read()` is the read strength, taken by `read_skill`: blocklist and safety bar
@@ -1620,17 +1620,17 @@ launcher's render inherits the host's `plugins.disabled`, except its own engine 
 (`product_render.inherit_plugin_opt_outs`). `build_memory_backend()` / `build_tool()`
 construct a contribution with a fresh `PluginContext`.
 
-**Plugin access** (`raven/plugins/access.py`, `plugins.roles`, `raven plugin access|grant|revoke`, `<RAVEN_HOME>/plugin_grants.json`):
+**Plugin access** (`raven/plugins/access.py`, `plugins.roles`, `raven plugin access|grant|revoke`, `<RARUS_HOME>/plugin_grants.json`):
 Role-based activation, asked before any of a plugin's code is imported. A plugin's permissions are
 read off what it contributes (one per contribution kind, plus `schedule` for a scheduled hook); its
 role is where discovery found it -- `builtin` (the wheel's shelf: everything), `installed` (the
-operator's `~/.raven/plugins`, a `plugins.dirs` root, an entry point: every contribution but
+operator's `~/.rarus/plugins`, a `plugins.dirs` root, an entry point: every contribution but
 `schedule`), `project` (`./.raven/plugins`, arrived with a checkout: nothing). `plugins.roles`
 replaces a role's set. What the role does not cover a grant can: the operator's consent to exactly
 the permissions the plugin needs, at exactly its version (an upgrade is a second consent). A
 plugin neither covers is an activation failure whose reason names the grant command.
 
-**Scheduled plugin hook** (`[[plugin.contributes.scheduled]]`, `raven/plugins/schedule.py`, `raven plugin schedule|fire|runs`, `<RAVEN_HOME>/plugin_schedules.json`):
+**Scheduled plugin hook** (`[[plugin.contributes.scheduled]]`, `raven/plugins/schedule.py`, `raven plugin schedule|fire|runs`, `<RARUS_HOME>/plugin_schedules.json`):
 Plugin code that runs at a cron time in a timezone, with no turn behind it. A resident host's
 `PluginScheduler` rides the plugin-service lifecycle. Each hook has a durable row reconciled at
 activation -- unchanged cron and timezone keep the row's generation and next run; a changed
@@ -1796,14 +1796,14 @@ that same contract, and tests/integration/test_kernel_wheel_smoke.py proves the 
 stands alone in a clean venv.
 
 **Home** (`home.py`):
-Where raven keeps everything: `RAVEN_HOME` or `~/.raven`, and the config file inside it,
+Where raven keeps everything: `RARUS_HOME` or `~/.rarus`, and the config file inside it,
 with an override a second instance can set. Kernel rather than config, because the kernel
 has to find its own settings -- a core that could not locate `config.json` without the
 config shelf would not be the closure the wheel claims -- and because the answer steers
 the installer, the node runtime lookup, the trace directory, the cron store and the serve
 state file alike. `config/loader.py` re-exports all three names, so every existing caller
 reads them where it always did.
-_Avoid_: resolving `RAVEN_HOME` again anywhere else -- that is how two directories become
+_Avoid_: resolving `RARUS_HOME` again anywhere else -- that is how two directories become
 the answer to one question.
 
 **PathPolicy** (`contracts/path_policy.py`):
@@ -1813,7 +1813,7 @@ declared once so neither the tree nor the vendored launchers (which re-derive
 them by hand) drift. Constants only, deliberately: path-escape checking is the
 tools' security boundary, and a callable protocol joins when a consumer types
 against it.
-_Avoid_: hardcoding `~/.raven`, `config.json` or the workspace sentinel string
+_Avoid_: hardcoding `~/.rarus`, `config.json` or the workspace sentinel string
 outside this paper and its implementers.
 
 **Historical Plans** (`docs/plans/`):
@@ -2194,7 +2194,7 @@ same tree for a person.
 _Avoid_: calling a leaf a node before it is compiled -- a node is a DAG run's, a leaf is the plan's,
 and one plan may be compiled into a graph, run by the scenario, or only read.
 
-**Agent mail** (`send_message` / `read_messages` in a built-in sub-agent run, `raven mail send|inbox|history|members|sessions`, `raven/agent/subagent/mailbox.py`, `<RAVEN_HOME>/mailbox/`):
+**Agent mail** (`send_message` / `read_messages` in a built-in sub-agent run, `raven mail send|inbox|history|members|sessions`, `raven/agent/subagent/mailbox.py`, `<RARUS_HOME>/mailbox/`):
 The direct line between sub-agents of one conversation, beside the coordinator rather than through
 it. A participant is the instance handle a run works under (a named or minted instance, a DAG
 node's id), else its roster agent name; it joins when a run starts under that name, and a DAG
@@ -2206,7 +2206,7 @@ ambiguous and self-addressed names are refused with the names that would work. T
 run's own participant name, never one the model writes; an external CLI agent learns it from
 `RAVEN_MAIL_SESSION` / `RAVEN_MAIL_AS`. Bodies reach the reader fenced as untrusted data.
 
-**Independent review** (`review:` in a rounds playbook, `raven review request|list|show|verdict|run|merge|log`, `raven/stint/review.py`, `<RAVEN_HOME>/reviews/`):
+**Independent review** (`review:` in a rounds playbook, `raven review request|list|show|verdict|run|merge|log`, `raven/stint/review.py`, `<RARUS_HOME>/reviews/`):
 A branch's diff against the branch it would merge into, judged by someone who did not write it,
 before it merges. Distinct from the node judge, which grades a step inside the run that produced
 it. A review request names the authors (for a stint, every agent that played a role) and a policy:
@@ -2218,7 +2218,7 @@ review book) asks for an approving verdict before either of its steps and otherw
 `unreviewed`. A reviewer agent is refused before it runs if it is an author. Requests, verdicts,
 refused verdicts and merges are appended to the decision journal.
 
-**Capability matrix** (`raven agents probe|matrix|pick`, `playbook fast --agent auto`, `raven/agent/subagent/capability_matrix.py`, `<RAVEN_HOME>/capability_matrix.json`):
+**Capability matrix** (`raven agents probe|matrix|pick`, `playbook fast --agent auto`, `raven/agent/subagent/capability_matrix.py`, `<RARUS_HOME>/capability_matrix.json`):
 What each roster agent has been seen to do, as opposed to what its row claims. A capability probe
 is a small task whose result is checked, not read: `reply` (a token back), `read_files` (a file's
 secret back), `write_files` (a file written), `run_commands` (a hash only running the command
@@ -2238,7 +2238,7 @@ twice on a channel within `repeatAfterS`, a channel sends at most `dailyCap` a d
 everything but critical, and a problem solved before delivery is not sent. Every delivery and every
 reason one did not go is logged to `notifications.jsonl`.
 
-**Orphan sweep** (`raven ops orphans`, `raven/agent/subagent/orphans.py`, `raven/utils/proc_tree.py`, `<RAVEN_HOME>/processes.json`):
+**Orphan sweep** (`raven ops orphans`, `raven/agent/subagent/orphans.py`, `raven/utils/proc_tree.py`, `<RARUS_HOME>/processes.json`):
 Agent processes a dead raven left running. Every ACP server and CLI agent raven starts is written
 to a ledger while it runs -- its pid and start time, its owner's pid and start time, and the instance
 it serves -- and dropped when it ends. A record is an orphan when its owner is gone (no such pid,
@@ -2248,7 +2248,7 @@ ancestors. Ended in two phases -- a polite request, a grace period with the tabl
 kill for what stayed -- and the instance it served is marked `interrupted`. Runs once per process
 when an RPC stack starts, in the background.
 
-**Attention queue** (`raven attention`, `attention.list` / `attention.resolve`, `raven/proactive_engine/attention.py`, `<RAVEN_HOME>/attention.json`):
+**Attention queue** (`raven attention`, `attention.list` / `attention.resolve`, `raven/proactive_engine/attention.py`, `<RARUS_HOME>/attention.json`):
 Everything waiting on a person, across every conversation, kept on the server so it outlives a
 reload and a restart. A tool approval and a credential request (high), an ask_user question
 (normal), a stint question (high when it blocks tasks, low when a provisional ruling stands), the
@@ -2257,7 +2257,7 @@ as items and closed when they end. One item per problem by a stable id; ordered 
 priority -- an item waiting past its escalation age counts one level higher -- then oldest first.
 An item whose answer lived in a process that died is closed as orphaned when a stack starts.
 
-**Project watch** (`raven watch add|list|remove|scan`, `raven/stint/project_watch.py`, `<RAVEN_HOME>/watch.json`):
+**Project watch** (`raven watch add|list|remove|scan`, `raven/stint/project_watch.py`, `<RARUS_HOME>/watch.json`):
 Problems in a project found and filed with nobody asking. A registered project's checks (named
 commands, run in the project with the curated environment, so no host secret reaches them) and,
 with `--github owner/repo`, the finished CI check runs of its branch are read whenever the commit
@@ -2268,7 +2268,7 @@ check that passes again closes its attention item but not its task: the backlog'
 what the green run proves. Runs in `raven gateway` only when a project is registered, from its
 next restart.
 
-**Code map** (`raven codemap index|show|find|drop`, the `code_map` tool, `raven/codemap/`, `<RAVEN_HOME>/codemap/<project>.sqlite`):
+**Code map** (`raven codemap index|show|find|drop`, the `code_map` tool, `raven/codemap/`, `<RARUS_HOME>/codemap/<project>.sqlite`):
 An index of what a project's source files define (classes, functions, members, types, constants,
 document headings, with signatures and lines) and what they import, read from the text alone --
 Python through `ast`, other languages line by line -- and kept outside the project. The file list
@@ -2280,7 +2280,7 @@ refresh carries on. The **map** ranks files for a question by the words in their
 by how many files import them; with no question it is the most depended-on files. The tool is
 served only with `tools.codeMap` on.
 
-**Scenario** (`raven scenario list|show|new|run|runs|log`, `raven/scenario/`, `<RAVEN_HOME>/scenarios/`, `<RAVEN_HOME>/scenario_runs/`):
+**Scenario** (`raven scenario list|show|new|run|runs|log`, `raven/scenario/`, `<RARUS_HOME>/scenarios/`, `<RARUS_HOME>/scenario_runs/`):
 A Python file with `async def main(sc)` that drives roster agents: `sc.run(agent, task)` runs one
 task and waits, `sc.start` returns a handle so several work at once (`sc.wait`, `sc.first`), and a
 failed or timed-out run comes back as a reply with `ok` false for the script to judge. Every run of
@@ -2309,7 +2309,7 @@ the next stronger one. The fallback chain is the **escalation**: a failure on th
 the turn to the stronger tiers' models and then the default. Off with the rest of routing by
 default; a conversation's own model outranks it.
 
-**Rate-limit resume** (`agents.defaults.rateLimitWaitMaxS`, `agents.defaults.rateLimitResume`, `raven/providers/rate_limits.py`, `raven/proactive_engine/rate_limit_resume.py`, `<RAVEN_HOME>/rate_limit_resume.json`):
+**Rate-limit resume** (`agents.defaults.rateLimitWaitMaxS`, `agents.defaults.rateLimitResume`, `raven/providers/rate_limits.py`, `raven/proactive_engine/rate_limit_resume.py`, `<RARUS_HOME>/rate_limit_resume.json`):
 What a turn does when the provider's rate limit says when it lifts (`ErrorClassification.retry_after_s`,
 read from `Retry-After`, `x-ratelimit-reset-*`, `anthropic-ratelimit-*-reset`, Gemini's `retryDelay` or
 the error's words -- "try again in 6m12s", the Claude CLI's `usage limit reached|<epoch>`, "resets 3pm").
@@ -2369,9 +2369,9 @@ task goes to one roster agent as written, in the project as it is; the checks th
 decide whether it is done, and a failed check sends the same agent another attempt carrying what
 failed, up to a few attempts, each under a tight time limit (an attempt that times out or raises
 is a failed attempt). Steps run one after another and the run is recorded under
-`<RAVEN_HOME>/fast/`. With no checks the agent's answer is the result.
+`<RARUS_HOME>/fast/`. With no checks the agent's answer is the result.
 
-**Table app** (`raven table`, `raven/tables/`, `<RAVEN_HOME>/tables/<name>.json`):
+**Table app** (`raven table`, `raven/tables/`, `<RARUS_HOME>/tables/<name>.json`):
 A table of rows with a key column, kept in step with outside sources -- CSV or JSON, a file or an
 http(s) URL, a dotted path to the list and a column-to-field mapping -- by a **sync pass**. A sync
 compares a source's rows with the rows it brought last time by key: new keys are added, moved
@@ -2414,7 +2414,7 @@ lines with `--events`.
 
 **Multi-repository run** (`repos:` on a dag playbook, `raven/playbook/multirepo.py`):
 One graph run that works several repositories. Before the run each listed repository gets a
-checkout of its own on branch `raven/<playbook>-<tag>` (under `<RAVEN_HOME>/multirepo/`), cut
+checkout of its own on branch `raven/<playbook>-<tag>` (under `<RARUS_HOME>/multirepo/`), cut
 from where it is now, and every node is told where they all are. When the run finishes -- a
 run-finish hook (`agent/subagent/run_hooks.py`) bound around the dispatch -- each branch is
 merged back into its own repository by the stint's two-step **Integration**, one result per
@@ -2727,7 +2727,7 @@ caller's intent.
 ### Workspace & Onboarding
 
 **Agent home** (`get_workspace_path()`, `raven/config/paths.py`):
-The per-agent filesystem tree (default `~/.raven/workspace`) holding the agent's and user's
+The per-agent filesystem tree (default `~/.rarus/workspace`) holding the agent's and user's
 memory (`MemoryStore`'s `user_memory/`), skills, session transcripts and their metadata
 directories (`SessionManager`'s `sessions/<group>/`), the Skill Hub cache (`skills/hub/`), and the Workspace Template seed. Seeded by
 `sync_workspace_templates()`. Exactly one per agent, never per session. Set by `--home` or
@@ -3477,7 +3477,7 @@ and every Subagent it spawns, and resolved per turn by `WorkdirResolver.resolve(
 checkout you started it from (Workdir policy `LAUNCH_DIR`); intermediate artifacts it
 produces there go under that directory's `.raven/` (the shadow-git repo lives at
 `.raven/shadow.git`). `raven gateway` gives each channel one directory (Workdir policy
-`PER_CHANNEL`), set by `channels.<name>.workspace`, defaulting to `<agent home>/../tmp/<channel>`, i.e. `~/.raven/tmp/<channel>`.
+`PER_CHANNEL`), set by `channels.<name>.workspace`, defaulting to `<agent home>/../tmp/<channel>`, i.e. `~/.rarus/tmp/<channel>`.
 Overridable per invocation via `--workspace`/`-w` (the working directory itself on
 tui/agent, the root the per-channel defaults hang off on gateway), or per running gateway
 session from the web UI, persisted in `Session.metadata["workdir"]` and taking effect on

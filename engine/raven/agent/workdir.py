@@ -28,8 +28,8 @@ _CURRENT: ContextVar[Path | None] = ContextVar("raven_session_workdir", default=
 def default_channel_root(agent_home: Path) -> Path:
     """Root of the per-channel working directories, a sibling of agent home.
 
-    With the default agent home (``~/.raven/workspace``) that is
-    ``~/.raven/tmp``. Derived from agent home rather than from ``$HOME`` so an
+    With the default agent home (``~/.rarus/workspace``) that is
+    ``~/.rarus/tmp``. Derived from agent home rather than from ``$HOME`` so an
     instance started with ``--home`` keeps its scratch directories next to that
     instance instead of reaching back into the real one.
 
@@ -105,7 +105,7 @@ def validate_override(value: str | Path, agent_home: Path) -> Path:
     # away, so an ordinary relative write lands on the agent's own memory.
     if resolved == home:
         raise ValueError(f"working directory must not be the agent home directory itself ({home})")
-    # An ancestor is worse still. `~/.raven` is not merely agent home's parent,
+    # An ancestor is worse still. `~/.rarus` is not merely agent home's parent,
     # it is the instance data directory -- config.json (provider keys), oauth/
     # (provider tokens), cron/, sentinel/, logs/. The per-turn checkpoint runs
     # `add -A` over the working directory, and the `.raven/` default exclude

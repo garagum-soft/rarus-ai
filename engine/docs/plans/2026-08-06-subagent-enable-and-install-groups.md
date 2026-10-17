@@ -594,7 +594,7 @@ async def test_probe_wire_shape_carries_last_test(tmp_path: Path, monkeypatch: p
 
 Add to `tests/test_web_rpc_config.py`. **First an autouse fixture**, because
 `_probe` and `_test` will now construct a `TestStateStore()` with no path, which
-resolves to the real `~/.raven/subagent_test_state.json` -- every existing test in
+resolves to the real `~/.rarus/subagent_test_state.json` -- every existing test in
 this file that calls either RPC would otherwise read and write the user's own file
 on every run. Same hazard, and same remedy, as the isolated-registry fixtures in
 `tests/test_subagent_third_party.py` and `tests/test_subagent_dag_runner.py`:
@@ -602,7 +602,7 @@ on every run. Same hazard, and same remedy, as the isolated-registry fixtures in
 ```python
 @pytest.fixture(autouse=True)
 def _isolated_test_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test here may touch the real ~/.raven/subagent_test_state.json.
+    """No test here may touch the real ~/.rarus/subagent_test_state.json.
 
     `raven.subagents.probe` and `.test` build a store with no explicit path, so
     without this every run of this file would accumulate verdicts in the user's

@@ -1,7 +1,7 @@
 """The pane board: agents placed in tmux windows and panes, rebalanced as they come and go.
 
 The board keeps which agent sits in which pane of which window
-(``<RAVEN_HOME>/panes/board.json``). Placing an agent puts it in the first
+(``<RARUS_HOME>/panes/board.json``). Placing an agent puts it in the first
 window with room -- a new window of the board's tmux session when every window
 is full -- by splitting that window's main pane, then re-plans the window
 (:mod:`raven.ops.pane_layout`) and applies the plan with ``select-layout``, so

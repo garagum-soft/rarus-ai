@@ -32,7 +32,7 @@ def _free_port() -> int:
 
 @pytest.fixture(autouse=True)
 def _isolated_instance_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test here may touch the real ~/.raven/subagent_instances.json.
+    """No test here may touch the real ~/.rarus/subagent_instances.json.
 
     Same reasoning as the fixture of this name in
     `tests/test_subagent_third_party.py`: a stateful create commits a handle
@@ -961,7 +961,7 @@ def _host_with_a_provider_key(monkeypatch: pytest.MonkeyPatch) -> None:
     Written to the real config the bound reads rather than stubbing the check,
     since "which sections count as usable" is half of what is under test.
 
-    The home is this test's own, named through RAVEN_HOME: the suite's isolation
+    The home is this test's own, named through RARUS_HOME: the suite's isolation
     sets HOME, which Windows does not read (Path.home() is USERPROFILE there), so
     writing to get_config_path() unaided overwrote the config of whoever ran the
     suite on Windows.
@@ -970,7 +970,7 @@ def _host_with_a_provider_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from raven.home import get_config_path
 
-    monkeypatch.setenv("RAVEN_HOME", tempfile.mkdtemp(prefix="raven-probe-home-"))
+    monkeypatch.setenv("RARUS_HOME", tempfile.mkdtemp(prefix="raven-probe-home-"))
     get_config_path().write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test"}}}), encoding="utf-8")
 
 

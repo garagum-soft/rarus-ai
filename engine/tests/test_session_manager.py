@@ -548,7 +548,7 @@ def test_loader_skips_partial_trailing_line(tmp_path: Path):
 
 
 def test_legacy_global_sessions_shim_removed(tmp_path: Path, monkeypatch):
-    """~/.raven/sessions files are no longer migrated nor consulted."""
+    """~/.rarus/sessions files are no longer migrated nor consulted."""
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     legacy_file = legacy / "tui_x.jsonl"

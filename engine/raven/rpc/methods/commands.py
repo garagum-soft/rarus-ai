@@ -151,7 +151,7 @@ def _compute_skill_count() -> tuple[int, str | None]:
     the new :class:`LocalSkillSource` indexes.
 
     Failure modes (any exception → ``(0, warning_str)``):
-    - ``load_config`` raises (missing ``~/.raven/config.json``, etc.)
+    - ``load_config`` raises (missing ``~/.rarus/config.json``, etc.)
     - workspace path unreachable
 
     Returning ``0`` + warning is the graceful-degrade path: TS-side surfaces

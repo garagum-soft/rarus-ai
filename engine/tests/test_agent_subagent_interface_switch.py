@@ -251,7 +251,7 @@ def test_the_command_line_switches_and_lists(tmp_path: Path, monkeypatch: pytest
     from raven.cli.commands import app
     from raven.ops import pane_board
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     registry_path = tmp_path / "instances.json"
     asyncio.run(InstanceRegistry(registry_path).commit(*KEY, "conv-42", kind="acp"))
     monkeypatch.setattr(instances, "default_registry_path", lambda: registry_path)

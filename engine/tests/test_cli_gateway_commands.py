@@ -56,7 +56,7 @@ def test_gateway_help_describes_the_channel_workspace_root():
     assert "per-session" not in output
     assert "/ws" not in output
     assert "per-channel working directories" in output
-    assert "~/.raven/tmp" in output
+    assert "~/.rarus/tmp" in output
 
 
 def test_gateway_config_short_alias_removed() -> None:

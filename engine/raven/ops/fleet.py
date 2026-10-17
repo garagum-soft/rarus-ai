@@ -100,7 +100,7 @@ class CommandDriver:
     """A registered machine reached through its command runner (``raven.ops.transport``), POSIX shell.
 
     ``update_command`` installs the version (``{version}`` is filled in); the
-    configuration and the secrets are written under ``~/.raven-fleet`` with the
+    configuration and the secrets are written under ``~/.rarus-fleet`` with the
     secrets file owner-only, and the state file records only the fingerprint.
     """
 

@@ -33,7 +33,7 @@ def build(
     since: str = typer.Option("7d", "--since", help="7d, 24h, 90m or a date (2026-10-01)"),
     until: str = typer.Option("", "--until", help="A date; default now"),
     session: str = typer.Option("", "--session", help="Only this conversation"),
-    out: Path = typer.Option(None, "--out", "-o", help="Where to write it (default: <RAVEN_HOME>/reports/)"),
+    out: Path = typer.Option(None, "--out", "-o", help="Where to write it (default: <RARUS_HOME>/reports/)"),
     json_output: bool = typer.Option(False, "--json", help="Print the report as JSON instead"),
 ) -> None:
     """A report for a period: conversations, runs, a retrospective and cost. Archives the finished runs."""

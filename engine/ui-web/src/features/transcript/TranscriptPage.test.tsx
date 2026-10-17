@@ -1580,7 +1580,7 @@ describe('a delegated result coming back', () => {
     const t0 = Date.now() - 20000
     const receipt = [
       'DAG run run-7 finished: 2 completed, 0 failed, 0 cancelled, 0 skipped (of 2).',
-      'Run dir: ~/.raven/dag/run-7',
+      'Run dir: ~/.rarus/dag/run-7',
       '',
       'Node output files:',
       '- read [completed]: nodes/read/.out.md',

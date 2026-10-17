@@ -765,7 +765,7 @@ def _disk_payload(fetched_at, *, prompt="0.0000005", completion="0.0000015", ver
 
 @pytest.fixture
 def disk_cache(tmp_path, monkeypatch):
-    """Point the OpenRouter disk cache at a temp file; never touch real ~/.raven."""
+    """Point the OpenRouter disk cache at a temp file; never touch real ~/.rarus."""
     path = tmp_path / "model-catalog.json"
     monkeypatch.setattr(model_catalog_cache, "_CACHE_PATH", path, raising=False)
     rates.reset_openrouter_cache()

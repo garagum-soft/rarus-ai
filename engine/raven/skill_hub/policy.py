@@ -69,7 +69,7 @@ def refuses_low_safety(score: object, min_safety: float) -> bool:
 
 # ``~/.foo`` / ``$HOME/.foo`` / ``/Users/x/.foo`` / ``/home/x/.foo`` —
 # any home dotdir reference in a skill body, with up to two segments
-# under it. Only ``~/.raven`` is ours; everything else is another
+# under it. Only ``~/.rarus`` is ours; everything else is another
 # product's (or the user's private) data.
 _EXTERNAL_HOME_RE = re.compile(
     r"(?:~|\$HOME|/Users/[A-Za-z0-9_][\w.-]*|/home/[A-Za-z0-9_][\w.-]*)"
@@ -77,7 +77,7 @@ _EXTERNAL_HOME_RE = re.compile(
     r"(?:/(?P<child>[A-Za-z0-9][\w.-]*))?"
     r"(?:/(?P<grandchild>[A-Za-z0-9][\w.-]*))?",
 )
-_ALLOWED_HOME_DOTDIRS = frozenset({"raven"})
+_ALLOWED_HOME_DOTDIRS = frozenset({"rarus", "raven"})
 
 # Dotdirs that host other products rather than being one: ``~/.config`` is
 # where everyone's settings live, so the segment naming whose data it is sits

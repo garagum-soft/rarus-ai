@@ -30,7 +30,7 @@ from raven.playbook.credentials import (
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     return tmp_path
 
 
@@ -143,7 +143,7 @@ def test_a_server_name_that_is_a_path_reaches_no_credential_file(tmp_path, monke
     # A playbook is distributed data. ``../../mcp/host`` under a playbook scope
     # would resolve to the host's own token file, so the rule holds on every
     # read and write: a server name is a filename, never a path.
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.mcp.oauth import credentials_path
 
     host_file = credentials_path("host")

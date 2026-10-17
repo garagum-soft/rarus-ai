@@ -642,7 +642,7 @@ async def test_a_published_pdf_that_leaves_the_fence_is_rendered_instead(
     (state / "oauth").mkdir(parents=True)
     secret = state / "oauth" / "tokens.json"
     secret.write_bytes(b"%PDF-1.4 not a preview at all\n%%EOF\n")
-    monkeypatch.setenv("RAVEN_HOME", str(state))
+    monkeypatch.setenv("RARUS_HOME", str(state))
 
     deck = _deck(tmp_path)
     sibling = tmp_path / "deck.pdf"

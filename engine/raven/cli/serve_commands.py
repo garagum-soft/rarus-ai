@@ -201,7 +201,7 @@ def adopt_stored_cookie(gateway: object) -> None:
 
 
 def _write_serve_state(port: int, token: str, cookie: str = "") -> Optional[Path]:
-    """Persist {port, token, cookie, pid} to ~/.raven/serve.json, 0600 from creation.
+    """Persist {port, token, cookie, pid} to ~/.rarus/serve.json, 0600 from creation.
 
     ``raven web`` reads it to mint a fresh auth nonce against the running serve
     (POST /auth/nonce with the token) instead of starting a second engine

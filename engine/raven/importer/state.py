@@ -24,7 +24,7 @@ def _default_state_path() -> Path:
 class ImportState:
     """Tracks which sources have been imported to enable resume.
 
-    Storage layout (``~/.raven/import_state.json``, configurable)::
+    Storage layout (``~/.rarus/import_state.json``, configurable)::
 
         {
           "meta": {"total": 42},

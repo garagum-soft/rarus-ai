@@ -21,7 +21,7 @@ from raven.config.update_channels import (
 
 @pytest.fixture
 def cfg_path(tmp_path: Path) -> Path:
-    """Provide a sandboxed config path; never touch the real ~/.raven."""
+    """Provide a sandboxed config path; never touch the real ~/.rarus."""
     return tmp_path / "config.json"
 
 

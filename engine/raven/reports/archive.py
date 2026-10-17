@@ -1,6 +1,6 @@
 """The run archive: one line per finished run, kept after the run's own record is gone.
 
-``<RAVEN_HOME>/reports/runs.jsonl``, append-only. A run is written once, the
+``<RARUS_HOME>/reports/runs.jsonl``, append-only. A run is written once, the
 first time a report or a listing sees it finished; a run still in flight is not
 archived until it ends. The line is the run's summary (status, agents, nodes,
 failures, cost-relevant counts, where its record was), so a conversation that

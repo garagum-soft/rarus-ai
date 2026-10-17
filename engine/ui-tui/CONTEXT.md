@@ -212,7 +212,7 @@ just an api key stays directly addable. The one `builtin` row answers to no acti
 it is this process, so there is nothing to test or delete, and its switch belongs to the
 package rather than to config - it renders `[core]` where the others carry one, and fills
 its status column with its description, having no probe to report. It edits
-`~/.raven/config.json` and hot-applies the result, so it changes what the model may
+`~/.rarus/config.json` and hot-applies the result, so it changes what the model may
 dispatch to. Not to be confused with the Agents Overlay, which shows live delegation state
 and writes nothing.
 

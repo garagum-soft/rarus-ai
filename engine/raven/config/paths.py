@@ -79,7 +79,7 @@ def get_workspace_path(workspace: str | None = None) -> Path:
 
 def get_bridge_install_dir() -> Path:
     """Return the WhatsApp bridge installation directory, under the home so a
-    relocated ``RAVEN_HOME`` keeps its own install."""
+    relocated ``RARUS_HOME`` keeps its own install."""
     return raven_home() / "bridge"
 
 

@@ -525,7 +525,7 @@ async def test_the_fix_loop_hands_the_red_report_to_the_fixer_and_ends_green(
 
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     repo = _checkout(tmp_path)
     pushed = tmp_path / "pushed.txt"
     asked = tmp_path / "asked.txt"

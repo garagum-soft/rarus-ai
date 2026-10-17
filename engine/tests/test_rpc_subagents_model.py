@@ -19,7 +19,7 @@ from raven.rpc.methods.subagents import subagents_list, subagents_update
 
 @pytest.fixture
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A config file the handlers write to instead of the real ``~/.raven``."""
+    """A config file the handlers write to instead of the real ``~/.rarus``."""
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps(
@@ -260,7 +260,7 @@ async def test_update_stores_a_builtin_model_naming_the_provider_it_was_picked_u
 
 @pytest.fixture
 def store_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The capability store the handlers read, instead of the real ``~/.raven``."""
+    """The capability store the handlers read, instead of the real ``~/.rarus``."""
     path = tmp_path / "caps.json"
     monkeypatch.setattr("raven.acp_client.capabilities.default_snapshot_path", lambda: path)
     return path

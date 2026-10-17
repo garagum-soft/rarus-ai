@@ -1,11 +1,11 @@
 """Where campaign state lands, and why it has to be resolved per call.
 
 The measured incident (2026-08-05). A run launched with
-``raven tui --config ~/.raven-r5/config.json`` kept its ledger, its decisions and
+``raven tui --config ~/.rarus-r5/config.json`` kept its ledger, its decisions and
 its trial events under that config's directory, because every tool call passed an
 explicit ledger path. ``ops_finish`` was the one call that omitted it, so the
 report resolved against a module-level constant bound from ``Path.home()`` at
-import time and was written to ``~/.raven/ops/<campaign>/`` instead -- a
+import time and was written to ``~/.rarus/ops/<campaign>/`` instead -- a
 directory created on the spot, holding no ``meta.json``.
 
 That is worse than a misplaced file. ``_expected_baseline()`` reads the starting

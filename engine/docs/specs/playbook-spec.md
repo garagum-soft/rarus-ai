@@ -14,7 +14,7 @@
 A playbook = one directory; inside it, a single `playbook.md`, split into three zones.
 
 ```
-~/.raven/playbooks/
+~/.rarus/playbooks/
   competitor-scan/
     playbook.md
 ```

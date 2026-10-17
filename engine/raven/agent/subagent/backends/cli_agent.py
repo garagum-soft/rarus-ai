@@ -438,16 +438,16 @@ class CliAgentBackend:
             env_base = await asyncio.to_thread(login_shell_env)
             # Which raven spawned this child is not something a login shell can
             # answer. The capture is there so the child finds the same tools the
-            # user's own shell would (nvm, conda, a homebrew PATH); RAVEN_HOME is
+            # user's own shell would (nvm, conda, a homebrew PATH); RARUS_HOME is
             # a different kind of fact -- it names the install this process IS,
             # and it is normally set on the command line rather than in a profile,
             # so the capture comes back without it and the child resolves the
             # default home instead.
             #
             # The failure that costs is silent, because both homes exist: started
-            # as RAVEN_HOME=~/.raven-main, the host polls that home's cron store
+            # as RARUS_HOME=~/.rarus-main, the host polls that home's cron store
             # while a sub-agent writing back to "the host's store" writes into
-            # ~/.raven. The hand-off lands in a file nobody reads and the wake
+            # ~/.rarus. The hand-off lands in a file nobody reads and the wake
             # simply never arrives.
             # ``subagent_role_env`` before ``self.env``, so a config ``env`` entry
             # is the way to hand one agent back its full registry. A third-party

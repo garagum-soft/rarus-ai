@@ -5,7 +5,7 @@ acceptance item (A1..A22) of that document; a case that points at no A tests the
 implementation, not the requirement, and does not belong here.
 
 Every case is run by an agent through the entry point a person uses -- the settings page
-driven by `playwright-cli`, the CLI wizard, a real gateway over a temporary `RAVEN_HOME`.
+driven by `playwright-cli`, the CLI wizard, a real gateway over a temporary `RARUS_HOME`.
 A row marked `contract` calls an interface directly and **does not constitute acceptance**;
 it is there for a fast mid-development check.
 
@@ -40,20 +40,20 @@ the operator's own EverOS.
 ```bash
 kill "$GW_PID"; kill "$EVEROS_PID"
 until ! nc -z 127.0.0.1 18899 2>/dev/null; do sleep 0.2; done      # drain, then the port is free
-rm -rf "$ACC"                                                       # the temporary RAVEN_HOME
+rm -rf "$ACC"                                                       # the temporary RARUS_HOME
 ```
 
 **The temporary home holds copies of the operator's real API keys.** After deleting it,
 scan by content, not by remembered paths:
 
 ```bash
-# with each real key from ~/.raven/config.json in turn
+# with each real key from ~/.rarus/config.json in turn
 grep -rl "$KEY" /private/tmp/claude-*/-Users-admin-Raven/*/ 2>/dev/null   # expect: no output
 ```
 
 ### Fixture
 
-`$ACC` is a temporary `RAVEN_HOME` seeded from the operator's config so the providers are
+`$ACC` is a temporary `RARUS_HOME` seeded from the operator's config so the providers are
 real and the keys work. Two shapes are needed:
 
 | Name | Shape | Used by |

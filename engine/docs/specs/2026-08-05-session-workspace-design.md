@@ -8,7 +8,7 @@ Status: implemented
 `workspace` meant two things at once. Split it, and give each half a layout
 that matches how it is actually used:
 
-- **Agent home** stays global (`~/.raven/workspace`): user memory, skills,
+- **Agent home** stays global (`~/.rarus/workspace`): user memory, skills,
   session transcripts and their metadata, memory store, Skill Hub cache.
 - **Working directory** is where a turn reads and writes files. The session's
   leader and every sub-agent it spawns share it.
@@ -34,8 +34,8 @@ responsibilities:
 Consequences on the running gateway:
 
 1. Every chat shared one directory. All DAG runs landed flat in
-   `~/.raven/workspace/.ravenx_dag/`, and every file artifact landed in
-   `~/.raven/workspace/`, whichever chat produced it.
+   `~/.rarus/workspace/.ravenx_dag/`, and every file artifact landed in
+   `~/.rarus/workspace/`, whichever chat produced it.
 2. `raven tui` and `raven agent` ignored the directory they were launched from,
    the opposite of what a terminal tool is expected to do.
 3. Terminal transcripts piled up under `sessions/cli/` and `sessions/tui/` with
@@ -70,7 +70,7 @@ leader's directory is passed to `backend.run(workspace=...)` and to
 ## Layout
 
 ```
-~/.raven/workspace/                       agent home
+~/.rarus/workspace/                       agent home
 ├── user_memory/  skills/  ...
 └── sessions/
     └── <group>/                          project slug (tui/agent) | channel (gateway)
@@ -82,7 +82,7 @@ leader's directory is passed to `backend.run(workspace=...)` and to
                     └── <run_id>/         graph.json, manifest.json,
                                           <node>.prompt.md, <node>.out.md
 
-~/.raven/tmp/<channel>/                   gateway working directory (default)
+~/.rarus/tmp/<channel>/                   gateway working directory (default)
 <launch dir>/                             tui/agent working directory
 └── .raven/shadow.git                     its checkpoints
 ```
@@ -97,7 +97,7 @@ attacker-controlled.
 | Entrypoint | Working directory | Session group | Workdir policy |
 |---|---|---|---|
 | `raven tui`, `raven agent` | the launch directory | `project_slug(cwd)` | `LAUNCH_DIR` |
-| `raven gateway` (web, IM, cron, sentinel) | `channels.<name>.workspace`, else `~/.raven/tmp/<channel>` | the channel name | `PER_CHANNEL` |
+| `raven gateway` (web, IM, cron, sentinel) | `channels.<name>.workspace`, else `~/.rarus/tmp/<channel>` | the channel name | `PER_CHANNEL` |
 
 The gateway's `-w` sets the root the per-channel defaults hang off; it does not
 name a single directory, because a daemon has no single working directory.
@@ -131,7 +131,7 @@ mid-run) when nothing is bound.
 
 - An override must be absolute, and may be neither agent home, nor one of its
   `user_memory` / `skills` / `sessions` subtrees, nor any directory containing
-  agent home. The last matters most: `~/.raven` is the instance data directory
+  agent home. The last matters most: `~/.rarus` is the instance data directory
   (`config.json`, `oauth/`, `cron/`, `logs/`), and the per-turn checkpoint runs
   `add -A` over the working directory — the `.raven/` default exclude cannot
   help when `.raven` *is* the work-tree root.

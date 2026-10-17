@@ -110,7 +110,7 @@ ContextAssembler 实测（dev-01 day29 checkpoint）：
 
 **$T_{out}$**：60% skip（`{action, reason, score}` ≈ 80 tok）+ 40% nudge（含 `topic_tag` + 中文 `nudge_message` ≈ 250 tok），加权平均 **~150 tok**。
 
-> 这是基于字符数 + qwen-tokenizer 经验比例（中文 ~1.5 chars/tok、英文 ~3.5 chars/tok）的估算。要拿到精确值，给 `UsageTracker.after_llm_call` 加一个 `call_site` contextvar tag，就能从 `~/.raven/telemetry/usage-*.jsonl` 直接 group-by 拉出来——目前 Planner 和主 AgentLoop 的 usage 在同一份文件里没法区分。
+> 这是基于字符数 + qwen-tokenizer 经验比例（中文 ~1.5 chars/tok、英文 ~3.5 chars/tok）的估算。要拿到精确值，给 `UsageTracker.after_llm_call` 加一个 `call_site` contextvar tag，就能从 `~/.rarus/telemetry/usage-*.jsonl` 直接 group-by 拉出来——目前 Planner 和主 AgentLoop 的 usage 在同一份文件里没法区分。
 
 ### 3.3 价格表（USD per million tokens）
 

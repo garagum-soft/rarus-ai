@@ -3781,7 +3781,7 @@ def host_rules(tmp_path, monkeypatch):
 
     home = tmp_path / "host-home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     permissions._host_policy.cache_clear()
 
     def write(config: dict[str, Any]) -> None:

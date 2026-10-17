@@ -125,7 +125,7 @@ SECRET_SLOTS = {
 # optional fallback loop.
 REQUIRED_SECRETS = ("CODE_API_KEY",)
 
-_DEFAULT_HOST_WORKSPACE = "~/.raven/workspace"
+_DEFAULT_HOST_WORKSPACE = "~/.rarus/workspace"
 
 _EXIT_TIMEOUT = 124
 """Exit code for a run the launcher killed on its own deadline.

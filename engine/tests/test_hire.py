@@ -35,7 +35,7 @@ def _own_home(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     for name in ("RAVEN_PARENT_MODEL", "RAVEN_PARENT_PROVIDER", "RAVEN_PARENT_REASONING_EFFORT"):
         monkeypatch.delenv(name, raising=False)
     return home

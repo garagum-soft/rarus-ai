@@ -376,7 +376,7 @@ def _localize(req: Requirement, name: str, section: Any = None) -> Requirement:
     """Put the provider's own name into the hint, so it can be pasted.
 
     The hint names a command, not a config path: telling someone to hand-edit
-    `~/.raven/config.json` asks them to know a file layout the CLI exists to
+    `~/.rarus/config.json` asks them to know a file layout the CLI exists to
     hide, and the OAuth hint already gave a command.
 
     When the section carries ``endpoints``, a key hint must name

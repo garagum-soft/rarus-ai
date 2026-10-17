@@ -33,7 +33,7 @@ them wrong reads a stopped run as still running:
 |---|---|---|---|
 | run dir | `<session_dir>/subagents/mas_dag/<run_id>/graph.json`, `manifest.json` | `DagRunStore.init`, `_finalize -> write_manifest` | the graph (edges, templates, `skills`, `mcps`, `inputs`, `instance`, `confirm`, top-level `replan`); per-node terminal state once finalized |
 | session node registry | `<session_dir>/subagents/nodes.json` (`dag_store.REGISTRY_FILENAME`) | `record_nodes`, `ensure_node_claimed`, `record_outcome` | `nodes{<id>: {kind: dag\|spawn, run_id?, status, started_at_ms, ended_at_ms?, has_output?}}`; the only place a hard-stopped run's `cancelled` / `skipped` land |
-| instance registry | `~/.raven/subagent_instances.json` (`raven.agent.subagent.instances.get_registry`) | `upsert_dag_node`, `upsert_spawn` | rows `kind in {cli, acp, dag-node}` with `runId`, `nodeId`, `status`, `createdAtMs`, `updatedAtMs` |
+| instance registry | `~/.rarus/subagent_instances.json` (`raven.agent.subagent.instances.get_registry`) | `upsert_dag_node`, `upsert_spawn` | rows `kind in {cli, acp, dag-node}` with `runId`, `nodeId`, `status`, `createdAtMs`, `updatedAtMs` |
 
 Node files sit in the flat namespace `<session_dir>/subagents/nodes/<node_id>.{prompt,out,
 error}.md`, `.meta.json`, `.transcript.jsonl` (older records: `mas_dag/<run>/<node>.*`; the

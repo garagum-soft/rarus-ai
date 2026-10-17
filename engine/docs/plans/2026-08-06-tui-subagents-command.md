@@ -327,7 +327,7 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A config file the handlers write to instead of the real ~/.raven."""
+    """A config file the handlers write to instead of the real ~/.rarus."""
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps(
@@ -1308,7 +1308,7 @@ This task is specified as a behavioural contract plus tests rather than finished
 | `d` | on a configured row, go to the delete-confirm stage (Task 7) |
 | `q` | `onClose()` |
 | Refresh | after any mutating RPC resolves, re-run `subagents.list` so the rendered state is the server's, not a local guess |
-| Footer | the key hints, then `custom agents: web UI /subagents or ~/.raven/config.json` |
+| Footer | the key hints, then `custom agents: web UI /subagents or ~/.rarus/config.json` |
 
 An unconfigured preset row has `enabled: false` from the server and cannot be toggled on directly - `enter` adds it (Task 7), and adding is what makes it toggleable. This mirrors the web UI, where the switch is the configuration act.
 
@@ -1530,7 +1530,7 @@ The overlay's whole point is a live surface, and no test here exercises the real
 uv run raven tui
 ```
 
-Then: `/subagents` opens the overlay; the roster matches `~/.raven/config.json`; `space` on a row survives closing and reopening the overlay; `r` re-probes; `t` on an installed cli agent reports a verdict; `esc` mid-test cancels it and leaves no orphan process (`pgrep -f claude`); `enter` on `opencode` adds it and it then appears in `spawn`'s tool description **without restarting the TUI** (ask the agent "which sub-agents can you dispatch to?" before and after).
+Then: `/subagents` opens the overlay; the roster matches `~/.rarus/config.json`; `space` on a row survives closing and reopening the overlay; `r` re-probes; `t` on an installed cli agent reports a verdict; `esc` mid-test cancels it and leaves no orphan process (`pgrep -f claude`); `enter` on `opencode` adds it and it then appears in `spawn`'s tool description **without restarting the TUI** (ask the agent "which sub-agents can you dispatch to?" before and after).
 
 Record what you actually observed for each. If hot-apply does not work, that is a Task 3 defect, not a Task 8 note.
 

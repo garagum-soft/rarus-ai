@@ -50,7 +50,7 @@ def workspace(tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never touch the real ``~/.raven/subagent_instances.json``."""
+    """Never touch the real ``~/.rarus/subagent_instances.json``."""
     from raven.agent.subagent import instances as instances_mod
 
     monkeypatch.setattr(instances_mod, "_registry", instances_mod.InstanceRegistry(path=tmp_path / "inst.json"))

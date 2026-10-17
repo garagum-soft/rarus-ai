@@ -2,7 +2,7 @@
 
 A scenario is a Python file with ``async def main(sc)``. Three places hold them,
 the most specific winning a name: the workspace's ``.raven/scenarios/``, the
-user's ``<RAVEN_HOME>/scenarios/``, and the ones shipped in
+user's ``<RARUS_HOME>/scenarios/``, and the ones shipped in
 ``raven/scenario/builtin/``. Listing parses the file (its docstring and a
 literal ``PARAMS`` mapping) and never imports it: a scenario that came with a
 cloned repository runs only when someone runs it by name.

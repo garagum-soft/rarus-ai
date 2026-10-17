@@ -6,7 +6,7 @@ Base: `feat/claude_code_tool_rendering` cut from `origin/main` at `3c060830`.
 
 Measured against `@agentclientprotocol/claude-agent-acp@0.66.0` (`agentInfo.name`
 `@agentclientprotocol/claude-agent-acp`). Evidence is 224 captured frames from
-real direct chats under `~/.raven/traces/logs/acp-frames/2026-08-20/`, plus the
+real direct chats under `~/.rarus/traces/logs/acp-frames/2026-08-20/`, plus the
 adapter's own `dist/tools.js` and `dist/acp-agent.js`, which ship unminified and
 commented.
 

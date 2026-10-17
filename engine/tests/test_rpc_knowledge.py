@@ -441,7 +441,7 @@ async def test_the_state_directory_is_refused_with_the_shipped_default(monkeypat
     (workspace / "uploads").mkdir(parents=True)
     (workspace / "uploads" / "handbook.md").write_text("hello", encoding="utf-8")
     (home / "serve.json").write_text('{"token": "sekrit"}', encoding="utf-8")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     _fence(monkeypatch, workspace, restrict=False)
 
     manager = _FakeManager([_FakeBase("b1", "handbook")], {})

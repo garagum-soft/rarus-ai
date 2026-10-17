@@ -338,7 +338,7 @@ This is the contract `ProviderIcon` already has with the provider registry.
 - `pnpm -C frontend lint` (0 errors), `pnpm -C frontend build`, `make lint`,
   `make check-large-files`.
 - End to end: `./start_webapp.sh`, configure each of the five presets from
-  `/subagents`, dispatch to each, and confirm `~/.raven/config.json`.
+  `/subagents`, dispatch to each, and confirm `~/.rarus/config.json`.
 
 ## 8. Risks
 

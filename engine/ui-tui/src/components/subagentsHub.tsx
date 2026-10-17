@@ -1005,7 +1005,7 @@ export function SubagentsHub({ gw, onClose, t }: SubagentsHubProps) {
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">
-          Saved to ~/.raven/config.json · Tab switches field
+          Saved to ~/.rarus/config.json · Tab switches field
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">
@@ -1072,7 +1072,7 @@ export function SubagentsHub({ gw, onClose, t }: SubagentsHubProps) {
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">
-          This removes {selected.name} from ~/.raven/config.json.
+          This removes {selected.name} from ~/.rarus/config.json.
         </Text>
 
         <Text color={t.color.muted} wrap="truncate-end">

@@ -157,7 +157,7 @@ def test_the_command_line_probes_shows_picks_and_routes_fast_mode(
         for name in ("doer", "talker")
     ]
     (home / "config.json").write_text(json.dumps({"subagents": {"agents": agents}}), encoding="utf-8")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     runner = CliRunner()
 
     probed = runner.invoke(app, ["agents", "probe", "doer", "talker", "--cap", "reply", "--cap", "write_files"])

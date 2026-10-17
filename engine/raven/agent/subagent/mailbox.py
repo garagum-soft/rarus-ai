@@ -22,7 +22,7 @@ with the names that would have worked -- mail to a typo is never a black hole.
 A participant joins when a run starts under its name, and a DAG joins all its
 nodes when it starts, so a node can write to one that has not run yet.
 
-One file pair per conversation under ``<RAVEN_HOME>/mailbox``: an append-only
+One file pair per conversation under ``<RARUS_HOME>/mailbox``: an append-only
 ``.jsonl`` log (the history, never consumed) and a ``.json`` state holding the
 members, the next sequence number and how far each member has read. Both are
 written under the state's lock, so other processes -- an external CLI agent

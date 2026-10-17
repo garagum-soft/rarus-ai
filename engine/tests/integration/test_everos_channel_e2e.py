@@ -13,7 +13,7 @@ backend directly). It is gated behind ``real_llm`` and isolates the
 store via ``EVEROS_MEMORY__ROOT`` so it never touches ``~/.everos``.
 
 The agent identity is the pre-configured ``agent_id`` in
-``~/.raven/config.json`` (``agent:liquid`` in this repo's setup); the
+``~/.rarus/config.json`` (``agent:liquid`` in this repo's setup); the
 user identity is the ``user_id`` fallback there (``liquid``). No per-user
 dynamic owner — single configured owner, by design.
 

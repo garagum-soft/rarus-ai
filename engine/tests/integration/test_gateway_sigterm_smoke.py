@@ -58,7 +58,7 @@ def test_sigterm_walks_the_graceful_chain(tmp_path: Path) -> None:
     config.write_text(json.dumps({"providers": {"anthropic": {"apiKey": "sk-ant-dummy-sigterm-smoke"}}}))
 
     env = dict(os.environ)
-    env["RAVEN_HOME"] = str(home)
+    env["RARUS_HOME"] = str(home)
     proc = subprocess.Popen(
         [
             str(binary),

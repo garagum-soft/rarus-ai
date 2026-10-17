@@ -3380,7 +3380,7 @@
     {
       "name": "setup.status",
       "summary": "Report whether an LLM provider is configured (hermes startup hook).",
-      "description": "Called by hermes UI useSessionLifecycle.ts / setupHandoff.ts at startup. v0.1 reads ~/.raven/config.json; if read fails, returns provider_configured=true as fallback (see design.md §3a.1).",
+      "description": "Called by hermes UI useSessionLifecycle.ts / setupHandoff.ts at startup. v0.1 reads ~/.rarus/config.json; if read fails, returns provider_configured=true as fallback (see design.md §3a.1).",
       "params": [],
       "result": {
         "name": "SetupStatusResult",
@@ -7195,7 +7195,7 @@
                     "type": "string"
                   },
                   "folder": {
-                    "description": "The folder under <RAVEN_HOME>/employees.",
+                    "description": "The folder under <RARUS_HOME>/employees.",
                     "type": "string"
                   },
                   "role": {
@@ -7333,7 +7333,7 @@
                   "type": "string"
                 },
                 "folder": {
-                  "description": "The folder under <RAVEN_HOME>/employees.",
+                  "description": "The folder under <RARUS_HOME>/employees.",
                   "type": "string"
                 },
                 "role": {

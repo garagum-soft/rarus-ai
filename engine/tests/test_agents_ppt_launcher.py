@@ -51,7 +51,7 @@ def launcher():
 @pytest.fixture()
 def grounded(launcher, tmp_path, monkeypatch):
     """A launcher pointed at a scratch home and state root, secrets set."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("PPT_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.delenv("PPT_ACP_HOME", raising=False)
     monkeypatch.setenv("PPT_API_KEY", "sk-own")

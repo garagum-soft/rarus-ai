@@ -23,10 +23,10 @@ NOW = 1_800_000_000.0
 
 @pytest.fixture(autouse=True)
 def _own_home(tmp_path, monkeypatch):
-    """The instance registry a spawn writes lands under this test's home, not the real ~/.raven."""
+    """The instance registry a spawn writes lands under this test's home, not the real ~/.rarus."""
     home = tmp_path / "raven-home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
 
 # -- reading the agents' words -----------------------------------------------------------------

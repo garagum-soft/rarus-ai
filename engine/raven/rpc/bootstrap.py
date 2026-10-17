@@ -119,7 +119,7 @@ def build_agent_loop(workspace: str | None = None, home: str | None = None, chan
                 "reason": "tui_init_crash",
                 "exception_type": type(e).__name__,
                 "exception_message": str(e),
-                "log_path": "~/.raven/logs/tui.log",
+                "log_path": "~/.rarus/logs/tui.log",
             },
         ) from e
     except Exception as e:
@@ -132,7 +132,7 @@ def build_agent_loop(workspace: str | None = None, home: str | None = None, chan
                 "reason": "uncaught",
                 "exception_type": type(e).__name__,
                 "exception_message": str(e),
-                "log_path": "~/.raven/logs/tui.log",
+                "log_path": "~/.rarus/logs/tui.log",
             },
         ) from e
 

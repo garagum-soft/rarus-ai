@@ -97,7 +97,7 @@ def _legacy_everos_config_path() -> Path | None:
         slice_ = {}
     if slice_.get("root"):
         candidates.append(Path(str(slice_["root"])).expanduser())
-    if get_config_path() == Path.home() / ".raven" / "config.json":
+    if get_config_path() == Path.home() / ".rarus" / "config.json":
         candidates.append(Path.home() / ".everos" / "raven")
     candidates.append(get_data_dir() / "everos")
 

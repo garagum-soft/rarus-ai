@@ -164,10 +164,10 @@ def _warm_the_heaviest_import() -> None:
     # Under a temporary home for the length of the call. This runs before the
     # autouse fixtures that redirect the home, and the import publishes the
     # OAuth token directories, which creates them: warming it as-is put an
-    # `oauth` directory in the developer's own ~/.raven.
+    # `oauth` directory in the developer's own ~/.rarus.
     home = tempfile.mkdtemp(prefix="raven-warmup-")
     pinned = {
-        "RAVEN_HOME": home,
+        "RARUS_HOME": home,
         "GITHUB_COPILOT_TOKEN_DIR": os.path.join(home, "oauth", "github_copilot"),
         "CHATGPT_TOKEN_DIR": os.path.join(home, "oauth", "chatgpt"),
     }
@@ -638,7 +638,7 @@ def _restore_loguru_enabled_state():
 def _no_real_raven_home(tmp_path, monkeypatch):
     """Keep the suite out of the config file of whoever is running it.
 
-    ``get_config_path()`` answers ``RAVEN_HOME/config.json``, and anything reading
+    ``get_config_path()`` answers ``RARUS_HOME/config.json``, and anything reading
     it at test time therefore reads a real person's preferences. The tool array is
     assembled through one of those reads (``LiveConfig``, so an off switch takes
     effect on the next turn rather than the next restart), which makes the
@@ -654,7 +654,7 @@ def _no_real_raven_home(tmp_path, monkeypatch):
     home itself can still beat, and this fixture must lose to all of them. Tests
     do it two ways -- ``monkeypatch.setattr(Path, "home", ...)`` and
     ``monkeypatch.setenv("HOME", ...)`` -- and the precedence runs
-    ``RAVEN_HOME`` > ``Path.home`` > ``HOME``. Setting ``RAVEN_HOME`` here beats
+    ``RARUS_HOME`` > ``Path.home`` > ``HOME``. Setting ``RARUS_HOME`` here beats
     both camps (measured: 17 unrelated failures), patching ``Path.home`` beats the
     ``setenv`` camp (measured: 3), and setting ``HOME`` beats neither: an attribute
     patch shadows it, and a later ``setenv`` replaces it.
@@ -676,23 +676,23 @@ def _no_real_raven_home(tmp_path, monkeypatch):
     # tests about the gate itself write their own permissions node (LiveConfig
     # re-reads on byte change, so overwriting this file mid-test takes effect
     # on the next tool call).
-    raven_home = home / ".raven"
+    raven_home = home / ".rarus"
     raven_home.mkdir()
     (raven_home / "config.json").write_text('{"permissions": {"mode": "full"}}')
-    # Unset rather than set: ``RAVEN_HOME`` outranks everything above, so a
+    # Unset rather than set: ``RARUS_HOME`` outranks everything above, so a
     # developer who exports it hands their own directory to every test that
     # isolates the home some other way. Deleting it is the one move that closes
     # that without overriding anybody -- a test that wants the variable sets it
     # itself, which lands after this.
-    monkeypatch.delenv("RAVEN_HOME", raising=False)
+    monkeypatch.delenv("RARUS_HOME", raising=False)
     monkeypatch.setattr("raven.home._current_config_path", None)
 
     # The attention queue is written by every broker a test drives. On Windows
     # ``Path.home()`` reads USERPROFILE, not the HOME set above, so without this
-    # those writes land in the real ~/.raven of whoever runs the suite. A test
-    # that sets RAVEN_HOME itself still gets the queue there.
+    # those writes land in the real ~/.rarus of whoever runs the suite. A test
+    # that sets RARUS_HOME itself still gets the queue there.
     def attention_path() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "attention.json" if stated else raven_home / "attention.json"
 
     monkeypatch.setattr("raven.proactive_engine.attention.default_path", attention_path)
@@ -700,38 +700,38 @@ def _no_real_raven_home(tmp_path, monkeypatch):
     # The same for the ledger of agent processes every ACP and CLI spawn writes,
     # and no background orphan sweep: the suite's processes are its own.
     def ledger_path() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "processes.json" if stated else raven_home / "processes.json"
 
     monkeypatch.setattr("raven.agent.subagent.orphans.default_path", ledger_path)
 
     def notify_log_path() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "notifications.jsonl" if stated else raven_home / "notifications.jsonl"
 
     monkeypatch.setattr("raven.proactive_engine.notify.default_log_path", notify_log_path)
 
     def matrix_path() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "capability_matrix.json" if stated else raven_home / "capability_matrix.json"
 
     monkeypatch.setattr("raven.agent.subagent.capability_matrix.default_path", matrix_path)
 
     def mail_root() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "mailbox" if stated else raven_home / "mailbox"
 
     monkeypatch.setattr("raven.agent.subagent.mailbox.default_root", mail_root)
 
     def review_root() -> Path:
-        stated = os.environ.get("RAVEN_HOME")
+        stated = os.environ.get("RARUS_HOME")
         return Path(stated) / "reviews" if stated else raven_home / "reviews"
 
     monkeypatch.setattr("raven.stint.review.default_root", review_root)
 
     def under_home(name: str):
         def path() -> Path:
-            stated = os.environ.get("RAVEN_HOME")
+            stated = os.environ.get("RARUS_HOME")
             return Path(stated) / name if stated else raven_home / name
 
         return path
@@ -833,7 +833,7 @@ def _no_real_oauth_credentials(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_tracing_state_dir(tmp_path, monkeypatch):
-    """Keep span emission off the real ``~/.raven/traces`` for the whole suite.
+    """Keep span emission off the real ``~/.rarus/traces`` for the whole suite.
 
     Tracing is on by default and ``trace.span()`` calls are embedded in library
     code (agent loop, subagents, TUI RPC), so any test exercising those paths
@@ -882,7 +882,7 @@ def _no_openrouter_network(tmp_path):
     any LiteLLM-miss model, so an un-mocked test would hit the network. Default
     to an empty catalog; tests that exercise the catalog restore the real fetch
     and mock the transport. The disk cache path is also redirected to a temp
-    file so the real ~/.raven/cache/ is never read or written.
+    file so the real ~/.rarus/cache/ is never read or written.
     """
     from raven.providers import model_catalog_cache, rates
 
@@ -1047,7 +1047,7 @@ def _no_real_acp_journal(tmp_path, monkeypatch):
     Every pooled connection opens one (``raven/acp_client/journal.py``), so any
     test that launches a stub server would otherwise write the whole exchange --
     the prompt, every tool result, every stderr line -- under the developer's
-    ``~/.raven/traces``, and leave it there after the run.
+    ``~/.rarus/traces``, and leave it there after the run.
     """
     from raven.acp_client import journal
 

@@ -42,7 +42,7 @@ def _cfg(home: Path):
         # the agent starts cron and the memory backend against whatever this
         # names, and no provider is configured here, which keeps the run
         # reproducible.
-        env={**os.environ, "RAVEN_HOME": str(home)},
+        env={**os.environ, "RARUS_HOME": str(home)},
         ready_timeout_ms=120000,
     )
 

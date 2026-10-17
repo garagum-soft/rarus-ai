@@ -383,7 +383,7 @@ async def test_the_subagent_lanes_web_tools_read_their_keys_live_too(tmp_path: P
 @pytest.mark.asyncio
 async def test_the_unconfigured_error_names_the_config_actually_in_force(tmp_path: Path) -> None:
     """Reachable only if the key disappears after registration, but the message
-    used to hard-code ``~/.raven/config.json`` and send anyone running with
+    used to hard-code ``~/.rarus/config.json`` and send anyone running with
     ``--config`` to edit a file the process never reads."""
     from raven.config.loader import get_config_path, set_config_path
 
@@ -396,7 +396,7 @@ async def test_the_unconfigured_error_names_the_config_actually_in_force(tmp_pat
         set_config_path(before)
 
     assert str(chosen) in out
-    assert "~/.raven/config.json" not in out
+    assert "~/.rarus/config.json" not in out
 
 
 class _PluginSearch(Tool):

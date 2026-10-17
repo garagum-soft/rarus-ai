@@ -175,12 +175,12 @@ The ledgers are wrong for this run and the final report must not trust them:
 
 ## Evidence
 
-- Main agent TUI log `~/.raven-main/logs/tui.log` lines 60217-60237 (19:19:18
+- Main agent TUI log `~/.rarus-main/logs/tui.log` lines 60217-60237 (19:19:18
   inspection, 19:20:38 malformed resolve with `action`, 19:21:47 resolve).
-- Oncall ACP frames `~/.raven-main/traces/logs/acp-frames/2026-09-03/Raven-Oncall-111106482791.jsonl`:
+- Oncall ACP frames `~/.rarus-main/traces/logs/acp-frames/2026-09-03/Raven-Oncall-111106482791.jsonl`:
   19:22:40 reasoning ("the user is giving me critical feedback ... use setsid
   nohup"), 19:22:50 `ops_kill`, 19:23:11 `launch_job.sh` authored, 19:47:32 gate
   refusal, 19:38:24 / 19:47:54 / 19:57:04 off-ledger `exec` launches.
 - Job directories on the GPU machine under `/root/workspace/r1_runs/jobs/`:
   `.raven-launch.sh`, `result.json` mtimes vs `output.log` mtimes, `launch_job.sh`.
-- Campaign ledgers `~/.raven-main/workspace/subagent_sessions/raven-oncall/oncall_flow/r1-*/ledger.json`.
+- Campaign ledgers `~/.rarus-main/workspace/subagent_sessions/raven-oncall/oncall_flow/r1-*/ledger.json`.

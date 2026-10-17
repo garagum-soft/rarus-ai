@@ -1273,7 +1273,7 @@ def _telemetry_row(model: str, cost: float | None, *, cache_read: int = 0, cache
 
 @pytest.fixture()
 def telemetry(cfg, tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     tel = tmp_path / "telemetry"
     tel.mkdir()
 

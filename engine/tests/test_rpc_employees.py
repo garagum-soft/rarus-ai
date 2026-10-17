@@ -23,7 +23,7 @@ def _own_home(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     from raven.config.loader import set_config_path
 
     set_config_path(home / "config.json")

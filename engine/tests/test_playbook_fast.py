@@ -126,7 +126,7 @@ def test_the_command_line_does_a_small_task_without_planning_a_playbook(
     (home / "config.json").write_text(
         json.dumps({"subagents": {"agents": [{"name": "writer", "kind": "cli", "command": command}]}}), encoding="utf-8"
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     project = tmp_path / "project"
     project.mkdir()
 

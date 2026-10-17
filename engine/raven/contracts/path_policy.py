@@ -17,11 +17,11 @@ does not -- it joins when a consumer types against it, not before.
 """
 
 #: The environment variable that relocates raven's home. A set-but-blank
-#: value is unset (a shell profile's ``RAVEN_HOME=`` must not mean "here").
-HOME_ENV_VAR = "RAVEN_HOME"
+#: value is unset (a shell profile's ``RARUS_HOME=`` must not mean "here").
+HOME_ENV_VAR = "RARUS_HOME"
 
 #: Directory under the user's home that is the default home.
-DEFAULT_HOME_DIRNAME = ".raven"
+DEFAULT_HOME_DIRNAME = ".rarus"
 
 #: The configuration file at the home root. Its parent directory doubles as
 #: the instance data directory (``config/paths.get_data_dir``): a second
@@ -32,7 +32,7 @@ CONFIG_FILENAME = "config.json"
 #: The raw ``agents.defaults.workspace`` value that means "the default":
 #: exactly this string resolves to ``<home>/workspace`` so the workspace
 #: follows a relocated home; any other value is the user's own path.
-WORKSPACE_DEFAULT_SENTINEL = "~/.raven/workspace"
+WORKSPACE_DEFAULT_SENTINEL = "~/.rarus/workspace"
 
 __all__ = [
     "CONFIG_FILENAME",

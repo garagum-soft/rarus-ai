@@ -37,7 +37,7 @@ def fake_home(monkeypatch, tmp_path) -> Path:
     # Clear any process-wide config-path override a prior test left set, so
     # get_config_path() falls back to the patched Path.home (monkeypatch restores it).
     monkeypatch.setattr("raven.home._current_config_path", None)
-    # OAuth credentials live under ``~/.raven`` too, so the patched home covers
+    # OAuth credentials live under ``~/.rarus`` too, so the patched home covers
     # them -- but each family prefers an environment override when one is set, and
     # the suite-wide fixture sets all of them.
     for name in ("CHATGPT_TOKEN_DIR", "GITHUB_COPILOT_TOKEN_DIR", "MINIMAX_OAUTH_TOKEN_DIR"):
@@ -46,7 +46,7 @@ def fake_home(monkeypatch, tmp_path) -> Path:
 
 
 def _write_config(home: Path, payload: dict) -> None:
-    cfg_dir = home / ".raven"
+    cfg_dir = home / ".rarus"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -286,7 +286,7 @@ async def test_save_key_happy_path_writes_key(fake_home: Path) -> None:
     assert entry["slug"] == "anthropic"
     assert entry["authenticated"] is True
 
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["providers"]["anthropic"]["apiKey"] == "sk-ant-new"
 
 
@@ -299,7 +299,7 @@ async def test_save_key_custom_accepts_api_base(fake_home: Path) -> None:
         }
     )
     assert result["provider"]["slug"] == "custom"
-    cfg = json.loads((fake_home / ".raven" / "config.json").read_text())
+    cfg = json.loads((fake_home / ".rarus" / "config.json").read_text())
     assert cfg["providers"]["custom"]["apiBase"] == "https://example.test/v1"
 
 
@@ -504,7 +504,7 @@ async def test_add_endpoint_replaces_the_entry_with_the_same_label(fake_home: Pa
 
     assert [ep["label"] for ep in result["endpoints"]] == ["eu"]
     assert result["endpoints"][0]["api_base"] == "https://eu.example.test/v1"
-    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["deepseek"]
+    section = json.loads((fake_home / ".rarus" / "config.json").read_text())["providers"]["deepseek"]
     assert [ep["apiKey"] for ep in section["endpoints"]] == ["sk-new"]
 
 
@@ -855,7 +855,7 @@ async def test_save_key_configures_a_local_deployment_by_address(fake_home: Path
     result = await model_save_key({"slug": "ollama_chat", "api_base": "http://gpu-box:11434"})
 
     assert result["provider"]["slug"] == "ollama_chat"
-    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    section = json.loads((fake_home / ".rarus" / "config.json").read_text())["providers"]["ollama_chat"]
     assert section.get("apiBase") == "http://gpu-box:11434"
     assert section.get("apiKey") == "sk-leftover"
 
@@ -881,7 +881,7 @@ async def test_save_key_accepts_optional_lm_studio_key(fake_home: Path, monkeypa
     )
 
     assert result["provider"]["slug"] == "lm_studio"
-    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["lm_studio"]
+    section = json.loads((fake_home / ".rarus" / "config.json").read_text())["providers"]["lm_studio"]
     assert section["apiKey"] == "lms-token"
 
 
@@ -908,7 +908,7 @@ async def test_save_key_accepts_optional_ollama_key(fake_home: Path) -> None:
     )
 
     assert result["provider"]["slug"] == "ollama_chat"
-    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    section = json.loads((fake_home / ".rarus" / "config.json").read_text())["providers"]["ollama_chat"]
     assert section["apiKey"] == "ollama-token"
 
 
@@ -917,7 +917,7 @@ async def test_save_key_ollama_host_update_preserves_existing_key(fake_home: Pat
 
     await model_save_key({"slug": "ollama_chat", "api_base": "http://remote-ollama:11434"})
 
-    section = json.loads((fake_home / ".raven" / "config.json").read_text())["providers"]["ollama_chat"]
+    section = json.loads((fake_home / ".rarus" / "config.json").read_text())["providers"]["ollama_chat"]
     assert section["apiKey"] == "existing-token"
 
 
@@ -948,7 +948,7 @@ async def test_options_lists_the_codex_models_the_account_reports(
     )
     # Asked only of an account there is one for, so the row has to be signed in
     # before the catalogue is reached at all.
-    auth = fake_home / ".raven" / "oauth" / "chatgpt"
+    auth = fake_home / ".rarus" / "oauth" / "chatgpt"
     auth.mkdir(parents=True, exist_ok=True)
     (auth / "auth.json").write_text('{"access_token": "live"}', encoding="utf-8")
     _write_config(fake_home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-4-5"}}})
@@ -1491,7 +1491,7 @@ async def test_adding_a_model_stores_what_the_person_stated_about_it(fake_home: 
     assert label["capabilities"] == ["function-call", "reasoning"]
     assert label["input_modalities"] == ["text", "image"]
 
-    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    stored = json.loads((fake_home / ".rarus" / "config.json").read_text(encoding="utf-8"))
     overlay = stored["providers"]["hosted_vllm"]["modelOverlay"]["hosted-vllm/my-finetune-v3"]
     assert overlay["capabilities"] == ["function-call", "reasoning"]
 
@@ -1504,7 +1504,7 @@ async def test_a_tag_no_surface_can_draw_is_refused_rather_than_stored(fake_home
     with pytest.raises(ConfigValidationError):
         await model_add_model({"slug": "hosted_vllm", "model": "m", "capabilities": ["telepathy"]})
 
-    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    stored = json.loads((fake_home / ".rarus" / "config.json").read_text(encoding="utf-8"))
     assert not stored["providers"]["hosted_vllm"].get("models")
 
 
@@ -1525,7 +1525,7 @@ async def test_adding_an_id_alone_leaves_a_hand_written_overlay_alone(fake_home:
         },
     )
     await model_add_model({"slug": "hosted_vllm", "model": "hosted-vllm/mine"})
-    stored = json.loads((fake_home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    stored = json.loads((fake_home / ".rarus" / "config.json").read_text(encoding="utf-8"))
     overlay = stored["providers"]["hosted_vllm"]["modelOverlay"]["hosted-vllm/mine"]
     assert overlay["label"] == "Mine"
     assert overlay["description"] == "tuned on tickets"
@@ -1874,7 +1874,7 @@ async def test_options_carries_the_vendor_key_url(fake_home: Path) -> None:
 
 
 def _read_config(home: Path) -> dict:
-    return json.loads((home / ".raven" / "config.json").read_text(encoding="utf-8"))
+    return json.loads((home / ".rarus" / "config.json").read_text(encoding="utf-8"))
 
 
 async def test_set_fields_patches_headers_one_at_a_time_and_masks_the_reply(fake_home: Path) -> None:

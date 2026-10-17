@@ -363,7 +363,7 @@ class CheckpointService:
                         "Safe to delete; will be recreated on next agent run. "
                         'Disable via `runtime.checkpoint.policy = "never"` '
                         "in your Raven config (typically "
-                        "~/.raven/config.json, or whichever file you "
+                        "~/.rarus/config.json, or whichever file you "
                         "passed via --config).\n",
                         encoding="utf-8",
                     )

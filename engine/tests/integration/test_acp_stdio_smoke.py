@@ -38,7 +38,7 @@ def _run(stdin_bytes: bytes, *, home: Path | None = None) -> subprocess.Complete
     """Run the binary against a throwaway agent home.
 
     The home matters. ``raven acp`` builds a full engine, which starts the cron
-    service and the memory backend against whatever ``RAVEN_HOME`` names -- so a
+    service and the memory backend against whatever ``RARUS_HOME`` names -- so a
     test that inherited the developer's would run their schedules and write into
     their sessions. Pointed at a temporary directory instead, which also makes the
     run reproducible: no provider is configured there, so the engine reports a
@@ -48,7 +48,7 @@ def _run(stdin_bytes: bytes, *, home: Path | None = None) -> subprocess.Complete
     if not binary.exists():
         pytest.skip(f"raven console script not installed at {binary}")
     env = dict(os.environ)
-    env["RAVEN_HOME"] = str(home or Path(tempfile.mkdtemp(prefix="acp-smoke-")) / "raven")
+    env["RARUS_HOME"] = str(home or Path(tempfile.mkdtemp(prefix="acp-smoke-")) / "raven")
     return subprocess.run(
         [str(binary), "acp"],
         input=stdin_bytes,

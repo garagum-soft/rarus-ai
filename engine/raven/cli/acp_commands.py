@@ -77,7 +77,7 @@ Environment:
                        DEBUG file level, a client whose stderr reader
                        gives up on a line that long can deadlock this
                        process.
-  RAVEN_HOME           Move the whole instance: config, logs, runtime
+  RARUS_HOME           Move the whole instance: config, logs, runtime
                        state. --config moves it for one run.
   RAVEN_SUBAGENT       1/true/yes/on says another raven launched this
                        process to answer one task for it, which
@@ -104,7 +104,7 @@ def acp(
     config: str | None = typer.Option(
         None,
         "--config",
-        help="Config file to serve from (default: the one $RAVEN_HOME names).",
+        help="Config file to serve from (default: the one $RARUS_HOME names).",
     ),
     verbose: bool = typer.Option(
         False,

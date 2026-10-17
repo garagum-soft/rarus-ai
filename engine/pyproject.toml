@@ -678,7 +678,7 @@ type = "forbidden"
 # build artifact rather than a refactor. The set carries no exceptions: the
 # three lazy reads tracing once needed closed when its span vocabulary (the
 # provider registry and pricing table reads) moved out to raven/observability
-# and RAVEN_HOME resolution moved in to raven/home.py, so an ignore_imports
+# and RARUS_HOME resolution moved in to raven/home.py, so an ignore_imports
 # entry here would be new debt, not a carry-over.
 #
 # One type-only edge exists and is deliberate, so it is written here rather

@@ -107,7 +107,7 @@ def test_the_command_line_ideates_with_a_roster_agent(tmp_path: Path, monkeypatc
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     project = tmp_path / "project"
     project.mkdir()
     (project / "README.md").write_text("# Notes app\n", encoding="utf-8")

@@ -1,7 +1,7 @@
 """Sentinel-stack builders shared by the gateway, agent and sentinel commands.
 
 Cross-process coordination: when ``config.sentinel.enabled`` is true, a
-single JsonStateStore at ``~/.raven/sentinel/state.json`` is shared
+single JsonStateStore at ``~/.rarus/sentinel/state.json`` is shared
 across NudgePolicy / NudgeInjector / DeferManager so REPL and gateway,
 when running simultaneously, agree on quotas + pending injects + defers.
 """

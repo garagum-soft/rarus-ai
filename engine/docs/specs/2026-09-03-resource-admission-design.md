@@ -290,8 +290,8 @@ nothing.
 
 - run11 refusal at 19:47:32 ("GPU machine runs 1 job(s) at a time ... 0 is/are
   already on it") followed by the off-ledger `exec` launch at 19:47:54 --
-  `~/.raven-main/traces/logs/acp-frames/2026-09-03/Raven-Oncall-111106482791.jsonl`.
-- Registry rows: `~/.raven-main/connections.json` (`conn_gpu_a800` `concurrency: 1`,
+  `~/.rarus-main/traces/logs/acp-frames/2026-09-03/Raven-Oncall-111106482791.jsonl`.
+- Registry rows: `~/.rarus-main/connections.json` (`conn_gpu_a800` `concurrency: 1`,
   `device: "2 x NVIDIA A800-SXM4-80GB"`).
 - Existing width accounting: `oncall_flow/openfoam_backend.py` (`cores_used`,
   `processor*` count), `oncall_flow/budget.py` (`accumulate(spans, overlap)`),

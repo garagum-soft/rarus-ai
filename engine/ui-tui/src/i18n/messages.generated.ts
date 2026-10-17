@@ -184,7 +184,7 @@ export const SLASH_TEXT: Record<Locale, Record<string, SlashText>> = {
     },
     reload: {
       name: '重载环境',
-      help: '重新读取 ~/.raven/.env 到运行中的网关'
+      help: '重新读取 ~/.rarus/.env 到运行中的网关'
     },
     browser: {
       name: '浏览器',
@@ -2009,7 +2009,7 @@ export const UI_TEXT: Record<Locale, Record<string, string>> = {
     'gui.panel.key_stored': 'API key (stored - blank keeps it)',
     'gui.panel.name_blank': 'name cannot be blank',
     'gui.panel.press_d_again': 'press d again to delete',
-    'gui.panel.custom_agents': 'custom agents: web UI /subagents or ~/.raven/config.json',
+    'gui.panel.custom_agents': 'custom agents: web UI /subagents or ~/.rarus/config.json',
     'gui.panel.server_addr': 'Server address',
     'gui.panel.console': 'console',
     'gui.panel.last_turn': 'Last turn',
@@ -2717,7 +2717,7 @@ export const UI_TEXT: Record<Locale, Record<string, string>> = {
     'gui.onb.err_generic': 'Something went wrong: {err}',
     'gui.onb.finish': 'Finish',
     'gui.onb.key_ph': 'API key',
-    'gui.onb.key_s': 'The key is stored locally in ~/.raven/config.json and never leaves this machine.',
+    'gui.onb.key_s': 'The key is stored locally in ~/.rarus/config.json and never leaves this machine.',
     'gui.onb.key_t': 'Connect {name}',
     'gui.onb.local_s': 'Point Raven at your local deployment.',
     'gui.onb.model_s': 'You can switch anytime with /model.',
@@ -5171,7 +5171,7 @@ export const UI_TEXT: Record<Locale, Record<string, string>> = {
     'gui.panel.key_stored': 'API key（已保存 · 留空则不变）',
     'gui.panel.name_blank': '名称不能为空',
     'gui.panel.press_d_again': '再按一次 d 删除',
-    'gui.panel.custom_agents': '自定义子智能体：网页端 /subagents 或 ~/.raven/config.json',
+    'gui.panel.custom_agents': '自定义子智能体：网页端 /subagents 或 ~/.rarus/config.json',
     'gui.panel.server_addr': '服务器地址',
     'gui.panel.console': '控制台',
     'gui.panel.last_turn': '上一轮',
@@ -5863,7 +5863,7 @@ export const UI_TEXT: Record<Locale, Record<string, string>> = {
     'gui.onb.err_generic': '出了点问题：{err}',
     'gui.onb.finish': '完成',
     'gui.onb.key_ph': 'API key',
-    'gui.onb.key_s': '密钥只保存在本机 ~/.raven/config.json，不会上传。',
+    'gui.onb.key_s': '密钥只保存在本机 ~/.rarus/config.json，不会上传。',
     'gui.onb.key_t': '连接 {name}',
     'gui.onb.local_s': '填写你本地部署的服务地址。',
     'gui.onb.model_s': '之后随时可以用 /model 更换。',

@@ -183,7 +183,7 @@ describe('execLabel', () => {
   })
 
   it('drops plumbing and repeated programs', () => {
-    expect(execLabel('ls ~/.raven/ | head -20; find ~/.raven -maxdepth 1 -type d')).toBe('ls -> find')
+    expect(execLabel('ls ~/.rarus/ | head -20; find ~/.rarus -maxdepth 1 -type d')).toBe('ls -> find')
     // `|| which hermes` is the same intent, not a second stage.
     expect(execLabel('which raven 2>/dev/null || which hermes 2>/dev/null')).toBe('which raven')
     // A bare `head file` is the work itself, so it survives as the first stage.

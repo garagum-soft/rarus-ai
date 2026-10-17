@@ -61,14 +61,14 @@ def workspace(tmp_path: Path) -> Path:
 
     ``set_config_path`` moves the runtime subdirectories (cron among them), which
     covers every handler that derives its path from the config -- but not one
-    that does not: ``settings_usage`` reads ``Path.home() / ".raven" /
+    that does not: ``settings_usage`` reads ``Path.home() / ".rarus" /
     "telemetry"`` directly, so ``HOME`` is moved for it separately. Without
     that, the test scanned the developer's own telemetry and validated whatever
     happened to be there.
 
     The teardown restores whatever was there before rather than clearing it.
     Clearing does not mean "no config": it means the developer's own
-    ``~/.raven/config.json``, so a later test in the same process reads their
+    ``~/.rarus/config.json``, so a later test in the same process reads their
     language setting and their workspace. That is a cross-file failure whose
     cause is in this file, and it only shows up when collection order puts this
     file first.
@@ -157,7 +157,7 @@ async def test_settings_usage_reads_what_the_default_tracker_writes(
     """The writer/reader pairing, driven end to end.
 
     It regressed once: ``install_from_config``'s callers pointed UsageTracker
-    at ``workspace/.token_wise`` while this reader scans ``RAVEN_HOME/telemetry``,
+    at ``workspace/.token_wise`` while this reader scans ``RARUS_HOME/telemetry``,
     so default-on usage tracking wrote rows the settings page reported as
     ``calls=0``. The pairing holds only while both sides resolve through the
     same default, which is what writing through one and reading through the
@@ -444,7 +444,7 @@ async def test_session_usage(workspace: Path, tmp_path: Path, monkeypatch: pytes
     unpriced = _check("session.usage", await session_mod.session_usage({"session_id": "tui:none"}))
     assert unpriced.calls == 0 and unpriced.cost_usd is None
 
-    telemetry = home / ".raven" / "telemetry"
+    telemetry = home / ".rarus" / "telemetry"
     telemetry.mkdir(parents=True)
     row = {
         "schema_version": 2,
@@ -616,7 +616,7 @@ async def test_usage_reports_actual_cost_and_marks_legacy_and_missing(workspace,
     from raven.rpc.methods.console import settings_usage
     from raven.token_wise.usage_tracker import UsageTracker
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     tracker = UsageTracker()
     await tracker.after_llm_call(
         {}, UsageSnapshot(model="paid", input_tokens=10, cost_usd=0.5, cache_read_tokens=0, cache_write_tokens=2)
@@ -660,7 +660,7 @@ async def test_usage_persisted_cost_round_trip(workspace, tmp_path, monkeypatch,
     from raven.rpc.methods.console import settings_usage
     from raven.token_wise.usage_tracker import UsageTracker
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     tracker = UsageTracker()
     await tracker.after_llm_call({}, UsageSnapshot(model="reported", cost_usd=cost))
     result = await settings_usage({"days": 1})
@@ -676,7 +676,7 @@ async def test_task_usage_includes_children_and_images_once(workspace, tmp_path,
     from raven.token_wise import usage_context
     from raven.token_wise.usage_tracker import UsageTracker
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.delenv("RAVEN_USAGE_ROOT_SESSION", raising=False)
     tracker = UsageTracker()
     await tracker.after_llm_call({}, UsageSnapshot(model="main", session_key="task-a", cost_usd=0.1))

@@ -59,7 +59,7 @@ def test_a_device_name_is_paired_once(tmp_path: Path) -> None:
 async def test_the_gateway_pairs_over_http_and_then_accepts_the_device_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.auth.pairing import default_store
     from raven.rpc.transports.ws import WsGateway
 
@@ -91,7 +91,7 @@ async def test_the_gateway_pairs_over_http_and_then_accepts_the_device_token(
 
 
 def test_the_command_line_pairs_lists_and_revokes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.auth.pairing import default_store
     from raven.cli.commands import app
 

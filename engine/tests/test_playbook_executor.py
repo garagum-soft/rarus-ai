@@ -1134,7 +1134,7 @@ def _secret_pg_spec():
 
 
 async def test_a_stored_secret_stands_in_for_one_the_caller_did_not_supply(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.playbook.credentials import set_secret_param
 
     spec = _secret_pg_spec()
@@ -1152,7 +1152,7 @@ async def test_an_unset_secret_is_a_reminder_not_a_gap(tmp_path, monkeypatch):
     # A gap is closed by the caller collecting the value in the conversation,
     # which is the one path a secret may not take. The run goes ahead, the server
     # the secret fills is handed over without it, and the reply says where to set it.
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     spec = _secret_pg_spec()
     tool = FakeDagTool()
     plan = await PlaybookExecutor(dag_tool=tool).execute(spec, {})
@@ -1165,7 +1165,7 @@ async def test_an_unset_secret_is_a_reminder_not_a_gap(tmp_path, monkeypatch):
 
 
 async def test_a_supplied_secret_outranks_the_stored_one(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.playbook.credentials import set_secret_param
 
     spec = _secret_pg_spec()
@@ -1179,7 +1179,7 @@ async def test_a_supplied_secret_outranks_the_stored_one(tmp_path, monkeypatch):
 async def test_a_secret_stored_after_the_dispatch_reaches_the_next_read(tmp_path, monkeypatch):
     # The hand-off is re-rendered on every read, which is what lets a node
     # that is continued after the credential landed dial with it.
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.playbook.credentials import set_secret_param
 
     spec = _secret_pg_spec()
@@ -1193,7 +1193,7 @@ async def test_a_secret_stored_after_the_dispatch_reaches_the_next_read(tmp_path
 
 
 async def test_a_stored_value_for_a_non_secret_param_is_not_read_back(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     from raven.playbook.credentials import set_secret_param
 
     spec = _dag_spec(params={"topic": ParamSpec(type="string", required=True, description="what to scan")})

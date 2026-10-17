@@ -98,7 +98,7 @@ all four via the shared `plugin_discovery_sources()` helper, which the
 | Priority | Source | Location | Audience |
 |---:|---|---|---|
 | 4 | `BUNDLED` | `raven/plugin/memory/<id>/` | first-party, ships with raven |
-| 3 | `USER` | `~/.raven/plugins/<id>/` | local drop-in |
+| 3 | `USER` | `~/.rarus/plugins/<id>/` | local drop-in |
 | 2 | `PROJECT` | `./.raven/plugins/<id>/`, and every root in `plugins.dirs` | per-project |
 | 1 | `ENTRY_POINTS` | pip pkg, group `raven.plugins` | third-party distribution |
 
@@ -241,7 +241,7 @@ importing it ahead of selection.
 | Channel | Where | "Install" | Dependencies |
 |---|---|---|---|
 | pip + entry_points (recommended) | standalone package | `uv add <pkg>` | package declares its own (e.g. `mem0ai`) |
-| user drop-in | `~/.raven/plugins/<id>/` | copy the dir | user must provide deps |
+| user drop-in | `~/.rarus/plugins/<id>/` | copy the dir | user must provide deps |
 | project drop-in | `./.raven/plugins/<id>/` | checked into project | user must provide deps |
 
 ### Example: a mem0 backend via pip + entry_points

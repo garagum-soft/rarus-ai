@@ -394,7 +394,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
             None,
             "--workspace",
             "-w",
-            help="Root for per-channel working directories (default: ~/.raven/tmp)",
+            help="Root for per-channel working directories (default: ~/.rarus/tmp)",
         ),
         home: str | None = typer.Option(
             None,
@@ -443,7 +443,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
 
         # load_runtime_config must run FIRST: it calls set_config_path() so
         # that subsequent load_raven_config() reads from --config, not the
-        # default ~/.raven/config.json. Otherwise skill_forge / sentinel
+        # default ~/.rarus/config.json. Otherwise skill_forge / sentinel
         # from --config are silently ignored.
         config_path_arg = config
         config = load_runtime_config(config, home=home)

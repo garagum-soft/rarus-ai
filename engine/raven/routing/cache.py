@@ -21,7 +21,7 @@ from raven.routing.types import ModelBenchmark, ModelTaskScore
 
 CACHE_VERSION = 1
 CACHE_TTL_S = 6 * 60 * 60  # 6 hours
-_DEFAULT_CACHE_PATH = Path.home() / ".raven" / "routing" / "benchmark-cache.json"
+_DEFAULT_CACHE_PATH = Path.home() / ".rarus" / "routing" / "benchmark-cache.json"
 _SNAPSHOT_PATH = Path(__file__).parent / "snapshot.json"
 
 

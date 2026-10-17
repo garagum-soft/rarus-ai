@@ -154,7 +154,7 @@ async def test_the_background_lane_stats_nothing(tool, tmp_path, monkeypatch):
     """A detached command finishes long after this result is gone, so there is
     no 'after' to compare against -- and the watch must not read the files
     either, which is what the stub proves by never being called."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     (tmp_path / "gone.txt").write_text("gone\n")
     called: list[str] = []
     monkeypatch.setattr(ExecTool, "_removal_watch", lambda self, command, cwd: called.append(command) or {})

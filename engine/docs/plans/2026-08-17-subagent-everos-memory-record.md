@@ -1310,7 +1310,7 @@ EOF
 
 - [ ] **Step 1: Declare an identity on a real fork**
 
-Add to the `Raven-Code` entry in `~/.raven/config.json` via the supported API
+Add to the `Raven-Code` entry in `~/.rarus/config.json` via the supported API
 (never by hand -- see the project's install notes):
 
 ```python

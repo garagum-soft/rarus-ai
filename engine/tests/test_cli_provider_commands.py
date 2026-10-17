@@ -138,7 +138,7 @@ def test_a_sign_in_leaves_its_credential_readable_only_by_its_owner(
     for env in ("CHATGPT_TOKEN_DIR", "GITHUB_COPILOT_TOKEN_DIR", "MINIMAX_OAUTH_TOKEN_DIR"):
         monkeypatch.delenv(env, raising=False)
 
-    paths = [tmp_path / ".raven" / "oauth" / name for name in written]
+    paths = [tmp_path / ".rarus" / "oauth" / name for name in written]
 
     def _write_them_wide_open() -> None:
         for path in paths:
@@ -176,7 +176,7 @@ def test_the_oauth_directory_is_owner_only_even_if_it_already_existed(
     from raven.config.paths import get_oauth_dir
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    loose = tmp_path / ".raven" / "oauth"
+    loose = tmp_path / ".rarus" / "oauth"
     loose.mkdir(parents=True)
     loose.chmod(0o755)
 

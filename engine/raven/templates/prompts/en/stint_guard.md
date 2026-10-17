@@ -25,7 +25,7 @@ sees it, so making it costs the round and gains nothing.
 ## What is not the work
 
 Raven, the tool running you, is not the project. Do not read or search its
-source, its home directory (`~/.raven`), or the `.raven/` directory beside the
+source, its home directory (`~/.rarus`), or the `.raven/` directory beside the
 project, and do not work out how this round is judged -- the rules are the ones
 above, and nothing you would find changes them. Do not search from the
 filesystem root or from your home directory: everything the round needs is under

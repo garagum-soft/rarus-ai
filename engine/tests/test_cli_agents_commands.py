@@ -6,7 +6,7 @@ agent folder. Pinned here: the dry-run tree, the three conflict refusals
 the instantiation itself (schema-valid manifest, compilable python, zero
 token residue), and the two landing spots.
 
-Every test isolates the raven home through ``RAVEN_HOME``: ``agents_root()``
+Every test isolates the raven home through ``RARUS_HOME``: ``agents_root()``
 takes the first existing tree, so a real home would shadow everything a test
 builds (the S1 spike measured exactly that).
 """
@@ -49,7 +49,7 @@ TOKENS = ("my-agent", "My-Agent", "my_agent", "MY_AGENT")
 def raven_home(tmp_path: Path, monkeypatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return home
 
 
@@ -954,7 +954,7 @@ def test_a_home_path_with_whitespace_registers_with_a_quoted_command(tmp_path: P
     one token."""
     home = tmp_path / "space y" / "home"
     home.mkdir(parents=True)
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
 
     r = runner.invoke(app, ["agents", "new", "demo-agent", "--register", "--no-smoke"])
 
@@ -1162,7 +1162,7 @@ def test_the_generated_installer_on_older_raven_checks_paths_before_registering(
 
     if spaced in {"folder", "cwd"}:
         raven_home = tmp_path / "my home"
-        monkeypatch.setenv("RAVEN_HOME", str(raven_home))
+        monkeypatch.setenv("RARUS_HOME", str(raven_home))
     result = runner.invoke(app, ["agents", "new", "demo-agent", "--no-smoke"])
     assert result.exit_code == 0, result.output
     target = raven_home / "agents" / "demo-agent"

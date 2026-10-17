@@ -133,7 +133,7 @@ class TestTheMainPath:
             yield
 
     async def test_one_run_builds_both_repositories_and_merges_each_branch(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
         api, web = _repo(tmp_path / "api", "api"), _repo(tmp_path / "web", "web")
         python = sys.executable.replace("\\", "/")
         tool = SubAgentDagTool(

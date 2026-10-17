@@ -1,7 +1,7 @@
 """Seven-step onboarding wizard: provider → sandbox → channel → memory → web → sub-agents → import.
 
 Goal: get a new user from ``pip install`` to a working agent in a few
-minutes, without ever opening ``~/.raven/config.json`` or
+minutes, without ever opening ``~/.rarus/config.json`` or
 ``~/.everos/raven/everos.toml``.
 
 Steps:
@@ -12,7 +12,7 @@ Steps:
   4. EverOS long-term memory (optional; llm/embedding required once enabled,
      rerank/multimodal optional)
   5. Web access (optional; pick a search vendor and a page reader and give
-     each its key; keys are mirrored to ~/.raven/env so sub-agents inherit them)
+     each its key; keys are mirrored to ~/.rarus/env so sub-agents inherit them)
   6. Sub-agents shipped in this checkout (optional; per folder, own key or
      this raven's LLM)
   7. Cold-start import from other AI tools (optional)
@@ -332,7 +332,7 @@ def _handle_existing_config(*, reset: bool, yes: bool, non_interactive: bool) ->
 
 
 def _bootstrap_empty_config() -> None:
-    """Make sure ``~/.raven/config.json`` + workspace dir exist before we patch.
+    """Make sure ``~/.rarus/config.json`` + workspace dir exist before we patch.
 
     We seed the user-facing extension defaults (memory / plugins / skillForge),
     including ``memory.backend = "everos"`` (the schema default). EverOS

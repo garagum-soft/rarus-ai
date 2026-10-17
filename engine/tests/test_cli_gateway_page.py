@@ -20,7 +20,7 @@ from tests.test_rpc_bootstrap import _FakeCron, _FakeLoop
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
     """An agent home of our own, so nothing here touches the developer's."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.setattr("raven.cli._gateway_page._last_credentials", None)
     return tmp_path / "home"
 

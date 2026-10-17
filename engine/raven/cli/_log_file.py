@@ -6,7 +6,7 @@ instead of stderr. They differ only in filename, whether a live stderr sink is
 kept, and retention — all parameters.
 
 The log directory follows :func:`get_logs_dir`, so a ``--config`` instance
-writes its logs next to its own config rather than always to ``~/.raven``.
+writes its logs next to its own config rather than always to ``~/.rarus``.
 
 Env vars:
     RAVEN_CLI_DEBUG=1  — additionally mirror DEBUG+ to stderr.

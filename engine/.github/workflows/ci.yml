@@ -320,7 +320,7 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/bin
           UV_CACHE_DIR: ${{ runner.temp }}/cache
-          RAVEN_HOME: ${{ runner.temp }}/home
+          RARUS_HOME: ${{ runner.temp }}/home
         run: |
           cat install.sh | sh
           "$UV_TOOL_BIN_DIR/raven" --version
@@ -334,7 +334,7 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}\tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}\bin
           UV_CACHE_DIR: ${{ runner.temp }}\cache
-          RAVEN_HOME: ${{ runner.temp }}\home
+          RARUS_HOME: ${{ runner.temp }}\home
         run: |
           Get-Content install.ps1 -Raw | Invoke-Expression
           & "$env:UV_TOOL_BIN_DIR\raven.exe" --version
@@ -352,7 +352,7 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}\tools-ps51
           UV_TOOL_BIN_DIR: ${{ runner.temp }}\bin-ps51
           UV_CACHE_DIR: ${{ runner.temp }}\cache
-          RAVEN_HOME: ${{ runner.temp }}\home-ps51
+          RARUS_HOME: ${{ runner.temp }}\home-ps51
         run: |
           Get-Content install.ps1 -Raw | Invoke-Expression
           & "$env:UV_TOOL_BIN_DIR\raven.exe" --version

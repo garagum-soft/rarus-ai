@@ -140,7 +140,7 @@ def test_agents_root_is_none_for_an_sdist_wheel(tmp_path: Path, monkeypatch: pyt
     # "nothing to do", not as an error.
     package = tmp_path / "site-packages" / "raven"
     package.mkdir(parents=True)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "no-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "no-home"))
     monkeypatch.setattr("raven.__file__", str(package / "__init__.py"))
     assert subagent_setup.agents_root() is None
 
@@ -148,7 +148,7 @@ def test_agents_root_is_none_for_an_sdist_wheel(tmp_path: Path, monkeypatch: pyt
 def test_agents_root_finds_the_tree_of_a_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "raven").mkdir()
     (tmp_path / "agents").mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "no-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "no-home"))
     monkeypatch.setattr("raven.__file__", str(tmp_path / "raven" / "__init__.py"))
     assert subagent_setup.agents_root() == tmp_path / "agents"
 
@@ -744,16 +744,16 @@ def _host_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, providers: dic
     either would test the stub instead of the rule that a key in `custom` is not
     an OpenRouter key.
 
-    Through `RAVEN_HOME` rather than `set_config_path`, which writes a module
+    Through `RARUS_HOME` rather than `set_config_path`, which writes a module
     global that outlives the test and then wins over the environment for the
     rest of the session -- `test_config_loader.py` asserts exactly that
     precedence, so leaving one behind breaks it. `Path.home` moves too:
-    credentials are looked for under `~/.raven` whatever the config path says.
+    credentials are looked for under `~/.rarus` whatever the config path says.
     """
-    home = tmp_path / ".raven"
+    home = tmp_path / ".rarus"
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.json").write_text(json.dumps({"providers": providers}), encoding="utf-8")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     for name in ("CHATGPT_TOKEN_DIR", "GITHUB_COPILOT_TOKEN_DIR", "MINIMAX_OAUTH_TOKEN_DIR"):
         monkeypatch.delenv(name, raising=False)
@@ -812,7 +812,7 @@ def test_an_unsigned_oauth_provider_is_not_lendable(tmp_path: Path, monkeypatch:
 
 def test_a_signed_in_oauth_host_is_offered_its_own_llm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _host_config(tmp_path, monkeypatch, {"openai_codex": {}})
-    home = tmp_path / ".raven"
+    home = tmp_path / ".rarus"
     (home / "config.json").write_text(
         json.dumps(
             {

@@ -345,7 +345,7 @@ def register(app: typer.Typer) -> None:
 
         # load_runtime_config must run FIRST: it calls set_config_path() so
         # that subsequent load_raven_config() reads from --config, not the
-        # default ~/.raven/config.json. Otherwise skill_forge / sentinel
+        # default ~/.rarus/config.json. Otherwise skill_forge / sentinel
         # from --config are silently ignored.
         config = load_runtime_config(config, home=home)
         ec_config = load_raven_config()
@@ -391,7 +391,7 @@ def register(app: typer.Typer) -> None:
             set_session_mode(session_id, permission_mode)
 
         # Build Sentinel stack if enabled — same wiring gateway uses, so the two
-        # processes share state via ~/.raven/sentinel/state.json. Discover
+        # processes share state via ~/.rarus/sentinel/state.json. Discover
         # triggers are dispatcher-side: only the gateway has real channel
         # adapters, so this process must NOT drain them or feishu/slack triggers
         # get consumed without delivery.

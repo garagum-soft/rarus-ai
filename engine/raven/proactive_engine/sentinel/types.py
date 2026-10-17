@@ -187,7 +187,7 @@ class TaskOption:
 class PendingDecision:
     """A discovery menu the user has been asked to pick from.
 
-    Persisted to ``~/.raven/sentinel/pending_decisions.json`` until the
+    Persisted to ``~/.rarus/sentinel/pending_decisions.json`` until the
     user replies (consumed) or the TTL expires. One active decision per
     (channel, to) pair — a fresh discovery run on the same address
     supersedes the old one.

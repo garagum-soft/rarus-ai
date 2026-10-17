@@ -9,7 +9,7 @@ before any work is done -- twice, ending both turns with a promise instead of th
 briefing the node was asked for.
 
 The signal is an environment variable the host injects into every child it
-launches, alongside the ``RAVEN_HOME`` it already sends. What the two paths
+launches, alongside the ``RARUS_HOME`` it already sends. What the two paths
 withhold is one shared set, asserted equal here so neither can drift.
 """
 

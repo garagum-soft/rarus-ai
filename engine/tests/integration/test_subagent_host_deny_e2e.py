@@ -140,7 +140,7 @@ def isolated(tmp_path, monkeypatch):
     home.mkdir()
     user = tmp_path / "user"
     user.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setenv("HOME", str(user))
     monkeypatch.setenv("USERPROFILE", str(user))
     for spec in PROVIDERS:

@@ -128,7 +128,7 @@ class SkillHubClient:
         self._base = endpoint.rstrip("/")
         self._api_key = api_key
         self._source = source
-        self._cache_dir = cache_dir or (Path.home() / ".raven" / "skills" / "hub")
+        self._cache_dir = cache_dir or (Path.home() / ".rarus" / "skills" / "hub")
         self._owns_client = client is None
         self._timeout = httpx.Timeout(timeout_s)
         self._client = client or httpx.AsyncClient(timeout=self._timeout)

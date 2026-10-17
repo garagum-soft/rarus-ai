@@ -80,7 +80,7 @@ def print_probe_troubleshooting(provider: str | None) -> None:
             f"  [dim]·[/dim] [cyan]raven provider get {provider}[/cyan] — inspect what's actually stored on disk"
         )
     console.print(
-        "  [dim]·[/dim] Check the model id in [cyan]~/.raven/config.json[/cyan] "
+        "  [dim]·[/dim] Check the model id in [cyan]~/.rarus/config.json[/cyan] "
         "under [cyan]agents.defaults.model[/cyan] — it should match a model the "
         "provider serves."
     )

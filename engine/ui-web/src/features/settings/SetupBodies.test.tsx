@@ -474,7 +474,7 @@ describe('the wizard step-done predicates', () => {
   ): Promise<void> {
     setGateway({
       call: async (method: string) => {
-        if (method === 'settings.get') return { settings: { tools, agents: { defaults: agentsDefaults } }, config_path: '~/.raven/config.json' }
+        if (method === 'settings.get') return { settings: { tools, agents: { defaults: agentsDefaults } }, config_path: '~/.rarus/config.json' }
         if (method === 'model.options') return { providers, model: '' }
         throw new Error(`unmocked ${method}`)
       },

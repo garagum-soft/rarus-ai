@@ -304,7 +304,7 @@ export default class App extends PureComponent<Props, State> {
         // Diagnostic dump of terminal-capability detection state, guarded by
         // RAVEN_TUI_DEBUG_TERMINFO=1. Useful when modifier+enter behavior
         // regresses on a new terminal/transport stack — set the env var,
-        // launch the TUI, then inspect ~/.raven/logs/tui-node-diag.log.
+        // launch the TUI, then inspect ~/.rarus/logs/tui-node-diag.log.
         if (process.env.RAVEN_TUI_DEBUG_TERMINFO === '1') {
           try {
             const diagPath = join(homedir(), '.raven', 'logs', 'tui-node-diag.log')

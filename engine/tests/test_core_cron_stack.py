@@ -536,7 +536,7 @@ async def test_an_ordinary_reminder_is_untouched_by_the_instance_branch(spine):
 def test_every_process_opens_the_one_cron_store(monkeypatch, tmp_path) -> None:
     from raven.core.cron_stack import build_cron_service
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     service = build_cron_service(allowed_channels={"tui"})
 
     assert service.store_path == tmp_path / "cron" / "jobs.json"

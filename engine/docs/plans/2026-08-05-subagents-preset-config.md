@@ -1222,7 +1222,7 @@ On `/subagents`:
    typed.
 2. Open `claude_code`. No required field; the command sits inside Advanced,
    pre-filled, and is editable.
-3. Save `claude_code` untouched, then confirm `~/.raven/config.json` gained a
+3. Save `claude_code` untouched, then confirm `~/.rarus/config.json` gained a
    `subagents.thirdParty` entry whose `command` matches the preset.
 4. Add a custom CLI agent and confirm the full field set still appears with Name
    and Type editable.

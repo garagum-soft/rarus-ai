@@ -1,6 +1,6 @@
 """Attach ``raven tui`` to a gateway that already hosts the page.
 
-When ``~/.raven/serve.json`` names a live ``raven gateway`` (the recorded pid
+When ``~/.rarus/serve.json`` names a live ``raven gateway`` (the recorded pid
 holds the gateway lock) and its ``/health`` answers as ``raven-serve``, the TUI
 parent does not build a second AgentLoop. It becomes a relay: the Node client
 keeps its existing transport (newline-JSON over the loopback TCP socket the

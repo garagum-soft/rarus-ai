@@ -33,7 +33,7 @@ pytestmark = pytest.mark.integration
 def home(tmp_path):
     if not raven_binary().exists():
         pytest.skip(f"raven console script not installed at {raven_binary()}")
-    return {"RAVEN_HOME": str(tmp_path / "home")}
+    return {"RARUS_HOME": str(tmp_path / "home")}
 
 
 @pytest.fixture
@@ -321,7 +321,7 @@ class TestSessionLoad:
 
         from raven.session.manager import SessionManager
 
-        manager = SessionManager(Path(home["RAVEN_HOME"]) / "workspace")
+        manager = SessionManager(Path(home["RARUS_HOME"]) / "workspace")
         session = manager.get_or_create("acp:planted")
         session.metadata["workdir"] = str(project)
         session.messages.extend(

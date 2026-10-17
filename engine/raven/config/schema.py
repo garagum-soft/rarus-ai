@@ -36,7 +36,7 @@ class ChannelBase(Base):
         default="",
         description=(
             "Absolute path this channel's chats read and write files in. Leave empty for the default, "
-            "~/.raven/tmp/<channel>. Must not be the agent home directory or anything inside its "
+            "~/.rarus/tmp/<channel>. Must not be the agent home directory or anything inside its "
             "memory, skills or session trees."
         ),
     )
@@ -813,7 +813,7 @@ class GatewayPageConfig(Base):
     On by default: one engine then serves the page and the IM channels, so
     what the browser sees is what the channels talk to. The page follows the
     `raven serve` port policy (``port``, probing forward when taken), writes
-    ``~/.raven/serve.json``, and `raven web` attaches to it. Disable to keep
+    ``~/.rarus/serve.json``, and `raven web` attaches to it. Disable to keep
     the gateway channel-only and run `raven serve` standalone instead.
     """
 
@@ -1118,7 +1118,7 @@ WebSearchProvider = Literal["serper", "anysearch", "serpapi", "tavily", "exa", "
 WebFetchProvider = Literal["jina", "anysearch", "tavily", "exa", "firecrawl"]
 
 #: The bare environment variable each web vendor's tool falls back to when the
-#: config slot is empty, and the name ``~/.raven/env`` mirrors the slot out as.
+#: config slot is empty, and the name ``~/.rarus/env`` mirrors the slot out as.
 WEB_VENDOR_ENV_VARS: dict[str, str] = {
     "serper": "SERPER_API_KEY",
     "anysearch": "ANYSEARCH_API_KEY",
@@ -1376,7 +1376,7 @@ class MCPServerConfig(Base):
     # turning a server off does not cost the user their re-authorisation.
     enabled: bool = True
     # How this server proves who it is. ``oauth`` means a browser flow whose
-    # tokens land under ~/.raven/credentials/mcp/, which is why the manager has
+    # tokens land under ~/.rarus/credentials/mcp/, which is why the manager has
     # to distinguish it: an apikey server that fails is broken, an oauth server
     # that fails may just be waiting for a human.
     auth: Literal["none", "apikey", "oauth"] = "none"
@@ -1476,7 +1476,7 @@ class ToolsConfig(Base):
     work there (raven-code, raven-oncall) turn it on in their own config."""
     code_map: bool = False
     """Serve ``code_map``: a ranked outline of a large code base and where a name
-    is defined, from an index kept under ``<RAVEN_HOME>/codemap/``. It reads only
+    is defined, from an index kept under ``<RARUS_HOME>/codemap/``. It reads only
     what ``read_file`` may. Off by default because it is one more tool in every
     request the model sees; ``raven codemap`` serves the same map from the shell
     either way."""
@@ -2600,7 +2600,7 @@ class Config(BaseSettings):
     def workspace_path(self) -> Path:
         """Get expanded workspace path.
 
-        The default follows ``RAVEN_HOME`` rather than being the literal it is
+        The default follows ``RARUS_HOME`` rather than being the literal it is
         declared as. Sessions, uploads, exports and the skill pool all live here,
         so an instance pointed at another home that kept this one would quietly
         read and write the first installation's conversations -- which is what a

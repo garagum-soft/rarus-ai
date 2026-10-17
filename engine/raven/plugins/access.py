@@ -9,7 +9,7 @@ a plugin cannot ask for less than it takes.
 Its *role* is where it came from -- who put it on this machine:
 
 - ``builtin`` -- shipped inside raven: everything.
-- ``installed`` -- put there by the operator (``~/.raven/plugins``, a
+- ``installed`` -- put there by the operator (``~/.rarus/plugins``, a
   ``plugins.dirs`` root, a pip-installed entry point): every contribution
   except ``schedule``, which is new power (code running with nobody's turn
   behind it) and is granted per plugin.

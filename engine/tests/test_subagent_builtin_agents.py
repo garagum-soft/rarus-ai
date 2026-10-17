@@ -273,11 +273,11 @@ class TestAnAcpRowCanReplaceTheSeed:
 
     def test_env_carries_the_host_raven_home(self, monkeypatch, tmp_path) -> None:
         home = tmp_path / "host"
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
 
         merged = merge_builtin_seeds([self._acp()])
 
-        assert merged[0].env["RAVEN_HOME"] == str(home)
+        assert merged[0].env["RARUS_HOME"] == str(home)
 
     def test_a_declared_command_description_and_env_are_kept(self) -> None:
         from raven.config.schema import ThirdPartyAcpSubagentConfig
@@ -288,7 +288,7 @@ class TestAnAcpRowCanReplaceTheSeed:
                 "kind": "acp",
                 "command": "custom acp",
                 "description": "mine",
-                "env": {"RAVEN_HOME": "/elsewhere"},
+                "env": {"RARUS_HOME": "/elsewhere"},
             }
         )
 
@@ -296,10 +296,10 @@ class TestAnAcpRowCanReplaceTheSeed:
 
         assert merged[0].command == "custom acp"
         assert merged[0].description == "mine"
-        assert merged[0].env == {"RAVEN_HOME": "/elsewhere"}
+        assert merged[0].env == {"RARUS_HOME": "/elsewhere"}
 
     def test_a_host_on_a_named_config_hands_that_config_to_the_child(self, monkeypatch, tmp_path) -> None:
-        """``RAVEN_HOME`` cannot carry a host started with ``--config``.
+        """``RARUS_HOME`` cannot carry a host started with ``--config``.
 
         That flag sets a path inside the loader and never touches the
         environment, so the child derived its config from a home the host was not
@@ -307,17 +307,17 @@ class TestAnAcpRowCanReplaceTheSeed:
         """
         cfg = tmp_path / "instance" / "config.json"
         home = tmp_path / "host"
-        monkeypatch.setenv("RAVEN_HOME", str(home))
+        monkeypatch.setenv("RARUS_HOME", str(home))
         monkeypatch.setattr("raven.home._current_config_path", cfg)
         monkeypatch.setattr("raven.agent.subagent.builtin_agents.host_raven_acp_command", lambda: "/usr/bin/raven acp")
 
         merged = merge_builtin_seeds([self._acp()])
 
         assert commands.command_argv(merged[0].command) == ["/usr/bin/raven", "acp", "--config", str(cfg)]
-        assert merged[0].env["RAVEN_HOME"] == str(home)
+        assert merged[0].env["RARUS_HOME"] == str(home)
 
     def test_a_host_reading_its_own_homes_config_adds_no_flag(self, monkeypatch) -> None:
-        monkeypatch.setenv("RAVEN_HOME", "/srv/raven")
+        monkeypatch.setenv("RARUS_HOME", "/srv/raven")
         monkeypatch.setattr("raven.home._current_config_path", Path("/srv/raven/config.json"))
         monkeypatch.setattr("raven.agent.subagent.builtin_agents.host_raven_acp_command", lambda: "/usr/bin/raven acp")
 
@@ -330,7 +330,7 @@ class TestAnAcpRowCanReplaceTheSeed:
         config path into someone else's argv is not this function's business."""
         from raven.config.schema import ThirdPartyAcpSubagentConfig
 
-        monkeypatch.setenv("RAVEN_HOME", "/srv/raven")
+        monkeypatch.setenv("RARUS_HOME", "/srv/raven")
         monkeypatch.setattr("raven.home._current_config_path", tmp_path / "config.json")
         row = ThirdPartyAcpSubagentConfig.model_validate(
             {"name": GENERIC_AGENT, "kind": "acp", "command": "custom acp"}
@@ -341,24 +341,24 @@ class TestAnAcpRowCanReplaceTheSeed:
         assert merged[0].command == "custom acp"
 
     def test_a_row_that_named_its_own_home_is_left_alone(self, monkeypatch, tmp_path) -> None:
-        """An explicit ``env.RAVEN_HOME`` is the row asking for a different
-        instance. ``--config`` outranks ``RAVEN_HOME`` in the child, so appending
+        """An explicit ``env.RARUS_HOME`` is the row asking for a different
+        instance. ``--config`` outranks ``RARUS_HOME`` in the child, so appending
         the host's would serve that row the host's model and provider under the
         row's own name.
         """
         from raven.config.schema import ThirdPartyAcpSubagentConfig
 
-        monkeypatch.delenv("RAVEN_HOME", raising=False)
+        monkeypatch.delenv("RARUS_HOME", raising=False)
         monkeypatch.setattr("raven.home._current_config_path", tmp_path / "host" / "config.json")
         monkeypatch.setattr("raven.agent.subagent.builtin_agents.host_raven_acp_command", lambda: "/usr/bin/raven acp")
         row = ThirdPartyAcpSubagentConfig.model_validate(
-            {"name": GENERIC_AGENT, "kind": "acp", "command": "", "env": {"RAVEN_HOME": "/child-home"}}
+            {"name": GENERIC_AGENT, "kind": "acp", "command": "", "env": {"RARUS_HOME": "/child-home"}}
         )
 
         merged = merge_builtin_seeds([row])
 
         assert merged[0].command == "/usr/bin/raven acp"
-        assert merged[0].env["RAVEN_HOME"] == "/child-home"
+        assert merged[0].env["RARUS_HOME"] == "/child-home"
 
     def test_a_row_that_named_its_own_home_is_left_alone_on_a_default_host(self, monkeypatch) -> None:
         """The same row, with the host on its own default config -- which is the
@@ -368,11 +368,11 @@ class TestAnAcpRowCanReplaceTheSeed:
         """
         from raven.config.schema import ThirdPartyAcpSubagentConfig
 
-        monkeypatch.delenv("RAVEN_HOME", raising=False)
+        monkeypatch.delenv("RARUS_HOME", raising=False)
         monkeypatch.setattr("raven.home._current_config_path", None)
         monkeypatch.setattr("raven.agent.subagent.builtin_agents.host_raven_acp_command", lambda: "/usr/bin/raven acp")
         row = ThirdPartyAcpSubagentConfig.model_validate(
-            {"name": GENERIC_AGENT, "kind": "acp", "command": "", "env": {"RAVEN_HOME": "/child-home"}}
+            {"name": GENERIC_AGENT, "kind": "acp", "command": "", "env": {"RARUS_HOME": "/child-home"}}
         )
 
         merged = merge_builtin_seeds([row])
@@ -382,7 +382,7 @@ class TestAnAcpRowCanReplaceTheSeed:
     def test_a_config_path_with_a_space_stays_one_argv_token(self, monkeypatch, command_platform) -> None:
         root = PureWindowsPath("C:/Users/me") if command_platform == "nt" else PurePosixPath("/srv")
         cfg = root / "my configs" / "config.json"
-        monkeypatch.setenv("RAVEN_HOME", "/srv/raven")
+        monkeypatch.setenv("RARUS_HOME", "/srv/raven")
         monkeypatch.setattr("raven.home._current_config_path", cfg)
         monkeypatch.setattr("raven.agent.subagent.builtin_agents.host_raven_acp_command", lambda: "/usr/bin/raven acp")
 

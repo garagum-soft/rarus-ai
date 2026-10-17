@@ -64,9 +64,9 @@ def host_config() -> dict:
     """The host raven's config, or an empty dict when there is none to read.
 
     Read as JSON through the path paper's answer. ``raven_home()`` here is the
-    host's home because the host passes its ``RAVEN_HOME`` to a launcher when
-    it has one set, and with none set both normally resolve ``~/.raven``; a
-    ``RAVEN_HOME`` the login profile exports while the host has none sends the
+    host's home because the host passes its ``RARUS_HOME`` to a launcher when
+    it has one set, and with none set both normally resolve ``~/.rarus``; a
+    ``RARUS_HOME`` the login profile exports while the host has none sends the
     launcher elsewhere.
     """
     try:
@@ -423,7 +423,7 @@ def _outside(path: Path, home: Path) -> bool:
 
     Asked of the filesystem, not only of the spelling: ``resolve()`` does not
     fold case, APFS default volumes do, so a home spelled as a case variant of
-    ``RAVEN_HOME`` would pass a string comparison while naming the very tree
+    ``RARUS_HOME`` would pass a string comparison while naming the very tree
     being handed over -- the alias-blind fail-open an adversarial review
     reproduced live. Every EXISTING ancestor of the candidate is compared with
     ``os.path.samefile`` (st_dev/st_ino, which sees through case variants and
@@ -466,11 +466,11 @@ def _creatable(path: Path) -> bool:
 def _instance_tag() -> str:
     """A name for THIS raven instance, for a path shared with its siblings.
 
-    Two instances on one machine are told apart by their ``RAVEN_HOME``, and
+    Two instances on one machine are told apart by their ``RARUS_HOME``, and
     the sibling fallback in :func:`product_acp_home` puts its directory beside
     the host Agent home -- a place their siblings can reach. Without the
     instance in the name, two instances under one parent would share one
-    engine home, which is the isolation ``RAVEN_HOME`` exists to give. The
+    engine home, which is the isolation ``RARUS_HOME`` exists to give. The
     directory's own name for legibility, and a digest of the resolved path
     because two instances can be named the same under different parents.
     """
@@ -505,7 +505,7 @@ def product_acp_home(product: str, *, override: str | None = None) -> Path:
     directory, which is never handed out as a working directory.
 
     Checked against the CONFIGURED host Agent home (:func:`host_agent_home`):
-    an operator who points ``agents.defaults.workspace`` at ``$RAVEN_HOME``
+    an operator who points ``agents.defaults.workspace`` at ``$RARUS_HOME``
     -- or any ancestor of it -- puts the data directory back inside the very
     tree being handed over, and the refusal returns. When the default lands
     inside it, the engine is homed beside the host's Agent home instead,

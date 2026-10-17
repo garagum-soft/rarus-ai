@@ -44,7 +44,7 @@ def plugin_auth(
     """Run (or refresh) the browser OAuth flow for an MCP server.
 
     Connects once with a throwaway registry: the flow opens your browser,
-    tokens land under ~/.raven/credentials/mcp/, and any running gateway
+    tokens land under ~/.rarus/credentials/mcp/, and any running gateway
     picks them up on its next connect.
     """
     import asyncio
@@ -250,7 +250,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--config",
             "-c",
-            help="Path to config file (default: ~/.raven/config.json)",
+            help="Path to config file (default: ~/.rarus/config.json)",
         ),
         verbose: bool = typer.Option(
             False,
@@ -313,7 +313,7 @@ def _render_plugin_table(
         console.print(
             "[yellow]No plugins discovered.[/yellow] The everos backend is "
             "its own distribution — install [bold]everos-memory[/bold] — "
-            "or drop a manifest under [bold]~/.raven/plugins/[/bold].",
+            "or drop a manifest under [bold]~/.rarus/plugins/[/bold].",
         )
         return
 

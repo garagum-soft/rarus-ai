@@ -52,7 +52,7 @@ export function shellReady(): void {
    The page cannot fix this by itself and that is deliberate -- minting a nonce
    takes the shared secret in an X-Raven-Token header and is never
    cookie-callable, so no page script can issue its own credential. The desktop
-   shell can: the secret is in ~/.raven/serve.json, which it reads and the page
+   shell can: the secret is in ~/.rarus/serve.json, which it reads and the page
    cannot. So in the app we ask the shell to redo the launch handshake; in a
    browser tab there is nobody to ask, and the banner stands.
 

@@ -130,7 +130,7 @@ class KNNModelRouter:
         # read-only repo asset). Keyed by endpoint + memory path so a different
         # embedder or memory file gets its own cache.
         key = hashlib.sha1(f"{self._embed_url}|{Path(path).resolve()}".encode()).hexdigest()[:16]
-        d = Path.home() / ".raven" / "knn_embcache"
+        d = Path.home() / ".rarus" / "knn_embcache"
         try:
             d.mkdir(parents=True, exist_ok=True)
         except Exception:

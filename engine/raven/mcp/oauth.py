@@ -6,7 +6,7 @@ dynamic client registration, PKCE, token refresh). What it delegates to the
 host, and what this module provides:
 
 - token/client persistence  -> :class:`FileTokenStorage`
-  (``~/.raven/credentials/mcp/<server>.json``, 0600, atomic writes)
+  (``~/.rarus/credentials/mcp/<server>.json``, 0600, atomic writes)
 - opening the browser        -> :class:`_Flow` (also notifies the GUI over
   the ``oauth.pending`` / ``oauth.done`` events)
 - receiving the redirect     -> a module-level pending map keyed by the

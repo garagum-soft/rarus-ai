@@ -5831,7 +5831,7 @@ class PlaybooksGraphSaveResult(PlaybooksGraphCheckResult):
 
 class Employee(_Strict):
     name: str
-    folder: str = Field(..., description="The folder under <RAVEN_HOME>/employees.")
+    folder: str = Field(..., description="The folder under <RARUS_HOME>/employees.")
     role: str = Field(..., description="What it does: the dispatching model reads it to decide when to hand it work.")
     owns: str
     provider: str = Field(..., description="Empty: the host's provider.")

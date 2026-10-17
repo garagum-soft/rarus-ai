@@ -3170,7 +3170,7 @@ class TurnPathMixin:
                     # binding is not set here -- `workdir.bind` wraps the main
                     # turn body further down, which this branch returns before
                     # reaching -- so it is resolved rather than read. Omitting it
-                    # fell back to agent home (`~/.raven/workspace`), which is
+                    # fell back to agent home (`~/.rarus/workspace`), which is
                     # raven's memory and skills rather than the work: a direct
                     # chat about the checkout the user is sitting in ran `git
                     # status` against raven's own home and answered about that.

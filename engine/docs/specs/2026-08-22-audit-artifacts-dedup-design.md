@@ -7,7 +7,7 @@ to the branch it was designed on.
 
 ## Goal
 
-`~/.raven/traces/logs/audit-artifacts/` is append-only and nothing ever folds
+`~/.rarus/traces/logs/audit-artifacts/` is append-only and nothing ever folds
 or removes what it writes. On the host it was measured on it holds 8.1 GB in
 603,629 files after one month. Make the writer store each distinct payload
 once, and give the operator a command that applies the same folding to what is
@@ -116,7 +116,7 @@ maintained. Note that the entry in `_blobs/` is itself a link, so a blob with
 `<kind>/<day>/` path that pointed at it does not on its own free its blocks.
 Reclaiming those is the sweep in section 3, step 8.
 
-Hard links are available: the host's `~/.raven` is ext4 with a 4096-byte block
+Hard links are available: the host's `~/.rarus` is ext4 with a 4096-byte block
 size, and a probe confirmed `links=2` on a shared inode.
 
 ### 2. Write path
@@ -154,7 +154,7 @@ Properties this relies on:
   one `stat` and one `link` instead of a full write. `turn.output` goes from
   42,641 writes to one write and 42,640 links.
 - **Concurrent writers are safe.** The gateway, the TUI, and each sub-agent
-  share one `~/.raven`. A blob is published from a temp file with `os.link`,
+  share one `~/.rarus`. A blob is published from a temp file with `os.link`,
   which fails rather than overwriting if another writer got there first, so the
   blob's inode is never swapped out from under a link already handed to a span.
   The temp name carries a `uuid4`, not just the pid: two writers *in one

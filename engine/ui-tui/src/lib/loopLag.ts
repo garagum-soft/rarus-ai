@@ -20,9 +20,9 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-// RAVEN_HOME first, matching history.ts and perfPane.tsx: a second install
+// RARUS_HOME first, matching history.ts and perfPane.tsx: a second install
 // keeps its own state dir and must not write into the first one's.
-const STATE_HOME = process.env.RAVEN_HOME?.trim() || join(homedir(), '.raven')
+const STATE_HOME = process.env.RARUS_HOME?.trim() || join(homedir(), '.raven')
 const STALL_LOG = process.env.RAVEN_TUI_STALL_LOG?.trim() || join(STATE_HOME, 'tui-stalls.log')
 
 /** Below this, a late tick is ordinary scheduling noise rather than a stall. */

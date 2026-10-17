@@ -267,7 +267,7 @@ Three consequences, each stated in the UI rather than hidden:
 `timeout`, applied to both branches for symmetry (only the cli branch has a
 registry). The probe passes `InstanceRegistry(path=<tmpdir>/probe.json)`, so the
 handle binding a stateful create commits lands in a throwaway file and never
-touches `~/.raven/subagent_instances.json`.
+touches `~/.rarus/subagent_instances.json`.
 
 Extending the factory rather than constructing `CliAgentBackend` directly in
 `probe.py` is deliberate: a duplicated field list would drift the moment a field

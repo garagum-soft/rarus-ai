@@ -72,7 +72,7 @@ async def test_design_acp_refuses_symlink_before_model_or_tools(tmp_path: Path, 
             ),
             cwd=str(repo),
             env={
-                "RAVEN_HOME": str(host),
+                "RARUS_HOME": str(host),
                 "DESIGN_STATE_ROOT": str(tmp_path / "state"),
                 "DESIGN_ACP_HOME": str(tmp_path / "agent-home"),
                 "RAVEN_TRACING_DIR": str(tmp_path / "traces"),

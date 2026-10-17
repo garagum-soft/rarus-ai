@@ -202,7 +202,7 @@ BUILTIN_AGENTS + role_pool.py            playbook 自己的第 4 份, 与上面�
 
 ## 3. 注册表设计
 
-住 `~/.raven/config.json` 的 `subagents.agents[]`（读时兼容旧键 `thirdParty`）。一行 = 一个可调用的 agent。
+住 `~/.rarus/config.json` 的 `subagents.agents[]`（读时兼容旧键 `thirdParty`）。一行 = 一个可调用的 agent。
 
 ### 3.1 公共字段
 

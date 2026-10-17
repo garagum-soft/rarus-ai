@@ -22,7 +22,7 @@ from raven.agent.tools.shell import ExecTool
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     return tmp_path / "home"
 
 

@@ -30,9 +30,7 @@ SCANNED_SUFFIXES = {".sh", ".ps1", ".yml", ".yaml", ".py"}
 # The trunk's own export sites. Named so a rename fails the scan instead of
 # silently leaving the renamed site unchecked: a contract that stops seeing
 # its subject keeps passing while describing nothing.
-TRUNK_SITES = (
-    ".github/workflows/release.yml",
-)
+TRUNK_SITES = (".github/workflows/release.yml",)
 
 
 def _tracked_files() -> list[Path]:

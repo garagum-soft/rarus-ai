@@ -9,7 +9,7 @@ Measured after the work, on the same store: the session list is 0.045s for
 57 KB and one session 0.13s for 102 KB, against 3.4s and 171 MB for the single
 payload it replaced.
 
-Every number below was measured on one real store: `~/.raven/traces` at 3.2 GB,
+Every number below was measured on one real store: `~/.rarus/traces` at 3.2 GB,
 323k artifact files, 270,335 span records across 38 log files, with a raven
 actively writing to it.
 

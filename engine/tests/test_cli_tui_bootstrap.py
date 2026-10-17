@@ -177,7 +177,7 @@ def test_find_node_discovers_windows_private_runtime(monkeypatch, tmp_path):
     node.chmod(node.stat().st_mode | stat.S_IXUSR)
 
     monkeypatch.setattr(tui_commands, "_is_windows", lambda: True)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path))
     monkeypatch.delenv("RAVEN_NODE", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.setenv("PATH", "")
@@ -209,7 +209,7 @@ def test_find_node_skips_below_min_and_scans_all_path(monkeypatch, tmp_path):
 
     monkeypatch.delenv("RAVEN_NODE", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "no-runtime"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "no-runtime"))
     monkeypatch.setenv("PATH", f"{old.parent}{os.pathsep}{new.parent}")
 
     node_path, version = tui_commands.find_node()
@@ -235,7 +235,7 @@ def test_find_node_reports_below_min_when_nothing_qualifies(monkeypatch, tmp_pat
 
     monkeypatch.delenv("RAVEN_NODE", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "no-runtime"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "no-runtime"))
     monkeypatch.setenv("PATH", str(old_dir))
 
     node_path, version = tui_commands.find_node()

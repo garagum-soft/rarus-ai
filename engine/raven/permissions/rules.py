@@ -94,7 +94,7 @@ DEFAULT_ALLOW_TOOLS: frozenset[str] = frozenset(
         "find",
         "glob",
         # Reads what grep and read_file may, behind the same fence; the one thing it
-        # writes is its own index under <RAVEN_HOME>/codemap/, never the project.
+        # writes is its own index under <RARUS_HOME>/codemap/, never the project.
         "code_map",
         # Reads a repository's CI from the GitHub API, the reach web_fetch already
         # has; it pushes, re-runs and writes nothing.

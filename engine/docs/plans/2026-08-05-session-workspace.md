@@ -4,7 +4,7 @@
 > executed against, the per-session design that was later withdrawn. Two things
 > it specifies are no longer true: the gateway isolates per **channel**, not per
 > session, and there is no `<agent home>/ws` — a channel's directory comes from
-> `channels.<name>.workspace`, defaulting to `~/.raven/tmp/<channel>`. See
+> `channels.<name>.workspace`, defaulting to `~/.rarus/tmp/<channel>`. See
 > [the design doc](../specs/2026-08-05-session-workspace-design.md) for what
 > actually shipped.
 
@@ -12,7 +12,7 @@
 
 **Goal:** Give every session its own working directory that the leader and all its sub-agents share, defaulting to the launch directory on `raven tui` / `raven agent` and to `<agent home>/ws/<channel>/<chat_id>/` on `raven gateway`, with a manual override.
 
-**Architecture:** One new module (`raven/agent/workdir.py`) owns the resolution rules and a per-turn `ContextVar`. `AgentLoop` binds that variable once per turn next to the existing per-turn tool-context wiring. Path-aware tools read it at call time and fall back to their constructor value; components that outlive the turn (sub-agents, DAG runs) capture it explicitly at call time. Agent home (`~/.raven/workspace`) stays global and keeps holding user memory, skills, transcripts and the memory store.
+**Architecture:** One new module (`raven/agent/workdir.py`) owns the resolution rules and a per-turn `ContextVar`. `AgentLoop` binds that variable once per turn next to the existing per-turn tool-context wiring. Path-aware tools read it at call time and fall back to their constructor value; components that outlive the turn (sub-agents, DAG runs) capture it explicitly at call time. Agent home (`~/.rarus/workspace`) stays global and keeps holding user memory, skills, transcripts and the memory store.
 
 **Tech Stack:** Python 3.12+, `uv`, pytest, Typer (CLI), FastAPI (webui service), React + TypeScript (webui frontend).
 
@@ -27,7 +27,7 @@
 - CLI tests go in the existing `tests/test_cli_<module>_commands.py`. Do not create new per-feature CLI test files. (AGENTS.md section 5.1)
 - **Before Task 1, confirm the branch base with the user** and cut a branch named `feat/session_workspace` from it. Do not start editing on `main`. (AGENTS.md section 2.2)
 - The commit step inside each task is authorized by the user starting execution of this plan. Nothing here authorizes a push or a PR; ask separately. (AGENTS.md sections 3.4, 3.6)
-- Agent home is `config.workspace_path` (`~/.raven/workspace` by default) and must keep holding user memory, skills, transcripts, the Skill Hub cache and the memory store. No task moves any of those.
+- Agent home is `config.workspace_path` (`~/.rarus/workspace` by default) and must keep holding user memory, skills, transcripts, the Skill Hub cache and the memory store. No task moves any of those.
 
 ---
 
@@ -1897,7 +1897,7 @@ same change that coins it.
 
 Read `CONTEXT.md:450-470` first. Replace the single "Workspace" entry with three:
 
-- **Agent home** — the per-agent filesystem tree (default `~/.raven/workspace`)
+- **Agent home** — the per-agent filesystem tree (default `~/.rarus/workspace`)
   holding user memory, skills, session transcripts, the Skill Hub cache and the
   memory store. Seeded by `sync_workspace_templates()`. One per agent, never per
   session. Set by `--home` or `agents.defaults.workspace`.
@@ -1952,6 +1952,6 @@ Run before proposing the PR:
 - [ ] `uv run pytest tests/test_cli_agent_loop_parity.py -v` passes with no new `LEDGER` entry, proving all three entrypoints pass `workdir_resolver`
 - [ ] `grep -rn "allowed_dir=" raven/ tests/ --include=*.py` returns nothing
 - [ ] `cd /tmp && uv run --directory <repo> raven agent -w /tmp/scratch --help` shows the new help text
-- [ ] Gateway: start it, send a web message, confirm the file lands in `~/.raven/workspace/ws/web/<chat_id>/` and not at the agent-home root
+- [ ] Gateway: start it, send a web message, confirm the file lands in `~/.rarus/workspace/ws/web/<chat_id>/` and not at the agent-home root
 - [ ] Gateway: set an override through the chat UI, restart the gateway, confirm the session still works in the overridden directory
 - [ ] `make check-large-files` passes (AGENTS.md section 7)

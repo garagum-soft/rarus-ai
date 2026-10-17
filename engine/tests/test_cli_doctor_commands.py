@@ -29,7 +29,7 @@ def isolated_raven_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     """`doctor` now inspects the installation on every run, which reads -- and
     can clear -- the upgrade marker in the agent home. Left unisolated, this
     file would report on, and tidy up after, a real upgrade in flight."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "agent-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "agent-home"))
     return tmp_path / "agent-home"
 
 
@@ -375,10 +375,10 @@ def _run_doctor_subprocess(home: Path) -> tuple[str, int]:
     import subprocess
     import sys
 
-    # RAVEN_HOME is dropped rather than passed through: the point of this helper
-    # is a sandbox HOME, and an inherited RAVEN_HOME (the isolation fixture sets
+    # RARUS_HOME is dropped rather than passed through: the point of this helper
+    # is a sandbox HOME, and an inherited RARUS_HOME (the isolation fixture sets
     # one) would out-rank it and send the subprocess to a different config.
-    env = {k: v for k, v in os.environ.items() if k != "RAVEN_HOME"}
+    env = {k: v for k, v in os.environ.items() if k != "RARUS_HOME"}
     env.update({"HOME": str(home), "COLUMNS": "250"})
     r = subprocess.run(
         [sys.executable, "-m", "raven", "doctor"],
@@ -393,9 +393,9 @@ def _run_doctor_subprocess(home: Path) -> tuple[str, int]:
 
 def _write_home_config(tmp_path: Path, name: str, body: str | None) -> Path:
     home = tmp_path / name
-    (home / ".raven").mkdir(parents=True)
+    (home / ".rarus").mkdir(parents=True)
     if body is not None:
-        (home / ".raven" / "config.json").write_text(body, encoding="utf-8")
+        (home / ".rarus" / "config.json").write_text(body, encoding="utf-8")
     return home
 
 
@@ -520,7 +520,7 @@ class TestTheInstallationSection:
 
 
 def _pinned_config(home: Path, **defaults: object) -> Path:
-    cfg = home / ".raven" / "config.json"
+    cfg = home / ".rarus" / "config.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         json.dumps(
@@ -642,7 +642,7 @@ def test_doctor_reports_a_config_that_names_no_provider(tmp_path) -> None:
     from raven.cli.doctor_commands import _inspect_config_health
     from raven.config.loader import load_config
 
-    cfg = tmp_path / ".raven" / "config.json"
+    cfg = tmp_path / ".rarus" / "config.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         json.dumps({"agents": {"defaults": {"model": "some/unclaimed-model", "provider": ""}}}),
@@ -673,7 +673,7 @@ def test_doctor_reads_a_leftover_auto_as_unset_not_as_a_typo(tmp_path) -> None:
     from raven.cli.doctor_commands import _inspect_config_health
     from raven.config.loader import load_config
 
-    cfg = tmp_path / ".raven" / "config.json"
+    cfg = tmp_path / ".rarus" / "config.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         json.dumps({"agents": {"defaults": {"model": "some/unclaimed-model", "provider": "auto"}}}),

@@ -1163,7 +1163,7 @@ describe('SubagentsHub', () => {
 
     const frame = h.frame()
     expect(frame).toContain('/subagents')
-    expect(frame).toContain('~/.raven/config.json')
+    expect(frame).toContain('~/.rarus/config.json')
 
     h.unmount()
   })

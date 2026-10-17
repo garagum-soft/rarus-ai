@@ -137,15 +137,15 @@ def in_state_dir(resolved: Path, workspace: str | Path, *also_written: str | Pat
 
     ``workspace`` is agent home, not a session's working directory. The two
     exemptions are derived from it, and both exist for one reason: they are
-    where the agent itself writes. The workspace lives *at* ``~/.raven/workspace``
-    by default, and a turn's working directory at ``~/.raven/tmp/<channel>`` -- a
+    where the agent itself writes. The workspace lives *at* ``~/.rarus/workspace``
+    by default, and a turn's working directory at ``~/.rarus/tmp/<channel>`` -- a
     sibling of the workspace since agent home and the working directory were
     split apart. Exempting only the first left the second denied, which is every
     artifact a chat has produced since that split: the page drew the delivery and
     then refused to open it. Anchoring on the working directory instead broke
-    the other way: the derived exemptions then covered ``~/.raven/tmp/<channel>``
+    the other way: the derived exemptions then covered ``~/.rarus/tmp/<channel>``
     and a sibling that does not exist, and every file the DAG runner writes under
-    ``~/.raven/workspace/sessions/`` -- a sub-agent's report among them -- read
+    ``~/.rarus/workspace/sessions/`` -- a sub-agent's report among them -- read
     as state. The state directory's secrets (``config.json``, ``oauth/``,
     ``serve.json``) are siblings of both, never inside either.
 
@@ -157,7 +157,7 @@ def in_state_dir(resolved: Path, workspace: str | Path, *also_written: str | Pat
     ``serve.json`` through it.
 
     Two roots rather than one, because two are in use and they do not always
-    agree: ``RAVEN_HOME`` moves ``serve.json`` and the runtime dir, while the
+    agree: ``RARUS_HOME`` moves ``serve.json`` and the runtime dir, while the
     credential store hangs off ``get_config_path().parent``. Unset they are the
     same directory; set, a fence anchored on either one leaves the other's OAuth
     tokens as ordinary paths.
@@ -188,7 +188,7 @@ def resolve_readable(raw: str, *, workspace: Path | None = None) -> Path:
     state-directory fence is anchored on agent home regardless, because its
     exemptions are derived from where the agent writes, and a working directory
     handed to it in that role turned every sub-agent report under
-    ``~/.raven/workspace/sessions/`` into a refusal.
+    ``~/.rarus/workspace/sessions/`` into a refusal.
 
     Raises:
         ValueError: the request names nothing.

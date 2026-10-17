@@ -47,7 +47,7 @@ lsof -nP -iTCP:$PORT -sTCP:LISTEN && { echo "port busy"; exit 1; }
 ```
 
 - Prerequisite: the person running this holds working API keys for DeepSeek,
-  OpenRouter and Gemini in their own `~/.raven/config.json` (the prior run's
+  OpenRouter and Gemini in their own `~/.rarus/config.json` (the prior run's
   host had the same three). Nothing else is taken from that file.
 - Seed `$RV/config.json` from those three sections with their `models`,
   overlays, headers and protocol overrides stripped and the table below put
@@ -55,7 +55,7 @@ lsof -nP -iTCP:$PORT -sTCP:LISTEN && { echo "port busy"; exit 1; }
 
 ```bash
 jq -n --argjson p "$(jq '.providers | {deepseek, openrouter, gemini}
-    | with_entries(.value |= del(.models, .modelOverlay, .extraHeaders, .modelProtocols))' ~/.raven/config.json)" '
+    | with_entries(.value |= del(.models, .modelOverlay, .extraHeaders, .modelProtocols))' ~/.rarus/config.json)" '
   {language: "zh",
    providers: ($p
      | .deepseek.models   = ["deepseek-v4-pro", "deepseek-v4-flash"]
@@ -81,7 +81,7 @@ jq -n --argjson p "$(jq '.providers | {deepseek, openrouter, gemini}
 - Build the page the served process reads: in `ui-web/`,
   `npm ci && npm run build && python3 build.py`.
 - Start the gateway from a neutral directory, never from the repository:
-  `(cd "$(mktemp -d)" && RAVEN_HOME="$RV" raven serve --port $PORT & echo $! > "$RV/serve.pid")`,
+  `(cd "$(mktemp -d)" && RARUS_HOME="$RV" raven serve --port $PORT & echo $! > "$RV/serve.pid")`,
   under the shell's `trap ... EXIT` and the POSIX watchdog of the machine
   rules; confirm `lsof -tiTCP:$PORT -sTCP:LISTEN` equals `cat "$RV/serve.pid"`.
 - Sign in through the token, never through `raven web`:
@@ -97,8 +97,8 @@ playwright-cli open "http://127.0.0.1:$PORT/auth#$NONCE"
   reply is the owning layer for `kind` and `gateway`, not a second opinion:
 
 ```bash
-RPC()  { RAVEN_HOME="$RV" uv run --quiet python -c "import asyncio,json; from raven.rpc.methods.model import $1 as f; print(json.dumps(asyncio.run(f($2))))"; }
-RPC2() { RAVEN_HOME="$RV" uv run --quiet python -c "import asyncio,json; from $1 import $2 as f; print(json.dumps(asyncio.run(f($3))))"; }
+RPC()  { RARUS_HOME="$RV" uv run --quiet python -c "import asyncio,json; from raven.rpc.methods.model import $1 as f; print(json.dumps(asyncio.run(f($2))))"; }
+RPC2() { RARUS_HOME="$RV" uv run --quiet python -c "import asyncio,json; from $1 import $2 as f; print(json.dumps(asyncio.run(f($3))))"; }
 RPC model_options '{}'            > "$RV/options.json"
 RPC model_fetch_models '{"slug":"openrouter"}' > "$RV/fetch_openrouter.json"
 # a section another module owns, e.g. the EverOS roles (raven/rpc/methods/console.py):
@@ -250,7 +250,7 @@ account for it.
 - A count in the report that was typed, not computed from `options.json` or
   `fetch_openrouter.json`.
 - A case run against the operator's own gateway on 18792, or with the
-  operator's `~/.raven` as `RAVEN_HOME`.
+  operator's `~/.rarus` as `RARUS_HOME`.
 - A typed-id case whose id happens to be in the vendor's live list (then the
   row is a normal row, not the typed row); check the reply first.
 - A skipped case marked green.

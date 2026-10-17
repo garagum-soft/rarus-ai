@@ -375,7 +375,7 @@ def test_a_gpu_row_with_no_device_count_is_admitted_by_job_count_not_by_cores():
 
 def _rendered_config(tmp_path, monkeypatch):
     """A sub-agent's shape: its own config in a state directory of its own, and
-    the host's home handed down as RAVEN_HOME."""
+    the host's home handed down as RARUS_HOME."""
     import raven.home as home
 
     state = tmp_path / "state"
@@ -383,7 +383,7 @@ def _rendered_config(tmp_path, monkeypatch):
     rendered = state / ".config.rendered.json"
     rendered.write_text("{}")
     monkeypatch.setattr(home, "_current_config_path", rendered)
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     monkeypatch.delenv(connections.CONNECTIONS_ENV, raising=False)
     # What the host overlays on every child it launches (``subagent_role_env``).
     monkeypatch.setenv("RAVEN_SUBAGENT", "1")

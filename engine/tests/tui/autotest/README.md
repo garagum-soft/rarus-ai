@@ -119,12 +119,12 @@ Constraints worth knowing:
   so `-m "two words"` loses its quotes. Type slash commands into the TUI
   instead, which exercises the fuller path anyway.
 - **`HOME` is the only isolation knob** for a destructive test (`env_set({"HOME":
-  str(tmp_path)})`); everos honours neither `RAVEN_HOME` nor XDG.
+  str(tmp_path)})`); everos honours neither `RARUS_HOME` nor XDG.
 
 ## Cost
 
 `test_e2e_raven_tui_chat.py` runs live model turns (four per full run) against
-whatever provider `~/.raven/config.json` names. Everything else is free.
+whatever provider `~/.rarus/config.json` names. Everything else is free.
 
 ## Exit codes (`python -m tests.tui.autotest`)
 

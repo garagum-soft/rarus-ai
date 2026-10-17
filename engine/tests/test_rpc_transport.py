@@ -327,7 +327,7 @@ def test_raven_state_dir_is_refused_even_when_the_workspace_is_not_restricted(
     (home / "nested").mkdir(parents=True)
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
     (home / "nested" / "credentials.json").write_text("{}")
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(tmp_path, restrict=False))
 
     for target in (home / "serve.json", home / "nested" / "credentials.json"):
@@ -340,10 +340,10 @@ def test_the_credential_store_is_refused_when_raven_home_points_elsewhere(
 ) -> None:
     """The two state roots do not always agree, and both must be fenced.
 
-    ``RAVEN_HOME`` moves serve.json and the tui runtime dir. It does not move
+    ``RARUS_HOME`` moves serve.json and the tui runtime dir. It does not move
     the credential store: ``mcp_oauth._credentials_dir()`` hangs off
-    ``get_config_path().parent``. Anchored on RAVEN_HOME alone, setting it left
-    ~/.raven/credentials/mcp/<server>.json -- OAuth access and refresh tokens --
+    ``get_config_path().parent``. Anchored on RARUS_HOME alone, setting it left
+    ~/.rarus/credentials/mcp/<server>.json -- OAuth access and refresh tokens --
     as an ordinary path, served to any cookie holder with
     ``restrict_to_workspace`` off. Anchored on the data dir alone, serve.json
     would be the one exposed instead.
@@ -362,7 +362,7 @@ def test_the_credential_store_is_refused_when_raven_home_points_elsewhere(
     creds.mkdir(parents=True)
     (creds / "github.json").write_text(json.dumps({"refresh_token": "r3fresh"}))
 
-    monkeypatch.setenv("RAVEN_HOME", str(raven_home))
+    monkeypatch.setenv("RARUS_HOME", str(raven_home))
     monkeypatch.setattr(paths_module, "get_data_dir", lambda: data_dir)
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(tmp_path, restrict=False))
 
@@ -378,7 +378,7 @@ def test_an_ordinary_file_outside_the_workspace_still_reads_when_unrestricted(
     restriction off, a project file elsewhere on disk is still viewable."""
     from raven.rpc import files as files_module
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "raven-home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "raven-home"))
     elsewhere = tmp_path.parent / "notes.md"
     elsewhere.write_text("# hi")
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(tmp_path, restrict=False))
@@ -389,7 +389,7 @@ def test_an_ordinary_file_outside_the_workspace_still_reads_when_unrestricted(
 def test_the_default_workspace_is_exempt_from_the_state_dir_fence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The default workspace lives AT ``~/.raven/workspace`` -- inside the state
+    """The default workspace lives AT ``~/.rarus/workspace`` -- inside the state
     directory -- so the fence as first written denied every file the agent
     itself had produced. The secrets the fence exists for (config.json, oauth/,
     serve.json) are all siblings of the workspace, never inside it."""
@@ -400,7 +400,7 @@ def test_the_default_workspace_is_exempt_from_the_state_dir_fence(
     ws.mkdir(parents=True)
     (ws / "report.md").write_text("# produced by the agent")
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(ws, restrict=False))
 
     assert resolve_readable(str(ws / "report.md")) == (ws / "report.md").resolve()
@@ -412,7 +412,7 @@ def test_the_turn_working_directory_is_exempt_from_the_state_dir_fence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A turn does not write in the workspace: agent home and the working
-    directory were split apart, and a turn now runs in ``~/.raven/tmp/<channel>``
+    directory were split apart, and a turn now runs in ``~/.rarus/tmp/<channel>``
     -- a sibling of the workspace, inside the same state root. A carve-out for
     the workspace alone therefore denied every artifact a chat produced, which
     is the bug the workspace carve-out exists to prevent, one directory over.
@@ -426,7 +426,7 @@ def test_the_turn_working_directory_is_exempt_from_the_state_dir_fence(
     workdir.mkdir(parents=True)
     (workdir / "report.md").write_text("# delivered by the agent")
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(ws, restrict=False))
 
     assert resolve_readable(str(workdir / "report.md")) == (workdir / "report.md").resolve()
@@ -452,7 +452,7 @@ def test_a_working_directory_root_that_contains_the_state_root_earns_no_exemptio
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
     ws = tmp_path / "project"
     ws.mkdir()
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(ws, restrict=False))
 
     with pytest.raises(PermissionError):
@@ -465,9 +465,9 @@ def test_a_session_workdir_does_not_move_the_fence_off_agent_home(
     """``/file`` resolves against the session's working directory when the page
     names a session. That directory anchors relative paths; it must not anchor
     the state-dir fence, whose exemptions are derived from agent home. Handed
-    the working directory in that role, the fence exempted ``~/.raven/tmp/tui``
+    the working directory in that role, the fence exempted ``~/.rarus/tmp/tui``
     and a sibling that does not exist, and refused every file the DAG runner
-    writes under ``~/.raven/workspace/sessions/`` -- a sub-agent's report among
+    writes under ``~/.rarus/workspace/sessions/`` -- a sub-agent's report among
     them -- while the page had just drawn it as a delivery. The secrets stay
     refused under the same call."""
     from raven.rpc import files as files_module
@@ -481,7 +481,7 @@ def test_a_session_workdir_does_not_move_the_fence_off_agent_home(
     workdir = home / "tmp" / "tui"
     workdir.mkdir(parents=True)
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(ws, restrict=False))
 
     assert resolve_readable(str(report), workspace=workdir) == report.resolve()
@@ -504,7 +504,7 @@ def test_a_pinned_workdir_under_the_state_root_keeps_its_files(tmp_path: Path, m
     pinned.mkdir(parents=True)
     (pinned / "notes.md").write_text("# written in the pinned directory")
     (home / "serve.json").write_text(json.dumps({"token": "s3cret"}))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     monkeypatch.setattr(files_module, "load_config", lambda: _workspace_config(ws, restrict=False))
 
     assert resolve_readable(str(pinned / "notes.md"), workspace=pinned) == (pinned / "notes.md").resolve()

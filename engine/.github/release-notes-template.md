@@ -63,7 +63,7 @@ raven web
 
 `raven upgrade` installs the latest stable release together with the plugin
 wheels it ships. It never picks up a pre-release unless this install has joined
-the beta channel (a `~/.raven/beta.json` that only the beta installer writes).
+the beta channel (a `~/.rarus/beta.json` that only the beta installer writes).
 `raven upgrade --check` reports whether a newer release exists without
 installing it. Editable source checkouts are never overwritten: `raven upgrade`
 reports the checkout path and how far it is ahead of or behind `origin/main`,

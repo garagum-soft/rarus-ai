@@ -289,7 +289,7 @@ def test_the_command_saves_the_plan_and_prints_it_or_its_graph(tmp_path: Path, m
         json.dumps({"subagents": {"agents": [{"name": "planner", "kind": "cli", "command": _agent_file(tmp_path)}]}}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     project = tmp_path / "project"
     project.mkdir()
 
@@ -329,7 +329,7 @@ async def _run_decompose_scenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
     manager = SubagentManager(

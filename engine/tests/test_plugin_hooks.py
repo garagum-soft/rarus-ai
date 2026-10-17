@@ -154,7 +154,7 @@ class TestBuildPluginHooks:
 def test_the_user_plugin_dir_follows_the_home(tmp_path: Path, monkeypatch) -> None:
     from raven.core.plugin_stack import plugin_discovery_sources
 
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     assert plugin_discovery_sources()["user_dir"] == tmp_path / "home" / "plugins"
 
 

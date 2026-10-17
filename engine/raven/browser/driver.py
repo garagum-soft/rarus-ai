@@ -116,7 +116,7 @@ def _cannot_start_at_all(text: str) -> bool:
 # than at import: a process that moves HOME after importing this module (the
 # test suite gives every test its own) must not open the profile it left.
 def _profile_dir() -> Path:
-    return Path.home() / ".raven" / "browser-profile"
+    return Path.home() / ".rarus" / "browser-profile"
 
 
 DEFAULT_VIEWPORT = (1280, 800)

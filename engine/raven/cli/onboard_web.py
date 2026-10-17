@@ -15,7 +15,7 @@ Jina at registration rather than left to fail.
 
 Providers and keys land in ``config.json`` through ``update_tools``, keyed by
 vendor (``tools.web.providers.<vendor>.apiKey``), and the keys are then mirrored
-into ``~/.raven/env`` as ``export`` lines. The mirror is what reaches consumers
+into ``~/.rarus/env`` as ``export`` lines. The mirror is what reaches consumers
 that never read raven's config: the user's own shell, and -- the reason it is
 here rather than in a docs page -- every ``cli`` and ``acp`` sub-agent, whose
 environment is a capture of ``$SHELL -lic`` (see
@@ -52,9 +52,9 @@ from raven.i18n import t
 #: second ``raven onboard`` run leave the file alone.
 RC_MARKER = "# raven-onboard-env"
 
-#: The rc line itself. Guarded on existence so deleting ``~/.raven/env`` later
+#: The rc line itself. Guarded on existence so deleting ``~/.rarus/env`` later
 #: degrades to a no-op rather than an error on every new shell.
-SOURCE_LINE = f'[ -f "$HOME/.raven/env" ] && . "$HOME/.raven/env"  {RC_MARKER}'
+SOURCE_LINE = f'[ -f "$HOME/.rarus/env" ] && . "$HOME/.rarus/env"  {RC_MARKER}'
 
 #: Which of these bash reads is decided by existence, first match winning; when
 #: none exist, ``~/.profile`` is the one a login shell reads by convention.

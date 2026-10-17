@@ -8,7 +8,7 @@ Base: `feat/subagent_everos_memory_record` at `b7b05841`; `origin/main` at
 Measured against `@agentclientprotocol/codex-acp@1.1.14` (`agentInfo.name`
 `@agentclientprotocol/codex-acp`, `agentInfo.title` `Codex`), model
 `gpt-5.6-sol`. Two frame captures back this spec: a real direct chat (323
-frames, `~/.raven/traces/logs/acp-frames/2026-08-23/Writer-092353638638.jsonl`)
+frames, `~/.rarus/traces/logs/acp-frames/2026-08-23/Writer-092353638638.jsonl`)
 and a purpose-built probe (222 frames) driving a four-step task chosen to force
 a plan, a patch and two shell commands.
 

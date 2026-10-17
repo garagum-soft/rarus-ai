@@ -128,7 +128,7 @@ use_skill(skill_id: str) -> { "skill_md": str, "name": str, "version": str,
 ---
 
 ## 4. 本地缓存 / 版本 / 失效(仅 Tier 2)
-- 仅"下载过 zip 的 skill"落盘:`~/.raven/skills/hub/<slug>@<version>/`(`SKILL.md` + `scripts/` + `meta.json`)。
+- 仅"下载过 zip 的 skill"落盘:`~/.rarus/skills/hub/<slug>@<version>/`(`SKILL.md` + `scripts/` + `meta.json`)。
 - 索引 `index.json`:`slug → {version, id, installed_at, dir, last_evolved_at}`。
 - 失效:候选带 `version`/`last_evolved_at`;`use_skill` 时本地版本 < Hub → 重新下载新版本。
 - 离线:已装(带脚本)skill 不依赖网络;纯指令 skill 每次走 `read_skill`(可加正文短缓存)。

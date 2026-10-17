@@ -86,7 +86,7 @@ export function createSkillhub(env: FixtureEnv, ext: ExtFixture): SkillhubFixtur
           if (!s) return { info: {} }
           return {
             info: {
-              name: s.name, description: s.description, path: `~/.raven/workspace/skills/${s.name}`,
+              name: s.name, description: s.description, path: `~/.rarus/workspace/skills/${s.name}`,
               body: `# ${s.name}\n\n${s.description}\n`, files: ['SKILL.md'], source: s.source, always: s.always,
               hub: s.hub, hub_id: s.hub_id,
               install: s.hub
@@ -126,7 +126,7 @@ export function createSkillhub(env: FixtureEnv, ext: ExtFixture): SkillhubFixtur
             always: false, hub: true, hub_id: e.id })
         }
         return {
-          name: e ? e.name : '', path: `~/.raven/skills/${e ? e.name : ''}`, files: ['SKILL.md'],
+          name: e ? e.name : '', path: `~/.rarus/skills/${e ? e.name : ''}`, files: ['SKILL.md'],
           skipped: [], replaced: false, size_bytes: 1200, install_count: 0,
         }
       },

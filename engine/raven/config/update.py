@@ -1,4 +1,4 @@
-"""Minimal in-place updates for ~/.raven/config.json.
+"""Minimal in-place updates for ~/.rarus/config.json.
 
 Unlike ``save_config`` which re-serializes the entire Pydantic model (and
 would bake every runtime default back into the file), these helpers read

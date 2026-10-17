@@ -148,7 +148,7 @@ def _home(tmp_path: Path, monkeypatch, data: dict) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.json").write_text(json.dumps(data))
-    monkeypatch.setenv("RAVEN_HOME", str(home))
+    monkeypatch.setenv("RARUS_HOME", str(home))
     return home / "config.json"
 
 

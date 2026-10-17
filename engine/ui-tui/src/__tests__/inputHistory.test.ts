@@ -27,7 +27,7 @@ let history: HistoryModule
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'raven-hist-'))
 
-  vi.stubEnv('RAVEN_HOME', dir)
+  vi.stubEnv('RARUS_HOME', dir)
   history = await import('../lib/history.js')
 })
 

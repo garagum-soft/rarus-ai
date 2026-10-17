@@ -126,13 +126,13 @@ def test_the_build_hook_copies_the_page_where_serve_looks_for_it() -> None:
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
     """An agent home of our own, so nothing here reads the developer's serve.json."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     return tmp_path / "home"
 
 
 class TestTheStateFileFollowsTheAgentHome:
     """`raven web` finds the engine through this file, so where it lands has to
-    be the one answer the rest of raven gives. Read inline, `RAVEN_HOME` was
+    be the one answer the rest of raven gives. Read inline, `RARUS_HOME` was
     resolved a second way that disagreed with the canonical one in three cases,
     and in each of them the state file became cwd-relative while the engine ran
     somewhere else -- which is a second engine on the next `raven web`."""
@@ -140,20 +140,20 @@ class TestTheStateFileFollowsTheAgentHome:
     @pytest.mark.parametrize("value", ["", "   "])
     def test_a_blank_setting_is_not_a_home(self, monkeypatch, value: str) -> None:
         # os.environ.get(name, default) hands back the empty string rather than
-        # the default, so `RAVEN_HOME=` in a shell profile put serve.json in the
+        # the default, so `RARUS_HOME=` in a shell profile put serve.json in the
         # working directory.
-        monkeypatch.setenv("RAVEN_HOME", value)
-        assert serve_commands._state_path() == Path.home() / ".raven" / "serve.json"
+        monkeypatch.setenv("RARUS_HOME", value)
+        assert serve_commands._state_path() == Path.home() / ".rarus" / "serve.json"
 
     def test_a_tilde_is_expanded(self, monkeypatch) -> None:
-        monkeypatch.setenv("RAVEN_HOME", "~/alt-home")
+        monkeypatch.setenv("RARUS_HOME", "~/alt-home")
         assert serve_commands._state_path() == Path.home() / "alt-home" / "serve.json"
 
     def test_it_lands_beside_the_config(self, monkeypatch, tmp_path: Path) -> None:
         """The property that matters, stated once: same home, both files."""
         from raven.config.loader import get_config_path
 
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "elsewhere"))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path / "elsewhere"))
         assert serve_commands._state_path().parent == get_config_path().parent
 
 
@@ -1643,7 +1643,7 @@ class TestTheSupervisorCleansUpOnTheSignalThatStopsIt:
             "s._bound_port_of = lambda p: None\n"
             "s._supervise(18999)\n"
         )
-        env = {**os.environ, "RAVEN_HOME": str(home)}
+        env = {**os.environ, "RARUS_HOME": str(home)}
         proc = subprocess.Popen([sys.executable, "-c", script], env=env)  # noqa: S603
         try:
             deadline = time.monotonic() + 15
@@ -1693,7 +1693,7 @@ class TestTheSupervisorCleansUpOnTheSignalThatStopsIt:
             "s._write_web_state = _linger\n"
             "s._supervise(18999)\n"
         )
-        env = {**os.environ, "RAVEN_HOME": str(home)}
+        env = {**os.environ, "RARUS_HOME": str(home)}
         proc = subprocess.Popen([sys.executable, "-c", script], env=env)  # noqa: S603
         try:
             deadline = time.monotonic() + 15
@@ -2274,7 +2274,7 @@ class TestStoppingARealTree:
             "sc._CHILD_STOP_S = 2.0\n"
             "sc._supervise(18999)\n"
         )
-        proc = subprocess.Popen([sys.executable, "-c", script], env={**os.environ, "RAVEN_HOME": str(home)})
+        proc = subprocess.Popen([sys.executable, "-c", script], env={**os.environ, "RARUS_HOME": str(home)})
         try:
             _wait_for(home / "serve.json")
             gw = json.loads((home / "serve.json").read_text())["pid"]
@@ -2305,7 +2305,7 @@ class TestStoppingARealTree:
             "sc._CHILD_STOP_S = 0.5\n"
             "sc._supervise(18999)\n"
         )
-        env = {**os.environ, "RAVEN_HOME": str(home)}
+        env = {**os.environ, "RARUS_HOME": str(home)}
         proc = subprocess.Popen([sys.executable, "-c", script], env=env)
         try:
             # Signalled as soon as the gateway is up, so usually while the
@@ -2345,7 +2345,7 @@ class TestStoppingARealTree:
             "sc._CHILD_STOP_S = 0.5\n"
             "sc._supervise(18999)\n"
         )
-        env = {**os.environ, "RAVEN_HOME": str(home)}
+        env = {**os.environ, "RARUS_HOME": str(home)}
         proc = subprocess.Popen([sys.executable, "-c", script], env=env)
         try:
             _wait_for(home / "gc-pid")

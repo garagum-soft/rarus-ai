@@ -105,10 +105,10 @@ def legacy_everos_root() -> Path:
 
 
 def _is_default_installation() -> bool:
-    """Whether this process is the installation that owns ``~/.raven``."""
+    """Whether this process is the installation that owns ``~/.rarus``."""
     from raven.home import get_config_path
 
-    return get_config_path() == Path.home() / ".raven" / "config.json"
+    return get_config_path() == Path.home() / ".rarus" / "config.json"
 
 
 def applicable_legacy_root() -> Path | None:

@@ -2,7 +2,7 @@
 
 Built from three journals: the conversations' transcripts (who asked what, which
 turns failed), the run records (``raven.reports.runs``) and the usage ledger
-(``<RAVEN_HOME>/telemetry/usage-*.jsonl``). Cost counts only what a provider
+(``<RARUS_HOME>/telemetry/usage-*.jsonl``). Cost counts only what a provider
 reported, as the ledger does; calls without a reported cost are counted and
 said, never estimated into the total.
 """

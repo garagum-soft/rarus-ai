@@ -339,7 +339,7 @@ def playbook_secret_set(
 ):
     """Store one secret param for a playbook on this machine.
 
-    The value lands in the Raven credentials root (RAVEN_HOME) under
+    The value lands in the Raven credentials root (RARUS_HOME) under
     playbooks/<name>/, mode 0600, and is read at load, so a run no longer has to
     be handed it -- and it never enters a conversation or the playbook file.
     """

@@ -72,7 +72,7 @@ npm run dev            # http://127.0.0.1:5173/src/page.html
 
 The dev server serves `src/page.html` with hot reload and proxies `/rpc`,
 `/health`, `/auth`, `/file`, `/files`, `/knowledge/file` and `/oauth/callback`
-to the gateway, whose port it reads from `~/.raven/serve.json` (18792 if there
+to the gateway, whose port it reads from `~/.rarus/serve.json` (18792 if there
 is no record). Same origin, so the session cookie works: sign in once through
 the proxied `/auth` page. Dev never produces a `dist/` -- the artifact only
 ever comes from the two build steps above.

@@ -58,8 +58,8 @@ async def test_acp_child_inherits_custom_raven_home(tmp_path: Path, monkeypatch:
     host_home = tmp_path / "custom-home"
     host_home.mkdir()
     observed = tmp_path / "observed.txt"
-    command = _reporting_child(tmp_path / "child.py", "RAVEN_HOME")
-    monkeypatch.setenv("RAVEN_HOME", str(host_home))
+    command = _reporting_child(tmp_path / "child.py", "RARUS_HOME")
+    monkeypatch.setenv("RARUS_HOME", str(host_home))
     monkeypatch.setattr(backend_env, "login_shell_env", lambda: {"PATH": os.environ["PATH"], "OUTPUT": str(observed)})
 
     client = await AcpClient.launch(name="env-probe", command=command)

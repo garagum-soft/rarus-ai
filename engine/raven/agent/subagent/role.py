@@ -13,7 +13,7 @@ ended the turn on the receipt. Twice, with a continuation in between.
 The signal is an environment variable rather than a flag on the command line
 because ``command`` is user-authored config: a flag would need every existing
 install edited by hand and would fail silently wherever one was missed. The host
-already injects ``RAVEN_HOME`` into every child it launches, so this rides a
+already injects ``RARUS_HOME`` into every child it launches, so this rides a
 channel that exists.
 
 Third of three mechanisms for one rule, and the division between them is scope

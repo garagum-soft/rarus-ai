@@ -583,7 +583,7 @@ def _write_carried_md(root: Path, name: str) -> None:
 
 @pytest.fixture
 def carried(library, tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     _write_carried_md(library["user"], "carried")
     return library
 
@@ -661,7 +661,7 @@ def test_run_reads_a_stored_secret_and_scopes_the_carried_servers_credentials(li
     merge later is too late: the stored secret has to be in the definition the
     pre-flight renders, and the carried server has to dial under the playbook's
     credential scope while the host's server keeps the host's."""
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     from raven.mcp import manager as manager_mod
     from raven.playbook.credentials import set_secret_param
 
@@ -1269,7 +1269,7 @@ class TestScaffoldingAStint:
 
     @staticmethod
     def _home(tmp_path, monkeypatch) -> Path:
-        monkeypatch.setenv("RAVEN_HOME", str(tmp_path))
+        monkeypatch.setenv("RARUS_HOME", str(tmp_path))
         return tmp_path / "workspace" / "playbooks"
 
     def test_what_it_writes_validates_as_written(self, tmp_path, monkeypatch) -> None:

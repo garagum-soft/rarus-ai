@@ -162,7 +162,7 @@ export const opsCommands: SlashCommand[] = [
   },
 
   {
-    help: 're-read ~/.raven/.env into the running gateway (CLI parity)',
+    help: 're-read ~/.rarus/.env into the running gateway (CLI parity)',
     name: 'reload',
     supported: false,
     run: (_arg, ctx) => {

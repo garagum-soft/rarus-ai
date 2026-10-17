@@ -101,7 +101,7 @@ def test_the_guard_is_off_unless_configured(tmp_path: Path) -> None:
 async def test_the_gateway_guard_pauses_and_cancels_and_tells_the_owner_through_the_heartbeat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("RAVEN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     manager = _Manager()
     events = SystemEventQueue()

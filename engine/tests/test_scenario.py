@@ -82,7 +82,7 @@ def home(tmp_path: Path, monkeypatch) -> Path:
     path = tmp_path / "home"
     path.mkdir()
     # Set for the agents' own processes too: they write the scenario's mail here.
-    monkeypatch.setenv("RAVEN_HOME", str(path))
+    monkeypatch.setenv("RARUS_HOME", str(path))
     return path
 
 

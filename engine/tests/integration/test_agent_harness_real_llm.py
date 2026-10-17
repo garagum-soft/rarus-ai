@@ -14,7 +14,7 @@ from raven.providers.litellm_provider import LiteLLMProvider
 
 
 def _config_key() -> str:
-    path = Path.home() / ".raven" / "config.json"
+    path = Path.home() / ".rarus" / "config.json"
     try:
         section = json.loads(path.read_text(encoding="utf-8")).get("providers", {}).get("openrouter") or {}
     except Exception:
@@ -29,7 +29,7 @@ MARKER = "HARNESS_E2E_OK"
 pytestmark = [
     pytest.mark.real_llm,
     pytest.mark.slow,
-    pytest.mark.skipif(not OPENROUTER_KEY, reason="no OpenRouter credential (env or ~/.raven)"),
+    pytest.mark.skipif(not OPENROUTER_KEY, reason="no OpenRouter credential (env or ~/.rarus)"),
 ]
 
 
@@ -190,7 +190,7 @@ async def test_real_harness_crosses_acp_process_and_blocks_worker_tool(tmp_path)
     backend = AcpAgentBackend(
         name=f"harness-e2e-{tmp_path.name}",
         command=f"{binary} acp",
-        env={"RAVEN_HOME": str(home)},
+        env={"RARUS_HOME": str(home)},
         ready_timeout_ms=120_000,
         timeout=180,
     )
@@ -296,7 +296,7 @@ async def test_generated_intake_executes_inside_the_forked_acp_worker(tmp_path) 
     backend = AcpAgentBackend(
         name=f"harness-functions-{tmp_path.name}",
         command=f"{binary} acp",
-        env={"RAVEN_HOME": str(home)},
+        env={"RARUS_HOME": str(home)},
         ready_timeout_ms=120_000,
         timeout=120,
     )

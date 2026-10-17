@@ -389,7 +389,7 @@ class TestTheLegacyRootBelongsToTheDefaultInstall:
         from raven_everos import config as ue
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        monkeypatch.setattr("raven.home.get_config_path", lambda: tmp_path / ".raven" / "config.json")
+        monkeypatch.setattr("raven.home.get_config_path", lambda: tmp_path / ".rarus" / "config.json")
 
         assert ue.applicable_legacy_root() == tmp_path / ".everos" / "raven"
 
