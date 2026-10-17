@@ -18,7 +18,7 @@
     "quit": {
       "zh": {
         "name": "退出",
-        "help": "退出 Raven"
+        "help": "退出 Rarus"
       }
     },
     "mouse": {
@@ -683,8 +683,8 @@
       "ru": "меняю настройки"
     },
     "gui.act.ing.raven_config_restart": {
-      "en": "reloading Raven",
-      "zh": "正在重载 Raven",
+      "en": "reloading Rarus",
+      "zh": "正在重载 Rarus",
       "ru": "перезагружаю Rarus"
     },
     "gui.act.ing.plugin_read": {
@@ -768,8 +768,8 @@
       "ru": "изменений настроек: {n}"
     },
     "gui.act.n.raven_config_restart": {
-      "en": "reloaded Raven {n} times",
-      "zh": "重载 Raven {n} 次",
+      "en": "reloaded Rarus {n} times",
+      "zh": "重载 Rarus {n} 次",
       "ru": "перезагрузок Rarus: {n}"
     },
     "gui.act.n.plugin_read": {
@@ -903,8 +903,8 @@
       "ru": "изменил настройки"
     },
     "gui.act.v.raven_config_restart": {
-      "en": "reloaded Raven",
-      "zh": "重载 Raven",
+      "en": "reloaded Rarus",
+      "zh": "重载 Rarus",
       "ru": "перезагрузил Rarus"
     },
     "gui.act.v.plugin_read": {
@@ -948,8 +948,8 @@
       "ru": "Адрес или команда, например npx -y @acme/crm-mcp"
     },
     "gui.adv_hint": {
-      "en": "Know what you are connecting? Give it an address or a launch command and Raven will handshake to fetch its actions.",
-      "zh": "知道要接什么就直接填地址或启动命令，Raven 会握手取回它提供的动作。",
+      "en": "Know what you are connecting? Give it an address or a launch command and Rarus will handshake to fetch its actions.",
+      "zh": "知道要接什么就直接填地址或启动命令，Rarus 会握手取回它提供的动作。",
       "ru": "Знаете, что подключаете? Укажите адрес или команду запуска, и Rarus выполнит рукопожатие, чтобы получить доступные действия."
     },
     "gui.adv_name_ph": {
@@ -1223,8 +1223,8 @@
       "ru": "Служба работает, но вход в этой вкладке устарел — получите новую ссылку командой: rarus web"
     },
     "gui.auth.dead_app": {
-      "en": "Sign-in expired - quit Raven and open it again",
-      "zh": "登录已失效——关掉 Raven 再打开一次",
+      "en": "Sign-in expired - quit Rarus and open it again",
+      "zh": "登录已失效——关掉 Rarus 再打开一次",
       "ru": "Вход устарел — закройте Rarus и откройте снова"
     },
     "gui.auth.retry": {
@@ -1273,8 +1273,8 @@
       "ru": "Нет открытой страницы"
     },
     "gui.br.idle_w": {
-      "en": "Type a URL above, or ask Raven to open one. You and Raven share this browser - either of you can click, and the other sees it.",
-      "zh": "在上面输入网址，或者让 Raven 打开一个。这个浏览器你和 Raven 共用：谁点的另一方都看得到。",
+      "en": "Type a URL above, or ask Rarus to open one. You and Rarus share this browser - either of you can click, and the other sees it.",
+      "zh": "在上面输入网址，或者让 Rarus 打开一个。这个浏览器你和 Rarus 共用：谁点的另一方都看得到。",
       "ru": "Введите адрес выше или попросите Rarus открыть страницу. Вы и Rarus делите один браузер — любой из вас может кликать, а другой это видит."
     },
     "gui.br.popin": {
@@ -1293,8 +1293,8 @@
       "ru": "Открыть в своём окне"
     },
     "gui.br.popped_w": {
-      "en": "The page is running in a real Chromium window - native scrolling and typing, and Raven keeps driving the same session. Logins carry over.",
-      "zh": "页面正运行在一个真实的 Chromium 窗口里——原生滚动和输入，Raven 仍然操作的是同一个会话，登录状态也会带过去。",
+      "en": "The page is running in a real Chromium window - native scrolling and typing, and Rarus keeps driving the same session. Logins carry over.",
+      "zh": "页面正运行在一个真实的 Chromium 窗口里——原生滚动和输入，Rarus 仍然操作的是同一个会话，登录状态也会带过去。",
       "ru": "Страница работает в настоящем окне Chromium — родная прокрутка и ввод, а Rarus продолжает управлять той же сессией. Входы сохраняются."
     },
     "gui.br.reload": {
@@ -1328,7 +1328,7 @@
       "ru": "Браузер не установлен"
     },
     "gui.br.unavail_w": {
-      "en": "Raven drives a real Chromium for this panel and for its browser tools. The browser runtime is not available on the gateway host.",
+      "en": "Rarus drives a real Chromium for this panel and for its browser tools. The browser runtime is not available on the gateway host.",
       "zh": "这个面板和 agent 的浏览器工具用的是一个真实 Chromium，但浏览器运行时在网关主机上不可用。",
       "ru": "Rarus управляет настоящим Chromium в этой панели и в своих браузерных инструментах. На компьютере со шлюзом браузерная среда недоступна."
     },
@@ -1543,8 +1543,8 @@
       "ru": "WhatsApp"
     },
     "gui.clarify.aria": {
-      "en": "Raven needs more from you",
-      "zh": "Raven 需要你补充",
+      "en": "Rarus needs more from you",
+      "zh": "Rarus 需要你补充",
       "ru": "Rarus нужно больше от вас"
     },
     "gui.clarify.back": {
@@ -1668,8 +1668,8 @@
       "ru": "Команды"
     },
     "gui.brand.hi": {
-      "en": "Hi, I'm Raven Agent",
-      "zh": "Hi，我是 Raven Agent",
+      "en": "Hi, I'm Rarus Agent",
+      "zh": "Hi，我是 Rarus Agent",
       "ru": "Здравствуйте, я агент Rarus"
     },
     "gui.composer_ph": {
@@ -1748,8 +1748,8 @@
       "ru": "Вошли"
     },
     "gui.conn.qr_noenc": {
-      "en": "Couldn't draw the code. Reinstalling Raven fixes this.",
-      "zh": "二维码生成失败，重新安装 Raven 可以修复",
+      "en": "Couldn't draw the code. Reinstalling Rarus fixes this.",
+      "zh": "二维码生成失败，重新安装 Rarus 可以修复",
       "ru": "Не удалось нарисовать код. Поможет переустановка Rarus."
     },
     "gui.conn.qr_scan": {
@@ -1823,8 +1823,8 @@
       "ru": "Код появится здесь"
     },
     "gui.conn.toggled": {
-      "en": "{name} {state} - reopen the Raven app to apply",
-      "zh": "{name} 已{state} · 重新打开 Raven App 生效",
+      "en": "{name} {state} - reopen the Rarus app to apply",
+      "zh": "{name} 已{state} · 重新打开 Rarus App 生效",
       "ru": "{name}: {state} — откройте приложение Rarus заново, чтобы применить"
     },
     "gui.conn.toggled_now": {
@@ -2103,8 +2103,8 @@
       "ru": "Расписание «{name}» дало что-то новое"
     },
     "gui.cron.missed_x": {
-      "en": "Missed reminders while Raven was down: {count}",
-      "zh": "Raven 停机期间错过的提醒：{count}",
+      "en": "Missed reminders while Rarus was down: {count}",
+      "zh": "Rarus 停机期间错过的提醒：{count}",
       "ru": "Пропущено напоминаний, пока Rarus не работал: {count}"
     },
     "gui.cron.next": {
@@ -2118,8 +2118,8 @@
       "ru": "далее {next}"
     },
     "gui.cron.none": {
-      "en": "Ask Raven in a conversation, say \"every morning at 8...\", and it sets one up for you.",
-      "zh": "在对话里跟 Raven 说「每天早上八点……」，它会帮你建一条。",
+      "en": "Ask Rarus in a conversation, say \"every morning at 8...\", and it sets one up for you.",
+      "zh": "在对话里跟 Rarus 说「每天早上八点……」，它会帮你建一条。",
       "ru": "Скажите Rarus в разговоре: «каждое утро в 8...» — и он всё настроит."
     },
     "gui.cron.none_t": {
@@ -2363,8 +2363,8 @@
       "ru": "Удалить эту возможность"
     },
     "gui.detail.remove_body": {
-      "en": "After removing \"{name}\", Raven cannot use it in any session. Its setup is deleted too.",
-      "zh": "移除「{name}」后，Raven 在所有会话里都不能再用它。配置会一并删除。",
+      "en": "After removing \"{name}\", Rarus cannot use it in any session. Its setup is deleted too.",
+      "zh": "移除「{name}」后，Rarus 在所有会话里都不能再用它。配置会一并删除。",
       "ru": "После удаления «{name}» Rarus не сможет использовать её ни в одной сессии. Её настройки тоже удалятся."
     },
     "gui.detail.remove_title": {
@@ -2813,8 +2813,8 @@
       "ru": "Загрузка..."
     },
     "gui.onb.sync_empty": {
-      "en": "Nothing on this machine that Raven can import yet",
-      "zh": "本机暂未发现可以导入到 Raven 的数据",
+      "en": "Nothing on this machine that Rarus can import yet",
+      "zh": "本机暂未发现可以导入到 Rarus 的数据",
       "ru": "На этом компьютере пока нечего импортировать в Rarus"
     },
     "gui.onb.sync_needs_memory": {
@@ -2903,8 +2903,8 @@
       "ru": "Ход завершился ошибкой — {e}"
     },
     "gui.notice.by_raven": {
-      "en": "Raven",
-      "zh": "Raven 提示",
+      "en": "Rarus",
+      "zh": "Rarus 提示",
       "ru": "Rarus"
     },
     "gui.notice.action_blocked": {
@@ -2928,8 +2928,8 @@
       "ru": "Вопрос остался без ответа, поэтому ход продолжился без него."
     },
     "gui.hub.auto_use": {
-      "zh": "技能由 Raven 按需自动使用，暂不支持单独停用",
-      "en": "Skills are picked up by Raven on demand; per-skill toggling is not supported yet",
+      "zh": "技能由 Rarus 按需自动使用，暂不支持单独停用",
+      "en": "Skills are picked up by Rarus on demand; per-skill toggling is not supported yet",
       "ru": "Rarus подбирает навыки по необходимости; включать навыки по отдельности пока нельзя"
     },
     "gui.hub.empty_filter": {
@@ -2963,8 +2963,8 @@
       "ru": "Каталог навыков"
     },
     "gui.hub.hero_sub": {
-      "zh": "{n} 个技能，教会 Raven 新的做事套路",
-      "en": "{n} skills that teach Raven new playbooks",
+      "zh": "{n} 个技能，教会 Rarus 新的做事套路",
+      "en": "{n} skills that teach Rarus new playbooks",
       "ru": "навыков, которые учат Rarus новым сценариям: {n}"
     },
     "gui.hub.install": {
@@ -3253,8 +3253,8 @@
       "ru": "Инструкция"
     },
     "gui.job.what_ph": {
-      "en": "What to send Raven when it fires - write it the way you would say it",
-      "zh": "到点发给 Raven 的话，像平时对话一样写",
+      "en": "What to send Rarus when it fires - write it the way you would say it",
+      "zh": "到点发给 Rarus 的话，像平时对话一样写",
       "ru": "Что отправить Rarus при срабатывании — пишите так, как сказали бы вслух"
     },
     "gui.live.busy": {
@@ -3283,8 +3283,8 @@
       "ru": "Повторите, когда она заработает."
     },
     "gui.mem.empty": {
-      "zh": "和 Raven 一起干点活，这里会慢慢攒起来。",
-      "en": "They build up as you work with Raven.",
+      "zh": "和 Rarus 一起干点活，这里会慢慢攒起来。",
+      "en": "They build up as you work with Rarus.",
       "ru": "Они накапливаются по мере вашей работы с Rarus."
     },
     "gui.mem.empty_t": {
@@ -3298,8 +3298,8 @@
       "ru": "Данные и память"
     },
     "gui.mem.hero_sub": {
-      "zh": "Raven 与你共事沉淀下来的长期记忆，全部存在本机",
-      "en": "The long-term memory Raven builds while working with you, all stored locally",
+      "zh": "Rarus 与你共事沉淀下来的长期记忆，全部存在本机",
+      "en": "The long-term memory Rarus builds while working with you, all stored locally",
       "ru": "Долговременная память, которую Rarus накапливает во время работы с вами, — всё хранится локально"
     },
     "gui.mem.hint_case": {
@@ -4253,8 +4253,8 @@
       "ru": "Коннектор агентов"
     },
     "gui.page.agents_sub": {
-      "en": "Raven coordinates the agents you connect: it delegates tasks, orchestrates the work and brings the results together.",
-      "zh": "Raven 可以统一调度已连接的智能体，委派任务、协调执行、整合结果",
+      "en": "Rarus coordinates the agents you connect: it delegates tasks, orchestrates the work and brings the results together.",
+      "zh": "Rarus 可以统一调度已连接的智能体，委派任务、协调执行、整合结果",
       "ru": "Rarus координирует подключённых вами агентов: делегирует задачи, организует работу и собирает результаты."
     },
     "gui.page.conn": {
@@ -4263,8 +4263,8 @@
       "ru": "Каналы"
     },
     "gui.page.conn_sub": {
-      "en": "Raven joins the chat apps you already use, so you can hand it work and get results back from WeChat, Feishu, Telegram and more.",
-      "zh": "Raven 可以接入你常用的聊天应用，在微信、飞书、Telegram 里也能直接给它派活、收结果",
+      "en": "Rarus joins the chat apps you already use, so you can hand it work and get results back from WeChat, Feishu, Telegram and more.",
+      "zh": "Rarus 可以接入你常用的聊天应用，在微信、飞书、Telegram 里也能直接给它派活、收结果",
       "ru": "Rarus подключается к мессенджерам, которыми вы уже пользуетесь, — можно давать ему работу и получать результаты из WeChat, Feishu, Telegram и других."
     },
     "gui.page.cron": {
@@ -4553,8 +4553,8 @@
       "ru": "Каталог плагинов"
     },
     "gui.plug.hero_sub": {
-      "zh": "{n} 个插件，为 Raven 接入外部服务与工具",
-      "en": "{n} plugins that connect Raven to outside services and tools",
+      "zh": "{n} 个插件，为 Rarus 接入外部服务与工具",
+      "en": "{n} plugins that connect Rarus to outside services and tools",
       "ru": "плагинов, которые связывают Rarus с внешними службами и инструментами: {n}"
     },
     "gui.plug.homepage": {
@@ -5373,8 +5373,8 @@
       "ru": "Перезагрузить"
     },
     "gui.upg.body": {
-      "en": "{from} to {to}. The Raven service restarts.",
-      "zh": "{from} 升到 {to}。Raven 服务会重启",
+      "en": "{from} to {to}. The Rarus service restarts.",
+      "zh": "{from} 升到 {to}。Rarus 服务会重启",
       "ru": "{from} → {to}. Служба Rarus перезапустится."
     },
     "gui.upg.body_busy": {
@@ -5393,8 +5393,8 @@
       "ru": "Обновление не завершилось"
     },
     "gui.upg.gave_up": {
-      "en": "It has been 20 minutes with no answer from Raven.",
-      "zh": "已经等了 20 分钟，Raven 仍然没有响应。",
+      "en": "It has been 20 minutes with no answer from Rarus.",
+      "zh": "已经等了 20 分钟，Rarus 仍然没有响应。",
       "ru": "Прошло 20 минут, а Rarus не ответил."
     },
     "gui.upg.go": {
@@ -5428,38 +5428,38 @@
       "ru": "Устанавливаю новую версию..."
     },
     "gui.upg.phase.restart": {
-      "en": "Restarting Raven...",
-      "zh": "正在重启 Raven…",
+      "en": "Restarting Rarus...",
+      "zh": "正在重启 Rarus…",
       "ru": "Перезапускаю Rarus..."
     },
     "gui.upg.reauth": {
-      "en": "Raven restarted but this page is no longer signed in. Reopen Raven.",
-      "zh": "Raven 已重启，但这个页面的登录失效了，请重新打开 Raven。",
+      "en": "Rarus restarted but this page is no longer signed in. Reopen Rarus.",
+      "zh": "Rarus 已重启，但这个页面的登录失效了，请重新打开 Rarus。",
       "ru": "Rarus перезапустился, но эта страница больше не авторизована. Откройте Rarus заново."
     },
     "gui.upg.title": {
-      "en": "Upgrade Raven?",
-      "zh": "升级 Raven？",
+      "en": "Upgrade Rarus?",
+      "zh": "升级 Rarus？",
       "ru": "Обновить Rarus?"
     },
     "gui.upg.why.busy": {
-      "en": "Raven is still working on a turn, a sub-agent or a question waiting for an answer, possibly in an IM channel. Upgrading restarts Raven and would cut that off, so let it finish first.",
-      "zh": "Raven 还在处理回合、子智能体或待回答的问题（可能在 IM 渠道里）。升级会重启 Raven 并打断它们，请等它们结束再升级。",
+      "en": "Rarus is still working on a turn, a sub-agent or a question waiting for an answer, possibly in an IM channel. Upgrading restarts Rarus and would cut that off, so let it finish first.",
+      "zh": "Rarus 还在处理回合、子智能体或待回答的问题（可能在 IM 渠道里）。升级会重启 Rarus 并打断它们，请等它们结束再升级。",
       "ru": "Rarus ещё работает над ходом, субагентом или вопросом, ожидающим ответа, возможно в чат-канале. Обновление перезапустит Rarus и оборвёт это, поэтому сначала дайте ему закончить."
     },
     "gui.upg.why.not_serving": {
-      "en": "This page is not being served by a running Raven, so it has nothing here to upgrade.",
-      "zh": "这个页面当前没有正在运行的 Raven 在托管，这里没有可以升级的对象。",
+      "en": "This page is not being served by a running Rarus, so it has nothing here to upgrade.",
+      "zh": "这个页面当前没有正在运行的 Rarus 在托管，这里没有可以升级的对象。",
       "ru": "Эту страницу отдаёт не запущенный Rarus, так что обновлять здесь нечего."
     },
     "gui.upg.why.unsupervised": {
-      "en": "This Raven was started by hand in a terminal, so nothing would bring it back after an upgrade. Run raven upgrade there, then start Raven again.",
-      "zh": "这个 Raven 是在终端里手动启动的，升级后没有守护进程能把它重新拉起来。请在那个终端里运行 raven upgrade，然后重新启动 Raven。",
+      "en": "This Rarus was started by hand in a terminal, so nothing would bring it back after an upgrade. Run raven upgrade there, then start Rarus again.",
+      "zh": "这个 Rarus 是在终端里手动启动的，升级后没有守护进程能把它重新拉起来。请在那个终端里运行 raven upgrade，然后重新启动 Rarus。",
       "ru": "Этот Rarus запущен вручную в терминале, поэтому после обновления его некому будет вернуть. Выполните там rarus upgrade и запустите Rarus снова."
     },
     "gui.upg.working": {
-      "en": "Upgrading Raven...",
-      "zh": "正在升级 Raven…",
+      "en": "Upgrading Rarus...",
+      "zh": "正在升级 Rarus…",
       "ru": "Обновляю Rarus..."
     },
     "gui.wd.back": {
@@ -5468,8 +5468,8 @@
       "ru": "Назад"
     },
     "gui.wd.blocked": {
-      "en": "Not a workspace: Raven's own data is here or beneath it. Its folders may still be.",
-      "zh": "这里不能作为工作区：Raven 自己的数据在此处或其下；里面的文件夹可以",
+      "en": "Not a workspace: Rarus's own data is here or beneath it. Its folders may still be.",
+      "zh": "这里不能作为工作区：Rarus 自己的数据在此处或其下；里面的文件夹可以",
       "ru": "Это не рабочее пространство: здесь или ниже лежат собственные данные Rarus. Но его подпапки могут подойти."
     },
     "gui.wd.empty": {
@@ -5878,8 +5878,8 @@
       "ru": "Не удалось отрисовать эту картинку."
     },
     "gui.ws.file_denied": {
-      "en": "Raven is confined to the workspace, so this file cannot be opened here.",
-      "zh": "Raven 被限制在工作目录内，这个文件没法在这里打开。",
+      "en": "Rarus is confined to the workspace, so this file cannot be opened here.",
+      "zh": "Rarus 被限制在工作目录内，这个文件没法在这里打开。",
       "ru": "Rarus ограничен рабочим пространством, поэтому этот файл здесь не открыть."
     },
     "gui.ws.file_gone": {
@@ -6303,8 +6303,8 @@
       "ru": "Закрыть"
     },
     "gui.conn.w2_blocked": {
-      "en": "Raven isn't running in the background. The code appears once it is.",
-      "zh": "Raven 后台没在运行，运行后这里会出现二维码",
+      "en": "Rarus isn't running in the background. The code appears once it is.",
+      "zh": "Rarus 后台没在运行，运行后这里会出现二维码",
       "ru": "Rarus не работает в фоне. Код появится, как только он запустится."
     },
     "gui.conn.w2_down": {
@@ -6458,8 +6458,8 @@
       "ru": "Исходная ошибка"
     },
     "gui.agent.ask_raven": {
-      "en": "Hand it to Raven →",
-      "zh": "交给 Raven →",
+      "en": "Hand it to Rarus →",
+      "zh": "交给 Rarus →",
       "ru": "Передать Rarus →"
     },
     "gui.agent.ask_connect": {
@@ -6953,8 +6953,8 @@
       "ru": "Агент для кода от Pi"
     },
     "gui.agent.by_raven": {
-      "en": "Built into Raven",
-      "zh": "Raven 自带",
+      "en": "Built into Rarus",
+      "zh": "Rarus 自带",
       "ru": "Встроен в Rarus"
     },
     "gui.agent.by_oss": {
@@ -6988,8 +6988,8 @@
       "ru": "Модель"
     },
     "gui.agent.model_follow": {
-      "en": "Follows the main Raven",
-      "zh": "跟随主 Raven",
+      "en": "Follows the main Rarus",
+      "zh": "跟随主 Rarus",
       "ru": "Следует за основной моделью Rarus"
     },
     "gui.agent.model_own_default": {
@@ -7018,13 +7018,13 @@
       "ru": "Сначала подключите поставщика"
     },
     "gui.agent.g_shipped": {
-      "en": "Raven ships {n} specialists for different fields",
-      "zh": "Raven 内置了 {n} 个不同领域的专家",
+      "en": "Rarus ships {n} specialists for different fields",
+      "zh": "Rarus 内置了 {n} 个不同领域的专家",
       "ru": "В Rarus есть специалисты для разных областей: {n}"
     },
     "gui.agent.setup_none": {
-      "en": "No other agents on this machine can connect to Raven yet",
-      "zh": "本机暂无可以连接到 Raven 使用的其他 Agent",
+      "en": "No other agents on this machine can connect to Rarus yet",
+      "zh": "本机暂无可以连接到 Rarus 使用的其他 Agent",
       "ru": "Других агентов на этом компьютере, которые могут подключиться к Rarus, пока нет"
     },
     "gui.agent.setup_scanning": {
@@ -7578,8 +7578,8 @@
       "ru": "Подключить {name}"
     },
     "gui.confirm.cfg.add_lend": {
-      "en": "Connect {name}, started with Raven's {key} key",
-      "zh": "接入 {name}，用 Raven 的 {key} key 启动",
+      "en": "Connect {name}, started with Rarus's {key} key",
+      "zh": "接入 {name}，用 Rarus 的 {key} key 启动",
       "ru": "Подключить {name}, запущенный с ключом Rarus {key}"
     },
     "gui.confirm.cfg.add_model": {
@@ -7588,18 +7588,18 @@
       "ru": "Модель: {model}"
     },
     "gui.confirm.cfg.reload": {
-      "en": "Reload Raven so the pending changes take effect. The process stays up; running work finishes first.",
-      "zh": "重新加载 Raven，让待生效的改动生效。进程不中断，正在跑的任务会先跑完。",
+      "en": "Reload Rarus so the pending changes take effect. The process stays up; running work finishes first.",
+      "zh": "重新加载 Rarus，让待生效的改动生效。进程不中断，正在跑的任务会先跑完。",
       "ru": "Перезагрузите Rarus, чтобы ожидающие изменения вступили в силу. Процесс остаётся запущенным; текущая работа сначала завершится."
     },
     "gui.confirm.cfg.restart": {
-      "en": "Restart the whole Raven process so the pending changes take effect. Channels reconnect after a few seconds.",
-      "zh": "重启整个 Raven 进程，让待生效的改动生效。渠道会断开几秒后重连。",
+      "en": "Restart the whole Rarus process so the pending changes take effect. Channels reconnect after a few seconds.",
+      "zh": "重启整个 Rarus 进程，让待生效的改动生效。渠道会断开几秒后重连。",
       "ru": "Перезапустите весь процесс Rarus, чтобы ожидающие изменения вступили в силу. Каналы переподключатся через несколько секунд."
     },
     "gui.confirm.cfg.key_field": {
-      "en": "After you allow, a card of its own asks you for this key. It is saved directly and never goes through Raven.",
-      "zh": "允许后会单独弹出一张卡片让你填这个 key，直接保存，不经过 Raven",
+      "en": "After you allow, a card of its own asks you for this key. It is saved directly and never goes through Rarus.",
+      "zh": "允许后会单独弹出一张卡片让你填这个 key，直接保存，不经过 Rarus",
       "ru": "После вашего разрешения отдельная карточка запросит у вас этот ключ. Он сохраняется напрямую и никогда не проходит через Rarus."
     },
     "gui.confirm.cfg.key_is_set": {
@@ -7633,8 +7633,8 @@
       "ru": "Вступает в силу после перезагрузки"
     },
     "gui.confirm.cfg.effect.restart": {
-      "en": "Takes effect after Raven restarts",
-      "zh": "需要重启 Raven 后生效",
+      "en": "Takes effect after Rarus restarts",
+      "zh": "需要重启 Rarus 后生效",
       "ru": "Вступает в силу после перезапуска Rarus"
     },
     "gui.confirm.cfg.effect.memory_server": {
@@ -7653,23 +7653,23 @@
       "ru": "меняет место, где хранятся сессии, память и файлы"
     },
     "gui.confirm.cfg.why.channels.*.allowFrom": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.*.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.dingtalk.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.dingtalk.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.dingtalk.workspace": {
@@ -7678,13 +7678,13 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.discord.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.discord.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.discord.gateway_url": {
@@ -7693,8 +7693,8 @@
       "ru": "отправляет учётные данные и сообщения этого канала на указанный адрес"
     },
     "gui.confirm.cfg.why.channels.discord.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.discord.workspace": {
@@ -7703,23 +7703,23 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.email.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.email.auto_reply_enabled": {
-      "en": "lets Raven send mail on its own",
-      "zh": "允许 Raven 自行发送邮件",
+      "en": "lets Rarus send mail on its own",
+      "zh": "允许 Rarus 自行发送邮件",
       "ru": "позволяет Rarus самому отправлять почту"
     },
     "gui.confirm.cfg.why.channels.email.consent_granted": {
-      "en": "lets Raven read and act on this mailbox",
-      "zh": "允许 Raven 读取并操作这个邮箱",
+      "en": "lets Rarus read and act on this mailbox",
+      "zh": "允许 Rarus 读取并操作这个邮箱",
       "ru": "позволяет Rarus читать этот ящик и действовать по его содержимому"
     },
     "gui.confirm.cfg.why.channels.email.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.email.imap_host": {
@@ -7753,18 +7753,18 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.feishu.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.feishu.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.feishu.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.feishu.workspace": {
@@ -7773,13 +7773,13 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.matrix.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.matrix.allow_room_mentions": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.matrix.e2ee_enabled": {
@@ -7788,18 +7788,18 @@
       "ru": "отключение отправляет учётные данные или сообщения этого канала без шифрования"
     },
     "gui.confirm.cfg.why.channels.matrix.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.matrix.group_allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.matrix.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.matrix.homeserver": {
@@ -7813,8 +7813,8 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.mochat.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.base_url": {
@@ -7823,28 +7823,28 @@
       "ru": "отправляет учётные данные и сообщения этого канала на указанный адрес"
     },
     "gui.confirm.cfg.why.channels.mochat.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.groups": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.mention.require_in_groups": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.panels": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.sessions": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.mochat.socket_url": {
@@ -7858,13 +7858,13 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.qq.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.qq.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.qq.workspace": {
@@ -7873,43 +7873,43 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.slack.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.dm.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.dm.enabled": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.dm.policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.group_allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.slack.user_token_read_only": {
-      "en": "turning it off lets Raven act as you on Slack",
-      "zh": "关闭它会让 Raven 以你的身份在 Slack 上行事",
+      "en": "turning it off lets Rarus act as you on Slack",
+      "zh": "关闭它会让 Rarus 以你的身份在 Slack 上行事",
       "ru": "отключение позволяет Rarus действовать от вашего имени в Slack"
     },
     "gui.confirm.cfg.why.channels.slack.workspace": {
@@ -7918,18 +7918,18 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.telegram.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.telegram.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.telegram.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.telegram.proxy": {
@@ -7943,13 +7943,13 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.wecom.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.wecom.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.wecom.workspace": {
@@ -7958,8 +7958,8 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.weixin.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.weixin.base_url": {
@@ -7973,8 +7973,8 @@
       "ru": "отправляет учётные данные и сообщения этого канала на указанный адрес"
     },
     "gui.confirm.cfg.why.channels.weixin.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.weixin.state_dir": {
@@ -7988,8 +7988,8 @@
       "ru": "меняет место, где разговоры этого канала читают и пишут файлы"
     },
     "gui.confirm.cfg.why.channels.whatsapp.allow_from": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.whatsapp.bridge_url": {
@@ -7998,13 +7998,13 @@
       "ru": "отправляет учётные данные и сообщения этого канала на указанный адрес"
     },
     "gui.confirm.cfg.why.channels.whatsapp.enabled": {
-      "en": "turning a channel on lets whoever its allow list admits instruct Raven there",
-      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Raven",
+      "en": "turning a channel on lets whoever its allow list admits instruct Rarus there",
+      "zh": "开启通道后，其允许名单放行的任何人都能在那里指挥 Rarus",
       "ru": "включение канала даёт тем, кого пускает его список разрешённых, возможность давать там команды Rarus"
     },
     "gui.confirm.cfg.why.channels.whatsapp.group_policy": {
-      "en": "widening it lets more people instruct Raven",
-      "zh": "放宽它会让更多人能指挥 Raven",
+      "en": "widening it lets more people instruct Rarus",
+      "zh": "放宽它会让更多人能指挥 Rarus",
       "ru": "расширение даёт больше людям возможность давать команды Rarus"
     },
     "gui.confirm.cfg.why.channels.whatsapp.workspace": {
@@ -8048,8 +8048,8 @@
       "ru": "диспетчерская модель читает это на каждом ходе, поэтому может влиять на то, что и куда отправляется"
     },
     "gui.confirm.cfg.why.subagents.*.lendKeys": {
-      "en": "gives the agent Raven's key for these providers; what it spends is billed to that key",
-      "zh": "把这些提供商的 Raven 密钥交给智能体使用；它的消耗都计在这把密钥上",
+      "en": "gives the agent Rarus's key for these providers; what it spends is billed to that key",
+      "zh": "把这些提供商的 Rarus 密钥交给智能体使用；它的消耗都计在这把密钥上",
       "ru": "даёт агенту ключ Rarus для этих поставщиков; то, что он потратит, спишется с этого ключа"
     },
     "gui.confirm.cfg.why.tools.connectionAdd": {
@@ -8343,8 +8343,8 @@
       "ru": "Веб-поиск ещё не настроен"
     },
     "gui.ws.notice_body": {
-      "en": "Right now Raven can only fetch URLs you give it; it cannot look things up on its own.",
-      "zh": "现在 Raven 只能抓你给出的网址，不能自己找资料。",
+      "en": "Right now Rarus can only fetch URLs you give it; it cannot look things up on its own.",
+      "zh": "现在 Rarus 只能抓你给出的网址，不能自己找资料。",
       "ru": "Сейчас Rarus может только загружать адреса, которые вы ему дадите; сам искать он не может."
     },
     "gui.ws.notice_go": {
@@ -9563,8 +9563,8 @@
       "ru": "Доступ к моделям"
     },
     "gui.settings.team.access_host": {
-      "en": "This Raven's keys",
-      "zh": "使用本 Raven 的密钥",
+      "en": "This Rarus's keys",
+      "zh": "使用本 Rarus 的密钥",
       "ru": "Ключи этого Rarus"
     },
     "gui.settings.team.access_own": {
@@ -9578,8 +9578,8 @@
       "ru": "Поставщик"
     },
     "gui.settings.team.provider_host": {
-      "en": "Follow this Raven",
-      "zh": "跟随本 Raven",
+      "en": "Follow this Rarus",
+      "zh": "跟随本 Rarus",
       "ru": "Как у этого Rarus"
     },
     "gui.settings.team.model": {
@@ -9588,8 +9588,8 @@
       "ru": "Модель"
     },
     "gui.settings.team.model_hint": {
-      "en": "Empty: this Raven's model.",
-      "zh": "留空：使用本 Raven 的模型。",
+      "en": "Empty: this Rarus's model.",
+      "zh": "留空：使用本 Rarus 的模型。",
       "ru": "Пусто: модель этого Rarus."
     },
     "gui.settings.team.api_key": {
@@ -9623,8 +9623,8 @@
       "ru": "{name} в команде; главный агент сможет передавать ему работу со следующего хода."
     },
     "gui.settings.team.host_model": {
-      "en": "this Raven's model",
-      "zh": "本 Raven 的模型",
+      "en": "this Rarus's model",
+      "zh": "本 Rarus 的模型",
       "ru": "модель этого Rarus"
     },
     "gui.settings.team.own_key": {
@@ -9633,8 +9633,8 @@
       "ru": "собственный ключ"
     },
     "gui.settings.team.host_keys": {
-      "en": "this Raven's keys",
-      "zh": "本 Raven 的密钥",
+      "en": "this Rarus's keys",
+      "zh": "本 Rarus 的密钥",
       "ru": "ключи этого Rarus"
     },
     "gui.settings.team.edit_prompt": {
@@ -10213,8 +10213,8 @@
       "ru": "В этом периоде ничего нет"
     },
     "gui.settings.usage.unavailable": {
-      "en": "Can't reach the Raven service",
-      "zh": "连不上 Raven 服务",
+      "en": "Can't reach the Rarus service",
+      "zh": "连不上 Rarus 服务",
       "ru": "Не удаётся связаться со службой Rarus"
     },
     "gui.settings.usage.unavailable_sub": {
@@ -10778,8 +10778,8 @@
       "ru": "Плагин памяти EverOS не установлен"
     },
     "gui.settings.roles.locked_foreign": {
-      "en": "This EverOS install is yours to manage, so Raven reads its config and does not write it",
-      "zh": "这个 EverOS 由你自己管理，Raven 只读它的配置、不写",
+      "en": "This EverOS install is yours to manage, so Rarus reads its config and does not write it",
+      "zh": "这个 EverOS 由你自己管理，Rarus 只读它的配置、不写",
       "ru": "Эта установка EverOS под вашим управлением, поэтому Rarus читает её настройки и не пишет в них"
     },
     "gui.settings.roles.locked_env": {
@@ -11203,8 +11203,8 @@
       "ru": "MCP-серверы не настроены"
     },
     "gui.settings.plugins.none_sub": {
-      "en": "An MCP server hands Raven tools and data from outside.",
-      "zh": "MCP 服务能给 Raven 接上外部的工具和数据。",
+      "en": "An MCP server hands Rarus tools and data from outside.",
+      "zh": "MCP 服务能给 Rarus 接上外部的工具和数据。",
       "ru": "MCP-сервер даёт Rarus инструменты и данные извне."
     },
     "gui.settings.plugins.connected": {
@@ -11668,8 +11668,8 @@
       "ru": "Продолжить разговор..."
     },
     "gui.composer.ph_busy": {
-      "en": "Continue the conversation; Raven will receive your new instruction directly",
-      "zh": "继续对话，Raven 将直接收到你的新指令",
+      "en": "Continue the conversation; Rarus will receive your new instruction directly",
+      "zh": "继续对话，Rarus 将直接收到你的新指令",
       "ru": "Продолжить разговор; Rarus получит вашу новую инструкцию напрямую"
     },
     "gui.at.point": {
@@ -12008,8 +12008,8 @@
       "ru": "Копировать"
     },
     "gui.onb.done_s": {
-      "en": "Raven is ready. Enjoy.",
-      "zh": "Raven 已经准备好了。",
+      "en": "Rarus is ready. Enjoy.",
+      "zh": "Rarus 已经准备好了。",
       "ru": "Rarus готов. Приятной работы."
     },
     "gui.onb.done_t": {
@@ -12043,7 +12043,7 @@
       "ru": "Подключить {name}"
     },
     "gui.onb.local_s": {
-      "en": "Point Raven at your local deployment.",
+      "en": "Point Rarus at your local deployment.",
       "zh": "填写你本地部署的服务地址。",
       "ru": "Укажите Rarus ваше локальное развёртывание."
     },
@@ -12073,8 +12073,8 @@
       "ru": "Вход ещё не выполнен — выполните команду и повторите."
     },
     "gui.onb.provider_s": {
-      "en": "Raven speaks to any of these. Pick one to start with.",
-      "zh": "Raven 支持这些服务商，先选一个开始。",
+      "en": "Rarus speaks to any of these. Pick one to start with.",
+      "zh": "Rarus 支持这些服务商，先选一个开始。",
       "ru": "Rarus работает с любым из них. Выберите, с чего начать."
     },
     "gui.onb.provider_t": {
@@ -12098,8 +12098,8 @@
       "ru": "Подключите поставщика моделей — и всё готово."
     },
     "gui.onb.welcome_t": {
-      "en": "Welcome to Raven",
-      "zh": "欢迎使用 Raven",
+      "en": "Welcome to Rarus",
+      "zh": "欢迎使用 Rarus",
       "ru": "Добро пожаловать в Rarus"
     },
     "gui.set.about_title": {
@@ -12293,8 +12293,8 @@
       "ru": "Рабочая папка"
     },
     "gui.set.cwd_hint": {
-      "en": "Raven reads and writes files only inside this directory.",
-      "zh": "Raven 只在这个目录里读写文件。",
+      "en": "Rarus reads and writes files only inside this directory.",
+      "zh": "Rarus 只在这个目录里读写文件。",
       "ru": "Rarus читает и пишет файлы только внутри этой папки."
     },
     "gui.set.danger": {
@@ -12563,8 +12563,8 @@
       "ru": "English"
     },
     "gui.set.language_hint": {
-      "en": "Applies to this app, the terminal UI, and the language Raven replies in.",
-      "zh": "同时作用于这个 App、终端界面，以及 Raven 回复所用的语言。",
+      "en": "Applies to this app, the terminal UI, and the language Rarus replies in.",
+      "zh": "同时作用于这个 App、终端界面，以及 Rarus 回复所用的语言。",
       "ru": "Применяется к этому приложению, терминальному интерфейсу и языку, на котором отвечает Rarus."
     },
     "gui.set.language_zh": {
@@ -12918,8 +12918,8 @@
       "ru": "Уведомления выключены"
     },
     "gui.set.ntf.hero_w": {
-      "en": "Turned on, Raven would reach you at these moments:",
-      "zh": "打开后，Raven 会在这些时刻找你：",
+      "en": "Turned on, Rarus would reach you at these moments:",
+      "zh": "打开后，Rarus 会在这些时刻找你：",
       "ru": "Если включить, Rarus будет связываться с вами в эти моменты:"
     },
     "gui.set.ntf.nudge": {
@@ -12938,8 +12938,8 @@
       "ru": "Отправить тестовое уведомление"
     },
     "gui.set.ntf.test_body": {
-      "zh": "通知长这样。任务完成而窗口不在前台时，Raven 会这样提醒你。",
-      "en": "This is what it looks like. Raven notifies you like this when a task finishes in the background.",
+      "zh": "通知长这样。任务完成而窗口不在前台时，Rarus 会这样提醒你。",
+      "en": "This is what it looks like. Rarus notifies you like this when a task finishes in the background.",
       "ru": "Вот как это выглядит. Rarus уведомляет вас так, когда задача завершается в фоне."
     },
     "gui.set.ntf.when": {
@@ -13198,8 +13198,8 @@
       "ru": "Искать, чем заняться"
     },
     "gui.set.pro.hero": {
-      "en": "Raven waits to be asked",
-      "zh": "Raven 只在被问到时才动",
+      "en": "Rarus waits to be asked",
+      "zh": "Rarus 只在被问到时才动",
       "ru": "Rarus ждёт, пока его попросят"
     },
     "gui.set.pro.hero_w": {
@@ -13258,13 +13258,13 @@
       "ru": "Версия, журналы и куда сообщать о проблемах."
     },
     "gui.set.sub.account": {
-      "en": "Who this copy of Raven belongs to.",
-      "zh": "这台 Raven 属于谁。",
+      "en": "Who this copy of Rarus belongs to.",
+      "zh": "这台 Rarus 属于谁。",
       "ru": "Кому принадлежит эта копия Rarus."
     },
     "gui.set.sub.channel": {
-      "en": "How Raven talks to you outside this window.",
-      "zh": "Raven 在这个窗口之外怎么找你。",
+      "en": "How Rarus talks to you outside this window.",
+      "zh": "Rarus 在这个窗口之外怎么找你。",
       "ru": "Как Rarus связывается с вами вне этого окна."
     },
     "gui.set.sub.data": {
@@ -13288,8 +13288,8 @@
       "ru": "Язык, тема и шрифт. Всё вступает в силу сразу."
     },
     "gui.set.sub.memory": {
-      "en": "What Raven carries between sessions.",
-      "zh": "Raven 在会话之间带走什么。",
+      "en": "What Rarus carries between sessions.",
+      "zh": "Rarus 在会话之间带走什么。",
       "ru": "Что Rarus переносит между сессиями."
     },
     "gui.set.sub.model": {
@@ -13298,8 +13298,8 @@
       "ru": "Какие поставщики подключены и как отвечает модель."
     },
     "gui.set.sub.notify": {
-      "en": "When Raven is allowed to interrupt you.",
-      "zh": "什么时候允许 Raven 打断你。",
+      "en": "When Rarus is allowed to interrupt you.",
+      "zh": "什么时候允许 Rarus 打断你。",
       "ru": "Когда Rarus можно вас прерывать."
     },
     "gui.set.sub.perm": {
@@ -13308,8 +13308,8 @@
       "ru": "Что агент может делать без предварительного вопроса."
     },
     "gui.set.sub.proact": {
-      "en": "Whether Raven may start something on its own.",
-      "zh": "Raven 能不能主动开始做事。",
+      "en": "Whether Rarus may start something on its own.",
+      "zh": "Rarus 能不能主动开始做事。",
       "ru": "Может ли Rarus начинать что-то сам."
     },
     "gui.set.sub.tools": {
@@ -13998,8 +13998,8 @@
       "ru": "Введите ключ"
     },
     "gui.confirm.cred.hint": {
-      "en": "Saved straight into the settings. Raven never sees it.",
-      "zh": "直接保存到设置里，Raven 看不到它",
+      "en": "Saved straight into the settings. Rarus never sees it.",
+      "zh": "直接保存到设置里，Rarus 看不到它",
       "ru": "Сохраняется прямо в настройки. Rarus его никогда не видит."
     },
     "gui.confirm.cred.replaces": {
@@ -14088,13 +14088,13 @@
       "ru": "Не удалось подключиться: {why}"
     },
     "gui.conn.host_down": {
-      "en": "Raven isn't running in the background, so channels can't receive messages right now.",
-      "zh": "Raven 后台没在运行，渠道暂时收不到消息",
+      "en": "Rarus isn't running in the background, so channels can't receive messages right now.",
+      "zh": "Rarus 后台没在运行，渠道暂时收不到消息",
       "ru": "Rarus не работает в фоне, поэтому каналы сейчас не могут принимать сообщения."
     },
     "gui.conn.line_live": {
-      "en": "Messages you send there reach Raven",
-      "zh": "在这里发的消息 Raven 都能收到",
+      "en": "Messages you send there reach Rarus",
+      "zh": "在这里发的消息 Rarus 都能收到",
       "ru": "Сообщения, которые вы туда отправите, попадут к Rarus"
     },
     "gui.conn.line_scan": {

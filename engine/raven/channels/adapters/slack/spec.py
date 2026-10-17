@@ -28,19 +28,19 @@ SPEC = ChannelSpec(
         "user_token_read_only": {
             "type": "boolean",
             "default": True,
-            "sensitive": "turning it off lets Raven act as you on Slack",
+            "sensitive": "turning it off lets Rarus act as you on Slack",
         },
         "reply_in_thread": {"type": "boolean", "default": True},
         "react_emoji": {"type": "string", "default": "eyes"},
         "group_policy": {
             "type": "string",
             "default": "mention",
-            "sensitive": "widening it lets more people instruct Raven",
+            "sensitive": "widening it lets more people instruct Rarus",
         },
         "group_allow_from": {
             "type": "array",
             "default": [],
-            "sensitive": "widening it lets more people instruct Raven",
+            "sensitive": "widening it lets more people instruct Rarus",
         },
         "dm": {
             "type": "object",
@@ -48,17 +48,17 @@ SPEC = ChannelSpec(
                 "enabled": {
                     "type": "boolean",
                     "default": True,
-                    "sensitive": "widening it lets more people instruct Raven",
+                    "sensitive": "widening it lets more people instruct Rarus",
                 },
                 "policy": {
                     "type": "string",
                     "default": "open",
-                    "sensitive": "widening it lets more people instruct Raven",
+                    "sensitive": "widening it lets more people instruct Rarus",
                 },
                 "allow_from": {
                     "type": "array",
                     "default": [],
-                    "sensitive": "widening it lets more people instruct Raven",
+                    "sensitive": "widening it lets more people instruct Rarus",
                 },
             },
         },

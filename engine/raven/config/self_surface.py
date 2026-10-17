@@ -438,7 +438,7 @@ SECTIONS: tuple[Section, ...] = (
                 "bool",
                 _E.IMMEDIATE,
                 writer="channels",
-                sensitive="turning a channel on lets whoever its allow list admits instruct Raven there",
+                sensitive="turning a channel on lets whoever its allow list admits instruct Rarus there",
                 note="the gateway starts or stops the adapter at once",
             ),
             Setting(
@@ -447,7 +447,7 @@ SECTIONS: tuple[Section, ...] = (
                 "list",
                 _E.IMMEDIATE,
                 writer="channels",
-                sensitive="widening it lets more people instruct Raven",
+                sensitive="widening it lets more people instruct Rarus",
             ),
             Setting(
                 "channels.sendProgress",
@@ -656,7 +656,7 @@ SECTIONS: tuple[Section, ...] = (
                 "list",
                 _E.IMMEDIATE,
                 writer="subagents",
-                sensitive="gives the agent Raven's key for these providers; what it spends is billed to that key",
+                sensitive="gives the agent Rarus's key for these providers; what it spends is billed to that key",
                 note=(
                     "describe subagents.<name> lists can_lend; the key is read from Raven's config at each start "
                     "and never passes through a tool call; [] lends none"
@@ -1138,7 +1138,7 @@ def only_asks_for_secrets(params: dict[str, Any]) -> bool:
 
 
 def touches_sensitive(params: dict[str, Any]) -> bool:
-    """Whether a call changes a setting the catalog marks ``sensitive`` (it widens or narrows what Raven may do).
+    """Whether a call changes a setting the catalog marks ``sensitive`` (it widens or narrows what Rarus may do).
 
     An add that lends a key is one: ``lend_key`` rides inside the add's value,
     not on a path, and it hands Raven's credential to another program the way

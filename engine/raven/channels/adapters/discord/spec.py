@@ -32,7 +32,7 @@ SPEC = ChannelSpec(
             "type": "string",
             "default": "mention",
             "choices": ["mention", "open"],
-            "sensitive": "widening it lets more people instruct Raven",
+            "sensitive": "widening it lets more people instruct Rarus",
         },
     },
 )

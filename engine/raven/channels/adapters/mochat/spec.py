@@ -44,19 +44,19 @@ SPEC = ChannelSpec(
         "max_retry_attempts": {"type": "integer", "default": 0},
         "claw_token": {"type": "string", "default": "", "required": True, "secret": True},
         "agent_user_id": {"type": "string", "default": ""},
-        "sessions": {"type": "array", "default": [], "sensitive": "widening it lets more people instruct Raven"},
-        "panels": {"type": "array", "default": [], "sensitive": "widening it lets more people instruct Raven"},
+        "sessions": {"type": "array", "default": [], "sensitive": "widening it lets more people instruct Rarus"},
+        "panels": {"type": "array", "default": [], "sensitive": "widening it lets more people instruct Rarus"},
         "mention": {
             "type": "object",
             "fields": {
                 "require_in_groups": {
                     "type": "boolean",
                     "default": False,
-                    "sensitive": "widening it lets more people instruct Raven",
+                    "sensitive": "widening it lets more people instruct Rarus",
                 },
             },
         },
-        "groups": {"type": "object", "default": {}, "sensitive": "widening it lets more people instruct Raven"},
+        "groups": {"type": "object", "default": {}, "sensitive": "widening it lets more people instruct Rarus"},
         "reply_delay_mode": {"type": "string", "default": "non-mention"},
         "reply_delay_ms": {"type": "integer", "default": 120000},
     },

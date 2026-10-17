@@ -25,7 +25,7 @@ SPEC = ChannelSpec(
         "consent_granted": {
             "type": "boolean",
             "default": False,
-            "sensitive": "lets Raven read and act on this mailbox",
+            "sensitive": "lets Rarus read and act on this mailbox",
         },
         "imap_host": {
             "type": "string",
@@ -62,7 +62,7 @@ SPEC = ChannelSpec(
             "sensitive": "turning it off sends this channel's credentials or messages unencrypted",
         },
         "from_address": {"type": "string", "default": ""},
-        "auto_reply_enabled": {"type": "boolean", "default": True, "sensitive": "lets Raven send mail on its own"},
+        "auto_reply_enabled": {"type": "boolean", "default": True, "sensitive": "lets Rarus send mail on its own"},
         "poll_interval_seconds": {"type": "integer", "default": 30},
         "mark_seen": {"type": "boolean", "default": True},
         "max_body_chars": {"type": "integer", "default": 12000},

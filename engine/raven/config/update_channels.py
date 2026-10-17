@@ -36,9 +36,9 @@ _SOCKET_SCHEMA: dict[str, dict[str, Any]] = {
     "enabled": {
         "type": "boolean",
         "default": False,
-        "sensitive": "turning a channel on lets whoever its allow list admits instruct Raven there",
+        "sensitive": "turning a channel on lets whoever its allow list admits instruct Rarus there",
     },
-    "allow_from": {"type": "array", "default": ["*"], "sensitive": "widening it lets more people instruct Raven"},
+    "allow_from": {"type": "array", "default": ["*"], "sensitive": "widening it lets more people instruct Rarus"},
     "workspace": {
         "type": "string",
         "default": "",

@@ -1629,9 +1629,9 @@ async def test_the_restart_prompt_title_names_the_restart_that_runs(config_file)
 
 def test_the_card_carries_the_note_of_a_field_inside_an_object_and_names_a_bare_add():
     line = surface.change_line({"action": "set", "path": "channels.telegram", "value": '{"allow_from": ["*"]}'})
-    assert "Note: widening it lets more people instruct Raven" in line
+    assert "Note: widening it lets more people instruct Rarus" in line
     view = surface.change_view({"action": "set", "path": "channels.slack", "value": '{"dm.policy": "open"}'}, {})
-    assert view["sensitive"] == "widening it lets more people instruct Raven"
+    assert view["sensitive"] == "widening it lets more people instruct Rarus"
     assert view["sensitive_key"] == "channels.slack.dm.policy"
     added = surface.change_line({"action": "add", "value": '{"preset": "claude-code", "lend_key": "anthropic"}'})
     assert added.startswith("Connect sub-agent") and "started with Raven's anthropic key" in added
