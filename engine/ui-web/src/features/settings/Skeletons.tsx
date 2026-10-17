@@ -325,6 +325,7 @@ const SHAPE: Partial<Record<SectionId, () => JSX.Element>> = {
             </div>
           )}
         />
+        <WGen ctl={<Bar w="40px" h={22} />} />
       </div>
     </Wait>
   ),

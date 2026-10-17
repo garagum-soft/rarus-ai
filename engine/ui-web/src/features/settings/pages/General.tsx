@@ -16,7 +16,7 @@
    row back rather than writing the feature again. */
 import { code as langCode, t } from '../../../i18n/t'
 import * as look from '../../../state/look'
-import { Seg } from '../Fields'
+import { Seg, Switch } from '../Fields'
 import * as store from '../store'
 
 import type { JSX, ReactNode } from 'react'
@@ -67,6 +67,7 @@ function Preview({ theme }: { theme: Theme }): JSX.Element {
 
 export function General(): JSX.Element {
   const theme = look.get().theme as Theme
+  const reduced = look.get().motion === 'off'
   return (
     <div className="settings-genlist">
       <Setting title={t('gui.settings.general.language')} sub={t('gui.settings.general.language_sub')}>
@@ -95,6 +96,9 @@ export function General(): JSX.Element {
             </button>
           ))}
         </div>
+      </Setting>
+      <Setting title={t('gui.settings.general.motion')} sub={t('gui.settings.general.motion_sub')}>
+        <Switch on={reduced} label={t('gui.settings.general.motion')} onChange={(v) => { look.set({ motion: v ? 'off' : 'on' }); store.redraw() }} />
       </Setting>
     </div>
   )

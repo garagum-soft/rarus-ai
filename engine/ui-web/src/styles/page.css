@@ -6892,7 +6892,8 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
    Rarus AI tokens (spec 10.2). The dark palette above is Raven's; Rarus
    sets the surfaces, lines and accents the design names and adds the few
    tokens the Raven page has no name for (--card, --amber-ink). Loaded last
-   so it wins; the light block is left as it was (spec 10.4 item 8 keeps
+   so it wins (--clay is lifted from #d96a5b to #db6e5f so error text clears 4.5:1 on --raised;
+   scripts/contrast.mjs is the check); the light block is left as it was (spec 10.4 item 8 keeps
    light out of v1 by defaulting the page to dark, not by deleting it).
    ═══════════════════════════════════════════════════════════════════ */
 :root[data-theme="dark"] {
@@ -6903,6 +6904,7 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
   --line: #2c2c2c;
   --line-soft: #262626;
   --amber-ink: #1d1d1d;
+  --clay: #db6e5f;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -6913,5 +6915,6 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
     --line: #2c2c2c;
     --line-soft: #262626;
     --amber-ink: #1d1d1d;
+    --clay: #db6e5f;
   }
 }

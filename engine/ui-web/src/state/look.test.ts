@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Verifies persisted appearance settings and their document-level effects.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { get, load, set } from './look'
 
@@ -79,5 +79,37 @@ describe('the appearance owner', () => {
     localStorage.setItem('raven.gui.look', '{broken')
     load()
     expect(get()).toEqual({ theme: 'dark', codeFont: 'system', motion: 'on' })
+  })
+})
+
+describe('motion follows the system until the reader chooses', () => {
+  const system = (reduce: boolean): void => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: reduce && query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }))
+  }
+  afterEach(() => { vi.unstubAllGlobals(); localStorage.clear() })
+
+  it('starts reduced when the system asks for it and nothing is stored', () => {
+    system(true)
+    load()
+    expect(get().motion).toBe('off')
+    expect(document.documentElement.dataset.motion).toBe('off')
+  })
+
+  it('does not freeze the system\'s setting as a choice when only the theme is changed', () => {
+    system(true)
+    load()
+    set({ theme: 'light' })
+    expect(JSON.parse(localStorage.getItem('raven.gui.look')!).motion).toBeUndefined()
+    system(false)
+    load()
+    expect(get().motion).toBe('on')
+  })
+
+  it('keeps the reader\'s own pick over the system, either way', () => {
+    system(true)
+    load()
+    set({ motion: 'on' })
+    load()
+    expect(get().motion).toBe('on')
   })
 })

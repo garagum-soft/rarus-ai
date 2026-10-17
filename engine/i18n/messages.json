@@ -16261,6 +16261,16 @@
       "en": "The server answered with an error. Try again later.",
       "zh": "服务器返回错误，请稍后再试。",
       "ru": "Сервер ответил ошибкой. Попробуйте позже."
+    },
+    "gui.settings.general.motion": {
+      "en": "Reduce motion",
+      "zh": "减少动效",
+      "ru": "Уменьшить движение"
+    },
+    "gui.settings.general.motion_sub": {
+      "en": "Turns off loading and transition animations. Follows the system setting until you choose.",
+      "zh": "关闭加载和过渡动画。在你选择之前跟随系统设置。",
+      "ru": "Отключает анимации загрузки и переходов. Пока вы не выбрали, следует настройке системы."
     }
   }
 }

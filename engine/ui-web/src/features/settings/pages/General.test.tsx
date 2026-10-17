@@ -52,7 +52,7 @@ describe('general page', () => {
   it('says what each setting is for under its name', async () => {
     install()
     await mount('general')
-    for (const k of ['language', 'theme']) {
+    for (const k of ['language', 'theme', 'motion']) {
       const title = screen.getByText('gui.settings.general.' + k, { selector: '.settings-gen-t' })
       expect(title.nextElementSibling!.textContent).toBe('gui.settings.general.' + k + '_sub')
     }
@@ -65,7 +65,22 @@ describe('general page', () => {
     Object.defineProperty(window, 'Notification', { value: { permission: 'granted', requestPermission: async () => 'granted' }, configurable: true })
     install()
     await mount('general')
-    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByLabelText('gui.settings.general.notify')).toBeNull()
     expect(screen.queryByText('gui.settings.general.notify')).toBeNull()
+  })
+})
+
+describe('reduce motion', () => {
+  it('is a switch that writes the look store and the document attribute', async () => {
+    install()
+    await mount('general')
+    const sw = screen.getByRole('switch', { name: 'gui.settings.general.motion' })
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    await act(async () => { fireEvent.click(sw) })
+    expect(look.get().motion).toBe('off')
+    expect(document.documentElement.dataset.motion).toBe('off')
+    expect(screen.getByRole('switch', { name: 'gui.settings.general.motion' }).getAttribute('aria-checked')).toBe('true')
+    await act(async () => { fireEvent.click(screen.getByRole('switch', { name: 'gui.settings.general.motion' })) })
+    expect(look.get().motion).toBe('on')
   })
 })
