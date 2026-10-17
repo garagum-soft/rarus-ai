@@ -28,6 +28,7 @@
  */
 
 import { manifest as browser } from './browser/manifest'
+import { manifest as canvas } from './canvas/manifest'
 import { manifest as composer } from './composer/manifest'
 import { manifest as connections } from './connections/manifest'
 import { manifest as cron } from './cron/manifest'
@@ -75,7 +76,9 @@ export interface DomainManifest {
   readonly cssPrefix?: string
 }
 
-/** The twenty, alphabetically: nothing reads them in an order. */
+/** The twenty-one, alphabetically but for the last: main.tsx mounts the roots in this order, and the
+ *  boot snapshot (happy-dom, timers clamped to 50ms) commits only the first roots it is given, so a
+ *  domain added later goes at the end rather than shifting what the goldens record. */
 export const MANIFESTS: readonly DomainManifest[] = [
   browser,
   composer,
@@ -97,4 +100,6 @@ export const MANIFESTS: readonly DomainManifest[] = [
   trajectory,
   transcript,
   workspace,
+  /* Last: see above. */
+  canvas,
 ]

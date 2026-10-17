@@ -218,6 +218,8 @@ const LEGACY_LOCAL = {
      the check pins every domain rather than only the ones with debt -- a
      domain absent from this table is one nobody has measured. */
   knowledge: 0,
+  /* Zero, and new: the agent canvas was written after the rule. */
+  canvas: 0,
   /* Up from 9, and none of the three is new code: an earlier branch deleted
      the old settings page, which also named `.icb`, `.other`, `.srow` and
      `.what`, so what the check read as two domains' it now reads as
@@ -325,6 +327,8 @@ const LEGACY_LOCAL = {
 // debt. A name in both places is counted once, by LEGACY_LOCAL.
 const LEGACY_EXPR = {
   browser: 2,
+  /* Zero, and new: the agent canvas was written after the rule. */
+  canvas: 0,
   /* Zero, for the same reason the table above has it at zero: the domain
      was written after the rule, expressions included. */
   knowledge: 0,

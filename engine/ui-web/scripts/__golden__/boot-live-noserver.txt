@@ -51,6 +51,14 @@ div.app[data-rail=on]
             path
             path
         span
+      button#canvasBtn.navi
+        svg
+          g
+            rect
+            rect
+            rect
+            path
+        span
     div#findBox.find
       span.ic
         svg
@@ -312,6 +320,11 @@ section#knowledgePage.page[data-open=false]
     h2
   div.work
     div#knowledgeBody.wrap
+section#canvasPage.page[data-open=false]
+  header
+    h2
+  div.work
+    div#canvasBody.wrap
 aside#detail.detail[data-open=false]
   div.dpanel
     header

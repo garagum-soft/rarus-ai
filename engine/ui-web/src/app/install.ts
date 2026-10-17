@@ -12,6 +12,7 @@
  */
 
 import { onFrameBytes, onFrameJson, browserSource } from '../features/browser/source'
+import { canvasSource } from '../features/canvas/source'
 import { open as approveSheet } from '../features/composer/approve'
 import { closeCredential, openCredential } from '../features/composer/credential'
 import { startTaskWith } from '../features/composer/startTaskWith'
@@ -245,6 +246,7 @@ export function installSources(): void {
   }
   sources.extAgents = extAgentsSource
   sources.knowledge = knowledgeSource
+  sources.canvas = canvasSource
   /* How a citation in the transcript is followed. Registered by the island
      that can do it rather than imported by the one that wants it: two domains
      reaching for each other is what puts every island in every island's

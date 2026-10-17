@@ -54,6 +54,7 @@ export const PARAMS = {
   'plug.revoke': { name: 'websearch' },
   'plug.configure': { name: 'github', form: { token: 'x' } },
   'skills.manage': { action: 'list' },
+  'org.set': { members: [] },
   'subagents.list': { probe: false },
   'subagents.add': { preset: 'codex', name: 'codex' },
   'subagents.update': { name: 'claude_code', description: 'x' },

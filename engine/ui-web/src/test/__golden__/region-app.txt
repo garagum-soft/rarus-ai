@@ -50,6 +50,14 @@ div.app
             path
             path
         span
+      button#canvasBtn.navi
+        svg
+          g
+            rect
+            rect
+            rect
+            path
+        span
     div#findBox.find
       span.ic
         svg

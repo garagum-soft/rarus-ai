@@ -15,6 +15,7 @@
  * held to one shape.
  */
 import type { BrowserSource } from '../features/browser/types'
+import type { CanvasSource } from '../features/canvas/types'
 import type { ComposerSource } from '../features/composer/types'
 import type { ConnectionsSource } from '../features/connections/types'
 import type { CronSource } from '../features/cron/types'
@@ -47,6 +48,7 @@ export interface CapabilitiesSource {
 export interface Sources {
   banner: BannerSource
   browser: BrowserSource
+  canvas: CanvasSource
   capabilities: CapabilitiesSource
   composer: ComposerSource
   connections: ConnectionsSource

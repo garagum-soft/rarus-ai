@@ -82,6 +82,20 @@ export function CubeGlyph({ size = 16 }: { size?: number }): JSX.Element {
   )
 }
 
+/** Agent canvas: a parent card joined to two children. */
+export function CanvasGlyph({ size = 16 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5.5" y="1.5" width="5" height="3.5" rx="1" />
+        <rect x="1.5" y="11" width="5" height="3.5" rx="1" />
+        <rect x="9.5" y="11" width="5" height="3.5" rx="1" />
+        <path d="M8 5v2.75M4 11V7.75h8V11" />
+      </g>
+    </svg>
+  )
+}
+
 /* A staged file's type, as a coloured badge -- the one place the icon set
    carries colour of its own, because the colour is the type. Only the kinds the
    design draws a badge for; anything else wears a plain file glyph instead. */

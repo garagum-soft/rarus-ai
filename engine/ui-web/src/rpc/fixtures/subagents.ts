@@ -98,8 +98,21 @@ export function createSubagents(env: FixtureEnv): SubagentsFixture {
   const rows = ROSTER.map((r) => (r.last_test_ok ? { ...r, last_test_at_ms: env.now() - 3600e3 } : { ...r }))
   const find = (name: string): Row | undefined => rows.find((r) => r.name === name)
 
+  /* The chart the canvas draws: who reports to whom. Held and replaced whole,
+     as the engine's `org.set` does, so a card dragged under another stays there
+     across a redraw. The engine's checks (one manager each, no loop, six
+     levels) are not repeated here; the page runs them before it sends. */
+  type Member = ResultOf<'org.get'>['members'][number]
+  let org: Member[] = [{ name: 'claude_code', reports_to: 'raven', department: 'Engineering', title: 'Coder' }]
+  const MAX_DEPTH = 6
+
   return {
     fixtures: {
+      'org.get': () => ({ members: org.map((m) => ({ ...m })), max_depth: MAX_DEPTH }),
+      'org.set': (p) => {
+        org = p.members.map((m) => ({ ...m }))
+        return { members: org.map((m) => ({ ...m })), max_depth: MAX_DEPTH }
+      },
       'subagents.list': () => ({ rows: rows.map((r) => ({ ...r })) }),
       'subagents.add': (p) => {
         const row = find(p.name || p.preset || '')

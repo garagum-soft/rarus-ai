@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { t } from '../../i18n/t'
+import * as confirm from '../../state/confirm'
 import * as lang from '../../state/lang'
+import * as page from '../../state/page'
 import { CARD_H, CARD_W, byName, chain, edgesOf, levelOf, managersFor, reportsOf, step, wirePath } from './graph'
 import * as store from './store'
 
@@ -20,11 +22,16 @@ const DRAG_SLOP = 4
 const arrows: readonly string[] = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
 
 const REFUSALS = {
-  self: 'gui.cv.refuse_self',
-  cycle: 'gui.cv.refuse_cycle',
-  depth: 'gui.cv.refuse_depth',
-  unknown: 'gui.cv.refuse_unknown',
+  self: 'gui.canvas.refuse_self',
+  cycle: 'gui.canvas.refuse_cycle',
+  depth: 'gui.canvas.refuse_depth',
+  unknown: 'gui.canvas.refuse_unknown',
 } as const
+
+/* Taking a card out of the chart moves its reports up, so the reader is asked first, in the app's
+   own dialog. */
+const askRemove = (name: string): void =>
+  confirm.ask(t('gui.canvas.remove'), t('gui.canvas.confirm_remove', { name }), t('gui.canvas.remove'), () => { void store.removeFromChart(name) })
 
 interface Drag {
   mode: 'pan' | 'card' | 'box'
@@ -37,7 +44,15 @@ interface Drag {
   additive: boolean
 }
 
-export function CanvasApp(): JSX.Element {
+/* Nothing is drawn while the page is shut: the island is mounted at boot with the rest, and a
+   canvas painted into a closed page would cost every first paint a tree nobody can see. */
+export function CanvasApp(): JSX.Element | null {
+  useSyncExternalStore(lang.subscribe, lang.get)
+  const shown = useSyncExternalStore(page.subscribe, page.get)
+  return shown === 'canvasPage' ? <CanvasBody /> : null
+}
+
+function CanvasBody(): JSX.Element {
   const s = useSyncExternalStore(store.subscribe, store.get)
   useSyncExternalStore(lang.subscribe, lang.get)
   const [panel, setPanel] = useState(false)
@@ -174,8 +189,8 @@ export function CanvasApp(): JSX.Element {
       e.preventDefault()
       if (s.edge) {
         void store.unlinkSelected()
-      } else if (at && s.org.some((r) => r.name === at) && window.confirm(t('gui.cv.confirm_remove', { name: at }))) {
-        void store.removeFromChart(at)
+      } else if (at && s.org.some((r) => r.name === at)) {
+        askRemove(at)
       }
     } else if (e.key === '+' || e.key === '=') {
       store.zoomBy(1.2)
@@ -195,28 +210,28 @@ export function CanvasApp(): JSX.Element {
     }
   }
 
-  const notice = s.refused ? t(REFUSALS[s.refused]) : s.error === 'import' ? t('gui.cv.import_bad') : s.error
+  const notice = s.refused ? t(REFUSALS[s.refused]) : s.error === 'import' ? t('gui.canvas.import_bad') : s.error
 
   return (
-    <div className="cv">
-      <div className="cv-bar" role="toolbar" aria-label={t('gui.cv.tools')}>
-        <div className="cv-title">{t('gui.page.canvas')}</div>
-        <span className="cv-grow" />
-        {notice ? <span className="cv-notice" role="alert">{notice}</span> : null}
-        <button type="button" className="cv-tool" onClick={() => store.zoomBy(1 / 1.2)} aria-label={t('gui.cv.zoom_out')}>−</button>
-        <span className="cv-zoom" aria-live="off">{Math.round(s.view.k * 100)}%</span>
-        <button type="button" className="cv-tool" onClick={() => store.zoomBy(1.2)} aria-label={t('gui.cv.zoom_in')}>+</button>
-        <button type="button" className="cv-tool" onClick={() => store.fit()}>{t('gui.cv.fit')}</button>
-        <button type="button" className="cv-tool" onClick={() => store.autoLayout()}>{t('gui.cv.layout')}</button>
-        <button type="button" className="cv-tool" disabled={!s.undo.length} onClick={() => void store.undo()}>{t('gui.cv.undo')}</button>
-        <button type="button" className="cv-tool" aria-pressed={panel} onClick={() => setPanel(!panel)}>{t('gui.cv.file')}</button>
+    <div className="canvas">
+      <div className="canvas-bar" role="toolbar" aria-label={t('gui.canvas.tools')}>
+        <div className="canvas-title">{t('gui.canvas.page')}</div>
+        <span className="canvas-grow" />
+        {notice ? <span className="canvas-notice" role="alert">{notice}</span> : null}
+        <button type="button" className="canvas-tool" onClick={() => store.zoomBy(1 / 1.2)} aria-label={t('gui.canvas.zoom_out')}>−</button>
+        <span className="canvas-zoom" aria-live="off">{Math.round(s.view.k * 100)}%</span>
+        <button type="button" className="canvas-tool" onClick={() => store.zoomBy(1.2)} aria-label={t('gui.canvas.zoom_in')}>+</button>
+        <button type="button" className="canvas-tool" onClick={() => store.fit()}>{t('gui.canvas.fit')}</button>
+        <button type="button" className="canvas-tool" onClick={() => store.autoLayout()}>{t('gui.canvas.layout')}</button>
+        <button type="button" className="canvas-tool" disabled={!s.undo.length} onClick={() => void store.undo()}>{t('gui.canvas.undo')}</button>
+        <button type="button" className="canvas-tool" aria-pressed={panel} onClick={() => setPanel(!panel)}>{t('gui.canvas.file')}</button>
       </div>
-      <div className="cv-body">
+      <div className="canvas-body">
         <div
-          className="cv-stage"
+          className="canvas-stage"
           ref={stage}
           role="tree"
-          aria-label={t('gui.cv.tree')}
+          aria-label={t('gui.canvas.tree')}
           aria-multiselectable="true"
           onPointerDown={onDown}
           onPointerMove={onMove}
@@ -224,11 +239,11 @@ export function CanvasApp(): JSX.Element {
           onKeyDown={onKey}
           data-grab={drag.current?.moved ? drag.current.mode : undefined}
         >
-          <div className="cv-layer" style={{ transform: `translate(${s.view.x}px, ${s.view.y}px) scale(${s.view.k})` }}>
-            <svg className="cv-wires" aria-hidden="true">
+          <div className="canvas-layer" style={{ transform: `translate(${s.view.x}px, ${s.view.y}px) scale(${s.view.k})` }}>
+            <svg className="canvas-wires" aria-hidden="true">
               <defs>
-                <marker id="cv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                  <path d="M0 0L10 5L0 10z" className="cv-arrowhead" />
+                <marker id="canvas-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0 0L10 5L0 10z" className="canvas-arrowhead" />
                 </marker>
               </defs>
               {edges.map((edge) => {
@@ -238,8 +253,8 @@ export function CanvasApp(): JSX.Element {
                 const dim = lit ? !(lit.has(edge.from) && lit.has(edge.to)) : false
                 return (
                   <g key={key}>
-                    <path className="cv-edge" data-hot={hot || undefined} data-dim={dim || undefined} d={d} markerEnd="url(#cv-arrow)" />
-                    <path className="cv-hit" data-wire={key} d={d} onClick={() => store.selectEdge(hot ? null : key)} />
+                    <path className="canvas-edge" data-hot={hot || undefined} data-dim={dim || undefined} d={d} markerEnd="url(#canvas-arrow)" />
+                    <path className="canvas-hit" data-wire={key} d={d} onClick={() => store.selectEdge(hot ? null : key)} />
                   </g>
                 )
               })}
@@ -255,7 +270,7 @@ export function CanvasApp(): JSX.Element {
               return (
                 <div
                   key={a.name}
-                  className="cv-card"
+                  className="canvas-card"
                   role="treeitem"
                   aria-level={Math.max(1, levelOf(s.org, a.name))}
                   aria-selected={picked}
@@ -271,29 +286,29 @@ export function CanvasApp(): JSX.Element {
                   onDoubleClick={() => store.openInspector(a.name)}
                   onFocus={() => store.focusOn(a.name)}
                 >
-                  <div className="cv-name" title={a.name}>{a.name}</div>
-                  <div className="cv-role">{a.role || row?.title || t(`gui.cv.origin_${a.origin}`)}</div>
-                  {a.description ? <div className="cv-desc">{a.description}</div> : null}
-                  <div className="cv-chips">
-                    {a.model ? <span className="cv-chip">{a.model}</span> : null}
-                    {row?.department ? <span className="cv-chip">{row.department}</span> : null}
+                  <div className="canvas-name" title={a.name}>{a.name}</div>
+                  <div className="canvas-role">{a.role || row?.title || t(`gui.canvas.origin_${a.origin}`)}</div>
+                  {a.description ? <div className="canvas-desc">{a.description}</div> : null}
+                  <div className="canvas-chips">
+                    {a.model ? <span className="canvas-chip">{a.model}</span> : null}
+                    {row?.department ? <span className="canvas-chip">{row.department}</span> : null}
                   </div>
-                  <div className="cv-status">
-                    <span className="cv-dot" data-ok={a.ready || undefined} aria-hidden="true" />
-                    {a.ready ? t('gui.cv.ready') : t('gui.cv.not_ready')}
+                  <div className="canvas-status">
+                    <span className="canvas-dot" data-ok={a.ready || undefined} aria-hidden="true" />
+                    {a.ready ? t('gui.canvas.ready') : t('gui.canvas.not_ready')}
                   </div>
                 </div>
               )
             })}
             {box ? (
               <div
-                className="cv-box"
+                className="canvas-box"
                 style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }}
               />
             ) : null}
           </div>
-          {s.loaded && !s.agents.length ? <div className="cv-empty">{t('gui.cv.empty')}</div> : null}
-          {s.loading && !s.loaded ? <div className="cv-empty">{t('gui.onb.loading')}</div> : null}
+          {s.loaded && !s.agents.length ? <div className="canvas-empty">{t('gui.canvas.empty')}</div> : null}
+          {s.loading && !s.loaded ? <div className="canvas-empty">{t('gui.canvas.loading')}</div> : null}
         </div>
         {s.inspect ? <Inspector name={s.inspect} known={known} /> : null}
         {panel ? <FilePanel onClose={() => setPanel(false)} /> : null}
@@ -303,9 +318,9 @@ export function CanvasApp(): JSX.Element {
 }
 
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
-  ['main', 'gui.cv.tab_main'],
-  ['prompt', 'gui.cv.tab_prompt'],
-  ['links', 'gui.cv.tab_links'],
+  ['main', 'gui.canvas.tab_main'],
+  ['prompt', 'gui.canvas.tab_prompt'],
+  ['links', 'gui.canvas.tab_links'],
 ]
 
 function Inspector({ name, known }: { name: string; known: string[] }): JSX.Element | null {
@@ -313,22 +328,22 @@ function Inspector({ name, known }: { name: string; known: string[] }): JSX.Elem
   const agent = s.agents.find((a) => a.name === name)
   if (!agent) return null
   return (
-    <aside className="cv-pane" aria-label={t('gui.cv.inspector')}>
-      <div className="cv-pane-head">
+    <aside className="canvas-pane" aria-label={t('gui.canvas.inspector')}>
+      <div className="canvas-pane-head">
         <div>
-          <div className="cv-pane-name">{agent.name}</div>
-          <div className="cv-pane-id">{t(`gui.cv.origin_${agent.origin}`)}</div>
+          <div className="canvas-pane-name">{agent.name}</div>
+          <div className="canvas-pane-id">{t(`gui.canvas.origin_${agent.origin}`)}</div>
         </div>
-        <button type="button" className="cv-tool" onClick={() => store.closeInspector()} aria-label={t('gui.cv.close')}>×</button>
+        <button type="button" className="canvas-tool" onClick={() => store.closeInspector()} aria-label={t('gui.canvas.close')}>×</button>
       </div>
-      <div className="cv-tabs" role="tablist">
+      <div className="canvas-tabs" role="tablist">
         {TABS.map(([id, key]) => (
-          <button key={id} type="button" role="tab" aria-selected={s.tab === id} className="cv-tab" onClick={() => store.setTab(id)}>
+          <button key={id} type="button" role="tab" aria-selected={s.tab === id} className="canvas-tab" onClick={() => store.setTab(id)}>
             {t(key)}
           </button>
         ))}
       </div>
-      <div className="cv-pane-body" role="tabpanel">
+      <div className="canvas-pane-body" role="tabpanel">
         {s.tab === 'main' ? <MainTab name={name} known={known} /> : s.tab === 'prompt' ? <PromptTab name={name} /> : <LinksTab name={name} />}
       </div>
     </aside>
@@ -345,31 +360,31 @@ function MainTab({ name, known }: { name: string; known: string[] }): JSX.Elemen
   useEffect(() => { setDepartment(row?.department ?? ''); setTitle(row?.title ?? '') }, [name, row?.department, row?.title])
   return (
     <>
-      {agent?.role ? <p className="cv-text">{agent.role}</p> : null}
-      {agent?.description ? <p className="cv-text cv-faint">{agent.description}</p> : null}
-      {agent?.model ? <div className="cv-chips"><span className="cv-chip">{agent.model}</span></div> : null}
-      <label className="cv-field">
-        <span>{t('gui.cv.manager')}</span>
+      {agent?.role ? <p className="canvas-text">{agent.role}</p> : null}
+      {agent?.description ? <p className="canvas-text canvas-faint">{agent.description}</p> : null}
+      {agent?.model ? <div className="canvas-chips"><span className="canvas-chip">{agent.model}</span></div> : null}
+      <label className="canvas-field">
+        <span>{t('gui.canvas.manager')}</span>
         <select
           value={row?.reports_to ?? ''}
           onChange={(e) => void store.reparent(name, e.target.value || null)}
         >
-          <option value="">{t('gui.cv.no_manager')}</option>
+          <option value="">{t('gui.canvas.no_manager')}</option>
           {row?.reports_to && !options.includes(row.reports_to) ? <option value={row.reports_to}>{row.reports_to}</option> : null}
           {options.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       </label>
-      <label className="cv-field">
-        <span>{t('gui.cv.department')}</span>
+      <label className="canvas-field">
+        <span>{t('gui.canvas.department')}</span>
         <input value={department} onChange={(e) => setDepartment(e.target.value)} onBlur={() => { if (department !== (row?.department ?? '')) void store.editMeta(name, { department }) }} />
       </label>
-      <label className="cv-field">
-        <span>{t('gui.cv.title')}</span>
+      <label className="canvas-field">
+        <span>{t('gui.canvas.title')}</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => { if (title !== (row?.title ?? '')) void store.editMeta(name, { title }) }} />
       </label>
       {row ? (
-        <button type="button" className="cv-tool" onClick={() => { if (window.confirm(t('gui.cv.confirm_remove', { name }))) void store.removeFromChart(name) }}>
-          {t('gui.cv.remove')}
+        <button type="button" className="canvas-tool" onClick={() => askRemove(name)}>
+          {t('gui.canvas.remove')}
         </button>
       ) : null}
     </>
@@ -379,31 +394,31 @@ function MainTab({ name, known }: { name: string; known: string[] }): JSX.Elemen
 function PromptTab({ name }: { name: string }): JSX.Element {
   const s = useSyncExternalStore(store.subscribe, store.get)
   const p = s.prompt
-  if (!store.isEmployee(name)) return <p className="cv-text cv-faint">{t('gui.cv.prompt_none')}</p>
+  if (!store.isEmployee(name)) return <p className="canvas-text canvas-faint">{t('gui.canvas.prompt_none')}</p>
   const dirty = p.text !== p.saved
   return (
     <>
       <textarea
-        className="cv-prompt"
+        className="canvas-prompt"
         value={p.text}
         disabled={p.loading}
-        aria-label={t('gui.cv.tab_prompt')}
+        aria-label={t('gui.canvas.tab_prompt')}
         onChange={(e) => store.editPrompt(e.target.value)}
       />
-      <button type="button" className="cv-save" disabled={!dirty || p.loading} onClick={() => void store.savePrompt()}>
-        {t('gui.cv.save')}
+      <button type="button" className="canvas-save" disabled={!dirty || p.loading} onClick={() => void store.savePrompt()}>
+        {t('gui.canvas.save')}
       </button>
-      <div className="cv-hist-title">{t('gui.cv.history')}</div>
+      <div className="canvas-hist-title">{t('gui.canvas.history')}</div>
       {p.history.length ? (
-        <ul className="cv-hist">
+        <ul className="canvas-hist">
           {p.history.map((text, i) => (
             <li key={`${i}:${text.length}`}>
-              <span className="cv-hist-text">{text.slice(0, 90) || '—'}</span>
-              <button type="button" className="cv-tool" onClick={() => store.rollbackTo(i)}>{t('gui.cv.rollback')}</button>
+              <span className="canvas-hist-text">{text.slice(0, 90) || '—'}</span>
+              <button type="button" className="canvas-tool" onClick={() => store.rollbackTo(i)}>{t('gui.canvas.rollback')}</button>
             </li>
           ))}
         </ul>
-      ) : <p className="cv-text cv-faint">{t('gui.cv.history_empty')}</p>}
+      ) : <p className="canvas-text canvas-faint">{t('gui.canvas.history_empty')}</p>}
     </>
   )
 }
@@ -415,22 +430,22 @@ function LinksTab({ name }: { name: string }): JSX.Element {
   const above = chain(s.org, name)
   return (
     <>
-      <div className="cv-hist-title">{t('gui.cv.manager')}</div>
+      <div className="canvas-hist-title">{t('gui.canvas.manager')}</div>
       {manager ? (
-        <button type="button" className="cv-link" onClick={() => store.openInspector(manager, 'links')}>{manager}</button>
-      ) : <p className="cv-text cv-faint">{t('gui.cv.no_manager')}</p>}
-      {above.length > 1 ? <p className="cv-text cv-faint">{above.join(' › ')}</p> : null}
-      <div className="cv-hist-title">{t('gui.cv.reports')}</div>
+        <button type="button" className="canvas-link" onClick={() => store.openInspector(manager, 'links')}>{manager}</button>
+      ) : <p className="canvas-text canvas-faint">{t('gui.canvas.no_manager')}</p>}
+      {above.length > 1 ? <p className="canvas-text canvas-faint">{above.join(' › ')}</p> : null}
+      <div className="canvas-hist-title">{t('gui.canvas.reports')}</div>
       {reports.length ? (
-        <ul className="cv-hist">
+        <ul className="canvas-hist">
           {reports.map((r) => (
             <li key={r}>
-              <button type="button" className="cv-link" onClick={() => store.openInspector(r, 'links')}>{r}</button>
-              <button type="button" className="cv-tool" onClick={() => void store.reparent(r, null)}>{t('gui.cv.unlink')}</button>
+              <button type="button" className="canvas-link" onClick={() => store.openInspector(r, 'links')}>{r}</button>
+              <button type="button" className="canvas-tool" onClick={() => void store.reparent(r, null)}>{t('gui.canvas.unlink')}</button>
             </li>
           ))}
         </ul>
-      ) : <p className="cv-text cv-faint">{t('gui.cv.no_reports')}</p>}
+      ) : <p className="canvas-text canvas-faint">{t('gui.canvas.no_reports')}</p>}
     </>
   )
 }
@@ -440,17 +455,17 @@ function LinksTab({ name }: { name: string }): JSX.Element {
 function FilePanel({ onClose }: { onClose: () => void }): JSX.Element {
   const [text, setText] = useState(() => store.exportText())
   return (
-    <aside className="cv-pane cv-file" aria-label={t('gui.cv.file')}>
-      <div className="cv-pane-head">
-        <div className="cv-pane-name">{t('gui.cv.file')}</div>
-        <button type="button" className="cv-tool" onClick={onClose} aria-label={t('gui.cv.close')}>×</button>
+    <aside className="canvas-pane canvas-file" aria-label={t('gui.canvas.file')}>
+      <div className="canvas-pane-head">
+        <div className="canvas-pane-name">{t('gui.canvas.file')}</div>
+        <button type="button" className="canvas-tool" onClick={onClose} aria-label={t('gui.canvas.close')}>×</button>
       </div>
-      <p className="cv-text cv-faint">{t('gui.cv.file_hint')}</p>
-      <textarea className="cv-prompt cv-json" value={text} onChange={(e) => setText(e.target.value)} aria-label={t('gui.cv.file')} spellCheck={false} />
-      <div className="cv-row">
-        <button type="button" className="cv-tool" onClick={() => setText(store.exportText())}>{t('gui.cv.file_reset')}</button>
-        <button type="button" className="cv-save" onClick={() => void store.importText(text).then((ok) => { if (ok) onClose() })}>
-          {t('gui.cv.file_apply')}
+      <p className="canvas-text canvas-faint">{t('gui.canvas.file_hint')}</p>
+      <textarea className="canvas-prompt canvas-json" value={text} onChange={(e) => setText(e.target.value)} aria-label={t('gui.canvas.file')} spellCheck={false} />
+      <div className="canvas-row">
+        <button type="button" className="canvas-tool" onClick={() => setText(store.exportText())}>{t('gui.canvas.file_reset')}</button>
+        <button type="button" className="canvas-save" onClick={() => void store.importText(text).then((ok) => { if (ok) onClose() })}>
+          {t('gui.canvas.file_apply')}
         </button>
       </div>
     </aside>

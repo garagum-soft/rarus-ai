@@ -40,8 +40,9 @@
 import { LayoutAlignLeftIcon, PlusSignIcon, Search01Icon, Settings02Icon } from '@hugeicons/core-free-icons'
 import { useSyncExternalStore } from 'react'
 
-import { AgentsGlyph, CubeGlyph, Icon } from '../components/Icon'
+import { AgentsGlyph, CanvasGlyph, CubeGlyph, Icon } from '../components/Icon'
 import { RavenMark } from '../components/RavenMark'
+import { open as openCanvas } from '../features/canvas/store'
 import { open as openKnowledge } from '../features/knowledge/store'
 import { open as openSettings } from '../features/settings/store'
 import { t } from '../i18n/t'
@@ -118,6 +119,12 @@ const NAV_ROWS: ReadonlyArray<{
     key: 'gui.nav.knowledge',
     open: () => openKnowledge(),
     icon: <CubeGlyph />,
+  },
+  {
+    button: 'canvasBtn',
+    key: 'gui.nav.canvas',
+    open: () => openCanvas(),
+    icon: <CanvasGlyph />,
   },
 ]
 

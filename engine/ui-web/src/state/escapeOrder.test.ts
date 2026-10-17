@@ -43,7 +43,7 @@ import * as workdir from './workdir'
 
 import type { ComposerSource } from '../features/composer/types'
 
-/* The twelve, in the order Escape reaches them. Each item is the text the chain
+/* The fifteen, in the order Escape reaches them. Each item is the text the chain
    tests to decide whether that layer is on screen -- a selector for the seven
    elements, the predicate's own name for the three that have no element of
    their own to look at.
@@ -57,6 +57,7 @@ const LAYER_IDS = [
   '#extAgentsPage',
   '#connectionsPage',
   '#knowledgePage',
+  '#canvasPage',
   'setIsOpen()',
   'desk.escapeOpen()',
   '#permPop',
@@ -87,6 +88,7 @@ const PAGE = [
   '<section class="page" id="extAgentsPage" data-open="false"></section>',
   '<section class="page" id="connectionsPage" data-open="false"></section>',
   '<section class="page" id="knowledgePage" data-open="false"></section>',
+  '<section class="page" id="canvasPage" data-open="false"></section>',
   '<aside class="detail" id="detail" data-open="false"><div class="body" id="dBody"></div></aside>',
   '<div class="veil setveil" id="setVeil" data-open="false"><div id="setModal"></div></div>',
   '<div class="veil" id="veil" data-open="false"><button id="cfNo"></button></div>',
@@ -137,6 +139,7 @@ const LAYERS: Record<string, { up: () => void; taken: () => boolean }> = {
      pins the upward edges and will not take a new one. Both pages therefore
      answer by the same spy, which is why PAIRS below leaves their pair out. */
   '#knowledgePage': { up: flag('knowledgePage'), taken: called(spies.pageShow) },
+  '#canvasPage': { up: flag('canvasPage'), taken: called(spies.pageShow) },
   'setIsOpen()': { up: () => settingsDialog.open(), taken: () => !settingsDialog.isOpen() },
   /* Its four-rung retreat (fullscreen -> node -> pane -> collapse) is
      store.test.ts's to prove; this fixture only needs one rung on screen and
@@ -219,11 +222,11 @@ const key = (k: string, over: Partial<KeyboardEventInit> = {}): KeyboardEvent =>
 }
 
 describe('the Escape priority order', () => {
-  it('is the order the table reaches the fourteen layers in', () => {
+  it('is the order the table reaches the fifteen layers in', () => {
     expect(escapeOrder.ESCAPE_ORDER.map((layer) => layer.id)).toEqual([...LAYER_IDS])
   })
 
-  it('has no fourteenth entry, and every entry is in the fixture', () => {
+  it('has no sixteenth entry, and every entry is in the fixture', () => {
     expect(escapeOrder.ESCAPE_ORDER).toHaveLength(LAYER_IDS.length)
     expect(Object.keys(LAYERS)).toEqual([...LAYER_IDS])
   })
@@ -249,19 +252,24 @@ describe('the Escape priority order', () => {
      below pins that instead, by the one thing that does differ. Not a state
      the page can be in either way: `page.show` opens one page and clears the
      rest, so two pages are never up at once outside this fixture. */
-  const SHARED_CLOSE: ReadonlyArray<readonly [string, string]> = [['#connectionsPage', '#knowledgePage']]
+  const SHARED_CLOSE: ReadonlyArray<readonly [string, string]> = [
+    ['#connectionsPage', '#knowledgePage'],
+    ['#connectionsPage', '#canvasPage'],
+    ['#knowledgePage', '#canvasPage'],
+  ]
   const shared = (a: string, b: string): boolean =>
     SHARED_CLOSE.some(([x, y]) => (x === a && y === b) || (x === b && y === a))
   const pairs = LAYER_IDS.flatMap((first, i) =>
     LAYER_IDS.slice(i + 1).filter((second) => !shared(first, second)).map((second) => ({ first, second })))
 
-  it('has ninety pairs to answer for, every pair but the one that shares a close', () => {
-    expect(pairs).toHaveLength(90)
+  it('has 102 pairs to answer for, every pair but the three that share a close', () => {
+    expect(pairs).toHaveLength(102)
   })
 
-  it('reaches the two pages that share a close in table order', () => {
+  it('reaches the three pages that share a close in table order', () => {
     const ids = escapeOrder.ESCAPE_ORDER.map((layer) => layer.id)
     expect(ids.indexOf('#connectionsPage')).toBeLessThan(ids.indexOf('#knowledgePage'))
+    expect(ids.indexOf('#knowledgePage')).toBeLessThan(ids.indexOf('#canvasPage'))
   })
 
   it.each(pairs)('takes back $first and leaves $second alone', ({ first, second }) => {

@@ -72,9 +72,9 @@ const initial = (): CanvasState => ({
 
 const store = makeStore<CanvasState>(initial())
 
-export const { get, subscribe } = store
+export const { get, set, subscribe, _resetForTests } = store
 
-const set = (patch: Partial<CanvasState>): void => store.set((prev) => ({ ...prev, ...patch }))
+const patch = (change: Partial<CanvasState>): void => store.set((prev) => ({ ...prev, ...change }))
 
 const source = (): CanvasSource => ds('canvas')
 
@@ -128,14 +128,14 @@ export function lit(): Set<string> | null {
 
 export async function load(): Promise<void> {
   if (get().loading) return
-  set({ loading: true, error: '' })
+  patch({ loading: true, error: '' })
   try {
     const data = await source().load()
     const known = new Set(data.agents.map((a) => a.name))
     const manual = Object.fromEntries(Object.entries(savedPositions()).filter(([n]) => known.has(n)))
-    set({ loaded: true, loading: false, agents: data.agents, org: data.org, maxDepth: data.maxDepth, manual, undo: [] })
+    patch({ loaded: true, loading: false, agents: data.agents, org: data.org, maxDepth: data.maxDepth, manual, undo: [] })
   } catch (e) {
-    set({ loaded: true, loading: false, error: failure(e) })
+    patch({ loaded: true, loading: false, error: failure(e) })
   }
 }
 
@@ -155,17 +155,17 @@ export function select(name: string, additive = false): void {
   const next = additive
     ? (s.selected.includes(name) ? s.selected.filter((n) => n !== name) : [...s.selected, name])
     : [name]
-  set({ selected: next, edge: null, focus: name, refused: '', error: '' })
+  patch({ selected: next, edge: null, focus: name, refused: '', error: '' })
 }
 
 export function clearSelection(): void {
-  set({ selected: [], edge: null, inspect: null })
+  patch({ selected: [], edge: null, inspect: null })
 }
 
 /** Picks a link ("manager>report"), lighting its two cards and nothing else; null lets go. */
 export function selectEdge(key: string | null): void {
   const ends = key ? key.split('>') : []
-  set({ edge: key, selected: ends, refused: '', error: '' })
+  patch({ edge: key, selected: ends, refused: '', error: '' })
 }
 
 /** Removes the picked link: the report now reports to nobody. */
@@ -173,13 +173,13 @@ export async function unlinkSelected(): Promise<boolean> {
   const key = get().edge
   if (!key) return false
   const report = key.slice(key.indexOf('>') + 1)
-  set({ edge: null })
+  patch({ edge: null })
   return reparent(report, null)
 }
 
 export function selectMany(list: string[], additive = false): void {
   const s = get()
-  set({ selected: additive ? [...new Set([...s.selected, ...list])] : list })
+  patch({ selected: additive ? [...new Set([...s.selected, ...list])] : list })
 }
 
 export function selectInBox(x0: number, y0: number, x1: number, y1: number, additive = false): void {
@@ -187,38 +187,38 @@ export function selectInBox(x0: number, y0: number, x1: number, y1: number, addi
 }
 
 export function focusOn(name: string): void {
-  set({ focus: name })
+  patch({ focus: name })
 }
 
 /* -- the view -------------------------------------------------------------- */
 
 export function setSize(w: number, h: number): void {
   const s = get().size
-  if (s.w !== w || s.h !== h) set({ size: { w, h } })
+  if (s.w !== w || s.h !== h) patch({ size: { w, h } })
 }
 
 export function setView(view: View): void {
-  set({ view })
+  patch({ view })
 }
 
 export function panBy(dx: number, dy: number): void {
   const v = get().view
-  set({ view: { ...v, x: v.x + dx, y: v.y + dy } })
+  patch({ view: { ...v, x: v.x + dx, y: v.y + dy } })
 }
 
 export function zoomBy(factor: number, cx?: number, cy?: number): void {
   const s = get()
-  set({ view: zoomAt(s.view, factor, cx ?? s.size.w / 2, cy ?? s.size.h / 2) })
+  patch({ view: zoomAt(s.view, factor, cx ?? s.size.w / 2, cy ?? s.size.h / 2) })
 }
 
 export function fit(): void {
   const s = get()
-  set({ view: fitView(positions(), s.size.w, s.size.h) })
+  patch({ view: fitView(positions(), s.size.w, s.size.h) })
 }
 
 /** Throws the reader's placements away and lays the tree out again. */
 export function autoLayout(): void {
-  set({ manual: {} })
+  patch({ manual: {} })
   writeJson(POS_KEY, {})
   fit()
 }
@@ -226,14 +226,14 @@ export function autoLayout(): void {
 /** A card dragged to a place that is not another card. */
 export function placeCard(name: string, pos: Pos): void {
   const manual = { ...get().manual, [name]: pos }
-  set({ manual })
+  patch({ manual })
   writeJson(POS_KEY, manual)
 }
 
 /** Lets a card go back to the tree's place for it. */
 export function unplace(name: string): void {
   const { [name]: _gone, ...rest } = get().manual
-  set({ manual: rest })
+  patch({ manual: rest })
   writeJson(POS_KEY, rest)
 }
 
@@ -246,12 +246,12 @@ export const cardUnder = (x: number, y: number, skip?: string): string | null =>
    answer -- or its refusal, which puts the old chart back -- follows. */
 async function apply(next: OrgRow[]): Promise<boolean> {
   const before = get().org
-  set({ org: next, undo: [...get().undo, before].slice(-UNDO_DEPTH), error: '', refused: '' })
+  patch({ org: next, undo: [...get().undo, before].slice(-UNDO_DEPTH), error: '', refused: '' })
   try {
-    set({ org: await source().saveOrg(next) })
+    patch({ org: await source().saveOrg(next) })
     return true
   } catch (e) {
-    set({ org: before, undo: get().undo.slice(0, -1), error: failure(e) })
+    patch({ org: before, undo: get().undo.slice(0, -1), error: failure(e) })
     return false
   }
 }
@@ -260,7 +260,7 @@ async function apply(next: OrgRow[]): Promise<boolean> {
 export async function reparent(child: string, parent: string | null): Promise<boolean> {
   const move = setParent(get().org, child, parent, names())
   if (!move.ok) {
-    set({ refused: move.reason, error: '' })
+    patch({ refused: move.reason, error: '' })
     return false
   }
   return apply(move.org)
@@ -281,12 +281,12 @@ export async function undo(): Promise<boolean> {
   const back = stack[stack.length - 1]
   if (!back) return false
   const was = get().org
-  set({ org: back, undo: stack.slice(0, -1), error: '', refused: '' })
+  patch({ org: back, undo: stack.slice(0, -1), error: '', refused: '' })
   try {
-    set({ org: await source().saveOrg(back) })
+    patch({ org: await source().saveOrg(back) })
     return true
   } catch (e) {
-    set({ org: was, undo: stack, error: failure(e) })
+    patch({ org: was, undo: stack, error: failure(e) })
     return false
   }
 }
@@ -299,14 +299,14 @@ export const exportText = (): string => exportGraph(get().org, positions())
 export async function importText(text: string): Promise<boolean> {
   const file = importGraph(text)
   if (!file) {
-    set({ error: 'import' })
+    patch({ error: 'import' })
     return false
   }
   const known = new Set(names())
   const manual = Object.fromEntries([...file.positions].filter(([n]) => known.has(n)))
   const ok = await apply(file.org)
   if (ok) {
-    set({ manual })
+    patch({ manual })
     writeJson(POS_KEY, manual)
   }
   return ok
@@ -315,16 +315,16 @@ export async function importText(text: string): Promise<boolean> {
 /* -- the inspector ----------------------------------------------------------- */
 
 export function openInspector(name: string, tab: Tab = 'main'): void {
-  set({ inspect: name, tab, selected: [name], focus: name })
+  patch({ inspect: name, tab, selected: [name], focus: name })
   if (tab === 'prompt') void loadPrompt(name)
 }
 
 export function closeInspector(): void {
-  set({ inspect: null })
+  patch({ inspect: null })
 }
 
 export function setTab(tab: Tab): void {
-  set({ tab })
+  patch({ tab })
   const name = get().inspect
   if (tab === 'prompt' && name) void loadPrompt(name)
 }
@@ -338,20 +338,20 @@ export const historyOf = (name: string): string[] => {
 
 export async function loadPrompt(name: string): Promise<void> {
   if (!isEmployee(name)) {
-    set({ prompt: emptyPrompt() })
+    patch({ prompt: emptyPrompt() })
     return
   }
-  set({ prompt: { name, text: '', saved: '', loading: true, history: historyOf(name) } })
+  patch({ prompt: { name, text: '', saved: '', loading: true, history: historyOf(name) } })
   try {
     const text = await source().promptGet(name)
-    if (get().prompt.name === name) set({ prompt: { name, text, saved: text, loading: false, history: historyOf(name) } })
+    if (get().prompt.name === name) patch({ prompt: { name, text, saved: text, loading: false, history: historyOf(name) } })
   } catch (e) {
-    if (get().prompt.name === name) set({ prompt: { ...get().prompt, loading: false }, error: failure(e) })
+    if (get().prompt.name === name) patch({ prompt: { ...get().prompt, loading: false }, error: failure(e) })
   }
 }
 
 export function editPrompt(text: string): void {
-  set({ prompt: { ...get().prompt, text } })
+  patch({ prompt: { ...get().prompt, text } })
 }
 
 /** Saves the draft; the text it replaces goes into the agent's history first. */
@@ -361,12 +361,12 @@ export async function savePrompt(): Promise<boolean> {
   try {
     if (!(await source().promptSet(p.name, p.text))) throw new Error('not saved')
   } catch (e) {
-    set({ error: failure(e) })
+    patch({ error: failure(e) })
     return false
   }
   const history = [p.saved, ...historyOf(p.name).filter((x) => x !== p.saved)].filter(Boolean).slice(0, HISTORY_DEPTH)
   writeJson(HIST_KEY + p.name, history)
-  set({ prompt: { ...p, saved: p.text, history }, error: '' })
+  patch({ prompt: { ...p, saved: p.text, history }, error: '' })
   return true
 }
 
@@ -374,10 +374,6 @@ export async function savePrompt(): Promise<boolean> {
 export function rollbackTo(index: number): void {
   const p = get().prompt
   const text = p.history[index]
-  if (text !== undefined) set({ prompt: { ...p, text } })
+  if (text !== undefined) patch({ prompt: { ...p, text } })
 }
 
-export function _resetForTests(): void {
-  store._resetForTests()
-  store.set(initial())
-}

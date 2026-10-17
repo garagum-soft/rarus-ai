@@ -55,6 +55,7 @@ const DECLARED = [
   { id: 'extAgentsPage', bodyId: 'extAgentsBody', navButtons: ['agentsBtn'], escapeRank: 1, head: 'gui.page.agents', aria: 'gui.page.agents' },
   { id: 'connectionsPage', bodyId: 'connectionsBody', navButtons: ['agentsBtn'], escapeRank: 2, head: 'gui.conn.page', aria: 'gui.conn.page' },
   { id: 'knowledgePage', bodyId: 'knowledgeBody', navButtons: ['knowledgeBtn'], escapeRank: 3, head: 'gui.page.knowledge', aria: 'gui.page.knowledge' },
+  { id: 'canvasPage', bodyId: 'canvasBody', navButtons: ['canvasBtn'], escapeRank: 4, head: 'gui.canvas.page', aria: 'gui.canvas.page' },
 ] as const satisfies readonly ModulePage[]
 
 /** The module pages, keyed as their `<section>` ids. */

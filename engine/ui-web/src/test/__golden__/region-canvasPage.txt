@@ -1,0 +1,5 @@
+section#canvasPage.page[data-open=false]
+  header
+    h2
+  div.work
+    div#canvasBody.wrap
