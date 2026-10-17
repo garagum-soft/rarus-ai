@@ -233,6 +233,7 @@ def test_exactly_seven_concrete_backend_classes() -> None:
     from raven.providers.openai_codex_provider import OpenAICodexProvider
     from raven.providers.openai_responses_provider import OpenAIResponsesProvider
     from raven.providers.per_model_provider import PerModelProvider
+    from raven.providers.rarus_provider import RarusProvider
     from raven.providers.resolving_provider import ResolvingProvider
 
     expected = {
@@ -253,6 +254,8 @@ def test_exactly_seven_concrete_backend_classes() -> None:
         # Claude on the user's own subscription, one step per call through the
         # Claude Agent SDK.
         ClaudeSubscriptionProvider,
+        # Rarus AI: the signed-in key is read per call (spec 18.2).
+        RarusProvider,
     }
     assert _concrete_provider_subclasses() == expected
     for cls in expected:

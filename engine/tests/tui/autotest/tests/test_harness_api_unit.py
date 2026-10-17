@@ -60,7 +60,13 @@ class TestSpawn:
         assert cmd[1] == "start"
         assert "--cols" in cmd and cmd[cmd.index("--cols") + 1] == "100"
         assert "--rows" in cmd and cmd[cmd.index("--rows") + 1] == "30"
-        assert cmd[-3:] == ["uv", "run", "raven"] or "raven" in cmd[-1] or "raven" in " ".join(cmd[-4:])
+        assert (
+            cmd[-3:] == ["uv", "run", "raven"]
+            or "raven" in cmd[-1]
+            or "rarus" in cmd[-1]
+            or "raven" in " ".join(cmd[-4:])
+            or "rarus" in " ".join(cmd[-4:])
+        )
 
     def test_spawn_captures_session_id(self, mock_run):
         mock_run.side_effect = [

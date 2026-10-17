@@ -7,12 +7,12 @@ swap the process it starts is installed raven itself. Two hostings, the
 fork launcher's own pair:
 
 - ``--acp`` (what the roster row spawns): render the config, then exec
-  ``python -m raven acp`` on this interpreter, so the server inherits this
+  ``python -m rarus acp`` on this interpreter, so the server inherits this
   pid, process group and stdio, and every turn runs through the same
   assembly door (build_runtime) as the host's TUI and gateway.
 - ``--task`` / ``--prompt-file``: the one-turn CLI adjudication hosting.
   One call is one turn; the same ``--session <id>`` across calls is a
-  multi-turn conversation. The launcher renders, runs ``raven agent -m``
+  multi-turn conversation. The launcher renders, runs ``rarus agent -m``
   on the installed raven, and owes the caller the fork launcher's five
   commitments: a task-first preamble, a transcript verdict (the answer is
   what the agent committed, never a replay of a previous turn's), a
@@ -535,9 +535,9 @@ def render_acp_config(source: Path, mode: str | None = None) -> Path:
 
 
 def serve(args: argparse.Namespace) -> int:
-    """Serve installed raven's ``raven acp`` on this process's stdio.
+    """Serve installed raven's ``rarus acp`` on this process's stdio.
 
-    After rendering, this process execs ``python -m raven acp`` on its own
+    After rendering, this process execs ``python -m rarus acp`` on its own
     interpreter (the roster row's ``{PYTHON}`` resolves at install time to
     one that imports raven), so the server inherits this pid, process group
     and stdio untouched. No finally-unlink around it: the fork's own sweep
@@ -546,7 +546,7 @@ def serve(args: argparse.Namespace) -> int:
     actually runs.
     """
     rendered = render_acp_config(Path(args.config).resolve(), mode=getattr(args, "mode", None))
-    log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    log(f"[run] exec {sys.executable} -m rarus acp (config {rendered})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)
@@ -721,7 +721,7 @@ def resolve_workspace(state_dir: Path, override: str | None) -> Path:
 
 
 def run_task(args: argparse.Namespace) -> int:
-    """Host one adjudicated CLI turn on installed raven's ``raven agent -m``.
+    """Host one adjudicated CLI turn on installed raven's ``rarus agent -m``.
 
     The turn runs with ``cwd=workspace`` so raven groups the session by the
     project the work happens in, and the transcript this launcher judges is

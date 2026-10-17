@@ -670,12 +670,12 @@ def render_config(source: Path) -> Path:
 
 
 def serve(args: argparse.Namespace) -> int:
-    """Render the config, then become installed raven's ``raven acp`` on stdio.
+    """Render the config, then become installed raven's ``rarus acp`` on stdio.
 
     The engine precheck comes before the render, the fork launcher's order: a
     missing engine is the answer whoever installed this needs first, and no
     file holding merged secrets should exist for a run that cannot start.
-    After rendering, this process execs ``python -m raven acp`` on its own
+    After rendering, this process execs ``python -m rarus acp`` on its own
     interpreter (the roster row's ``{PYTHON}`` resolves at install time to
     one that imports raven), so the server inherits this pid, process group
     and stdio untouched. No chdir: the fork engine resolved its templates and
@@ -691,7 +691,7 @@ def serve(args: argparse.Namespace) -> int:
         )
 
     rendered = render_config(Path(args.config).resolve())
-    log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    log(f"[run] exec {sys.executable} -m rarus acp (config {rendered})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)

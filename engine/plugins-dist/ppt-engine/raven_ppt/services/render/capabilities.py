@@ -116,7 +116,7 @@ def find_soffice() -> str | None:
     """LibreOffice's launcher, asked of the module that also runs it.
 
     Re-exported rather than reimplemented: the render gate has to call LibreOffice
-    missing on exactly the installs `raven doctor` calls it missing on, and a
+    missing on exactly the installs `rarus doctor` calls it missing on, and a
     second search of its own is what drifted last time -- one copy knew where a
     Windows install puts the binary and the other only looked at PATH.
     """

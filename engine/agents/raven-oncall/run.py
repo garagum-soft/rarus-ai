@@ -3,7 +3,7 @@
 
 The retired vendored Raven-Oncall carried a whole fork checkout; this
 product carries none. It renders its config and execs the
-installed raven's own ``raven acp``, so every turn runs through the same
+installed raven's own ``rarus acp``, so every turn runs through the same
 assembly door (build_runtime) as the host's TUI and gateway. The machinery
 of rendering lives in the launcher library
 (``raven.config.product_render``); what remains here is this product's own
@@ -23,7 +23,7 @@ plugin's contributions, and the one-turn CLI adjudication path retires with
 its only callers (the wake shell and the fork benchmarks). This launcher
 serves ACP, nothing else.
 
-After rendering, this process execs ``python -m raven acp`` on its own
+After rendering, this process execs ``python -m rarus acp`` on its own
 interpreter (the row's ``{PYTHON}`` resolves at install time to one that
 imports raven), so the server inherits this pid, process group and stdio.
 stdout belongs to the protocol; every diagnostic goes to stderr.
@@ -243,7 +243,7 @@ def main() -> int:
 
     rendered = render_config(Path(args.config).resolve())
     os.environ.setdefault(CONNECTIONS_ENV, str(connections_registry()))
-    log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    log(f"[run] exec {sys.executable} -m rarus acp (config {rendered})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)

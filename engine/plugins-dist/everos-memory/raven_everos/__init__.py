@@ -18,7 +18,7 @@ What the host may reach, declared rather than assumed:
   (probe, start, stop, lock holder, log path, the default base URL);
 - :mod:`.health` -- the capability probe and the sections a healthy service
   reports, read by the sub-agent manager for the default base URL;
-  ``raven doctor`` and ``raven import`` go through
+  ``rarus doctor`` and ``raven import`` go through
   :meth:`MemoryBackend.health` instead of this module directly;
 - :mod:`.backend` -- the memory backend the registry builds, plus
   ``convert_messages`` / ``as_ms_epoch``, public because the sub-agent trace
@@ -26,7 +26,7 @@ What the host may reach, declared rather than assumed:
 - :mod:`.config` -- everos.toml and data-root env management, read and
   written by the console settings RPC methods and borrowed by the knowledge
   and memory RPC surfaces for the plugin's own root and address;
-- :mod:`.onboard` -- the ``onboard`` contribution: one ``raven onboard``
+- :mod:`.onboard` -- the ``onboard`` contribution: one ``rarus onboard``
   screen, built by the host's plugin registry from the manifest factory.
 
 Anything else in the package is the plugin's own.

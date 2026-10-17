@@ -427,7 +427,7 @@ def test_the_command_line_shows_access_grants_and_runs_a_hook(sources, tmp_path:
     flat = lambda r: "".join(r.output.split()).replace("│", "")  # noqa: E731 - rich wraps table cells
     assert "denied:needsschedule" in flat(before), before.output
     assert "failed" in listed.output and "needsschedule" in flat(listed)
-    assert "ravenplugingrantnightly-pschedule" in flat(preview)
+    assert "rarusplugingrantnightly-pschedule" in flat(preview)
     assert wrong.exit_code == 1 and "missingschedule" in flat(wrong)
     assert granted.exit_code == 0 and "grantedscheduletonightly1.0.0" in flat(granted)
     assert "allowed" in after.output

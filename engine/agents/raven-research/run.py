@@ -3,7 +3,7 @@
 
 The retired vendored Raven-Research carried a whole fork checkout; this
 product carries none. It renders its config and execs the
-installed raven's own ``raven acp``, so every turn runs through the same
+installed raven's own ``rarus acp``, so every turn runs through the same
 assembly door (build_runtime) as the host's TUI and gateway. The machinery
 of rendering lives in the launcher library
 (``raven.config.product_render``); what remains here is this product's own
@@ -28,7 +28,7 @@ architecture doing the job the fork used to:
   client's picker shows, applied per session over the baseline flow config
   instead of being compiled into the loop the way the fork did.
 
-After rendering, this process execs ``python -m raven acp`` on its own
+After rendering, this process execs ``python -m rarus acp`` on its own
 interpreter (the row's ``{PYTHON}`` resolves at install time to one that
 imports raven), so the server inherits this pid, process group and stdio.
 stdout belongs to the protocol; every diagnostic goes to stderr.
@@ -455,7 +455,7 @@ def main() -> int:
     args = parser.parse_args()
 
     rendered = render_config(Path(args.config).resolve())
-    log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    log(f"[run] exec {sys.executable} -m rarus acp (config {rendered})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)

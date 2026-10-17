@@ -829,7 +829,7 @@ class EverosBackend:
             return
 
         # Deferred from construction (make_backend) so that building a
-        # backend to ask health() -- raven doctor's path -- stays read-only.
+        # backend to ask health() -- rarus doctor's path -- stays read-only.
         # Runs here, once identity is known good, on every start path.
         from raven_everos.config import (
             bind_roles_here,
@@ -926,7 +926,7 @@ class EverosBackend:
                 # user can act on this, so say it here rather than only in the
                 # log the caller writes.
                 self._state = ServiceState.UNCONFIGURED
-                self.notify("Long-term memory is off: its LLM is not configured.\nRun `raven onboard` to set it up.")
+                self.notify("Long-term memory is off: its LLM is not configured.\nRun `rarus onboard` to set it up.")
                 return
             except EverosBinaryMissingError as e:
                 # An install problem, not a startup problem: no probe and no
@@ -1024,7 +1024,7 @@ class EverosBackend:
         with ``[llm]`` alone. What is left is real but weaker, and the log saying
         so is file-only at runtime, so the difference looks like an agent that is
         merely vague rather than one running on a lesser search -- the hardest
-        kind of fault to attribute. ``raven doctor`` can find it, but only if the
+        kind of fault to attribute. ``rarus doctor`` can find it, but only if the
         user thinks to ask; this is on the path every session already takes.
 
         Only what was configured and could not be built is worth saying: a role
@@ -1094,7 +1094,7 @@ class EverosBackend:
                 )
 
     async def health(self) -> BackendHealth:
-        """What ``raven doctor`` prints and what ``raven import`` gates on.
+        """What ``rarus doctor`` prints and what ``raven import`` gates on.
 
         Callable before ``start``: doctor asks an instance it never started, so
         nothing here may read the state machine. What the server says about
@@ -1863,7 +1863,7 @@ def _flatten_profile_list(items: list[Any]) -> list[str]:
 def make_backend(ctx: PluginContext) -> EverosBackend:
     """Plugin entry-point factory. Called by :class:`PluginRegistry`
     after manifest activation. Sync construction only, and read-only:
-    ``raven doctor`` constructs a backend to call ``health()`` without ever
+    ``rarus doctor`` constructs a backend to call ``health()`` without ever
     starting it, so nothing here may touch disk or the environment. Pointing
     EverOS at its root and creating its config templates happens in
     ``EverosBackend.start()`` instead."""

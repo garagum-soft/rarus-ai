@@ -212,7 +212,7 @@ def _resources_for(
                 f"REFUSED: this declaration says one job holds {n} devices, but the row for {machine} does "
                 "not say how many devices it has, so nothing can hold that number to a count and the gate "
                 "would admit by job count alone. Fix the row first: write 'gpus: N' (or a device line "
-                "'N x <card>'; `raven ops connection add` probes and writes both), then declare again. "
+                "'N x <card>'; `rarus ops connection add` probes and writes both), then declare again. "
                 "Nothing was written.",
                 {},
             )

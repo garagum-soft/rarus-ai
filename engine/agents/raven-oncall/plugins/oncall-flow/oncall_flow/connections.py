@@ -141,7 +141,7 @@ def describe() -> str:
             "This is NOT the same as having no machines: the file may well list "
             "several, and this instance cannot see any of them. Say exactly this "
             "to the owner -- the file needs fixing, or rewriting with "
-            "`raven ops connection add`. Do not submit anything and do not look "
+            "`rarus ops connection add`. Do not submit anything and do not look "
             "for a way in yourself."
         )
     rows = load()
@@ -149,7 +149,7 @@ def describe() -> str:
         where = "is empty" if found.state == OK else "does not exist"
         return f"No machine is set up in this instance ({store_path()} {where}).\n\n" + _REQUEST
     # Only what makes a machine unusable. The rest is the owner's to fix and
-    # `raven ops connection doctor` is where they read it: a line that appears on
+    # `rarus ops connection doctor` is where they read it: a line that appears on
     # every listing is read as noise and then not read at all, which is the same
     # reason a shallow path claim is not honoured below.
     faults = [f for f in problems() if f.blocking]
@@ -162,7 +162,7 @@ def describe() -> str:
         "\n\nOne or more of these cannot be used as written, and picking it will "
         "fail:\n  "
         + "\n  ".join(str(f) for f in faults)
-        + "\nSay this to the owner; `raven ops connection doctor` reports the same."
+        + "\nSay this to the owner; `rarus ops connection doctor` reports the same."
         if faults
         else ""
     )

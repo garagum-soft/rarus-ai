@@ -1,4 +1,4 @@
-"""PPT deck authoring, shipped as its own raven plugin distribution.
+"""PPT deck authoring, shipped as its own rarus plugin distribution.
 
 The capability is one package rather than a set of edits spread through the
 host because it has to be removable: installing the ``ppt-engine`` wheel adds

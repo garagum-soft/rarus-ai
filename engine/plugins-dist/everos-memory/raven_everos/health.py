@@ -108,7 +108,7 @@ def configured_base_url(config: Any) -> str:
     18791 is told it is not running. Key order mirrors
     ``raven.core.plugin_stack._resolve_plugin_config_slice`` (plugin id, then
     contribution name) without building a registry, which the callers --
-    ``raven doctor`` and the wizard -- have no other reason to do.
+    ``rarus doctor`` and the wizard -- have no other reason to do.
     """
     slices = getattr(getattr(config, "plugins", None), "config", None) or {}
     for key in ("everos-memory", "everos"):
@@ -123,7 +123,7 @@ def parse_capabilities(payload: Any) -> dict[str, bool]:
 
     ``{}`` whenever the body cannot answer -- absent, malformed, or from a
     pre-1.2.1 server. Shared with the adapter, which reads the same map to pick
-    its search lane: parsed two ways, ``raven doctor`` and recall could disagree
+    its search lane: parsed two ways, ``rarus doctor`` and recall could disagree
     about the same server.
     """
     raw = (payload or {}).get("capabilities") if isinstance(payload, dict) else None

@@ -119,7 +119,7 @@ def main(
             # it would be dropped without a word, so it is refused instead.
             sub = ctx.invoked_subcommand
             hint = (
-                f"put --dev after the subcommand: raven {sub} --dev"
+                f"put --dev after the subcommand: rarus {sub} --dev"
                 if sub in ("web", "serve", "gateway")
                 else "--dev ahead of a subcommand applies to bare `raven` only"
             )

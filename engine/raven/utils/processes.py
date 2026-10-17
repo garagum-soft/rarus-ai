@@ -155,6 +155,15 @@ def raven_identity(pid: int) -> Optional[bool]:
     module = re.search(r"""(?<![\w/\\.-])-m\s+["']?raven(?![\w.-])["']?(?=\s|$)""", line, re.IGNORECASE)
     if module is not None:
         return _has_resident_subcommand(line[module.end() :])
+    # The desktop shell runs its engine as ``python -m rarus_app --engine <command>`` (or, frozen,
+    # ``RarusAI.exe --engine <command>``); ``-m rarus`` is the same entry under the new name.
+    shell = re.search(
+        r"""(?:(?<![\w/\\.-])-m\s+["']?(?:rarus_app|rarus)(?![\w.-])["']?|[/\\]RarusAI(?:\.exe)?"?)(?:\s+--engine)?(?=\s)""",
+        line,
+        re.IGNORECASE,
+    )
+    if shell is not None:
+        return _has_resident_subcommand(line[shell.end() :])
     return _is_console_serve(line)
 
 
@@ -170,7 +179,7 @@ def _is_console_serve(line: str) -> bool:
 
     return any(
         _has_resident_subcommand(line[match.end() :])
-        for match in re.finditer(r'(?:^|[/\\])raven(?:\.exe)?"?(?=\s)', line, re.IGNORECASE)
+        for match in re.finditer(r'(?:^|[/\\])(?:raven|rarus)(?:\.exe)?"?(?=\s)', line, re.IGNORECASE)
     )
 
 

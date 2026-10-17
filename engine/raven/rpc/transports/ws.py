@@ -754,6 +754,40 @@ async def handle_oauth_callback(request: web.Request) -> web.Response:
     )
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+
+
+def _allowed_hosts() -> frozenset[str]:
+    """Loopback names, plus any the operator lists in ``RARUS_ALLOWED_HOSTS`` (comma separated)."""
+    import os
+
+    extra = {h.strip().lower() for h in os.environ.get("RARUS_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    return _LOOPBACK_HOSTS | extra
+
+
+def _host_name(header: str) -> str:
+    """The host part of a ``Host`` header, without its port (``[::1]:80`` -> ``[::1]``)."""
+    value = header.strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        return value[: end + 1] if end != -1 else value
+    return value.rsplit(":", 1)[0] if ":" in value else value
+
+
+@web.middleware
+async def host_guard(request: web.Request, handler: Any) -> web.StreamResponse:
+    """Refuse a request whose ``Host`` is not a loopback name.
+
+    The server only listens on 127.0.0.1, but a web page on another site can make the browser
+    resolve its own name to 127.0.0.1 (DNS rebinding) and then talk to this server as if it
+    were that site's. The request still carries the attacker's name in ``Host``, so checking
+    it closes that door for every route, including the ones that need no session.
+    """
+    if _host_name(request.headers.get("Host", "")) not in _allowed_hosts():
+        raise web.HTTPForbidden(reason="bad host")
+    return await handler(request)
+
+
 def build_app(
     gateway: WsGateway,
     static_dir: Path | None,
@@ -765,7 +799,7 @@ def build_app(
     from raven.rpc.transports.deliverables import add_files_routes
 
     gateway.agent_loop_factory = agent_loop_factory
-    app = web.Application()
+    app = web.Application(middlewares=[host_guard])
     app.router.add_get("/health", gateway.handle_health)
     app.router.add_get("/auth", gateway.handle_auth_page)
     app.router.add_post("/auth/exchange", gateway.handle_auth_exchange)

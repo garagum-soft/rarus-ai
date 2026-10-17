@@ -142,7 +142,7 @@ def test_hint_non_editable_points_to_installer(monkeypatch, raw):
     monkeypatch.setattr("raven.gateway.manager.sys.platform", "linux")
     hint = missing_dep_hint()
     assert "uv sync" not in hint
-    assert "install.sh" in hint
+    assert "installer" in hint
 
 
 def test_hint_package_not_found_points_to_installer(monkeypatch):
@@ -153,12 +153,12 @@ def test_hint_package_not_found_points_to_installer(monkeypatch):
 
     monkeypatch.setattr("raven.gateway.manager.distribution", _raise)
     monkeypatch.setattr("raven.gateway.manager.sys.platform", "darwin")
-    assert "install.sh" in missing_dep_hint()
+    assert "installer" in missing_dep_hint()
 
 
 @pytest.mark.parametrize(
     "platform, marker",
-    [("win32", "raw.githubusercontent.com"), ("darwin", "install.sh"), ("linux", "install.sh")],
+    [("win32", "installer"), ("darwin", "installer"), ("linux", "installer")],
 )
 def test_hint_installer_matches_os(monkeypatch, platform, marker):
     """Wheel install picks the installer for the running OS (irm vs curl)."""
@@ -171,8 +171,8 @@ def test_hint_installer_matches_os(monkeypatch, platform, marker):
     "direct_url, platform, expected",
     [
         (_EDITABLE_JSON, "linux", "uv sync --inexact --extra channels"),
-        (_WHEEL_JSON, "linux", "install.sh"),
-        (_WHEEL_JSON, "win32", "raw.githubusercontent.com"),
+        (_WHEEL_JSON, "linux", "installer"),
+        (_WHEEL_JSON, "win32", "installer"),
     ],
     ids=["editable", "wheel-unix", "wheel-win"],
 )

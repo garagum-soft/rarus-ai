@@ -1860,7 +1860,7 @@ class TestRefusingAnIncompleteInstall:
         with pytest.raises(typer.Exit):
             serve_commands._refuse_incomplete_install()
 
-        assert "install.sh" in capsys.readouterr().err
+        assert "installer" in capsys.readouterr().err
 
     def test_a_running_upgrade_is_waited_out_rather_than_failed_fast(self, monkeypatch) -> None:
         """`_supervise` gives up after `_CRASH_LOOP_GIVE_UP` failures faster than

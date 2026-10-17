@@ -263,7 +263,7 @@ def _require_llm_configured() -> None:
     if everos_role_configured("llm"):
         return
     raise EverosNotConfiguredError(
-        "EverOS memory LLM is not configured: pick a model and a provider for it in settings, or run `raven onboard`."
+        "EverOS memory LLM is not configured: pick a model and a provider for it in settings, or run `rarus onboard`."
     )
 
 

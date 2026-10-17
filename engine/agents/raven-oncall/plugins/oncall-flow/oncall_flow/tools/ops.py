@@ -2409,7 +2409,7 @@ class OpsSubmitTool(_OpsScheduler):
         # Recorded from what actually happened, not from having asked. This event
         # is what attendance counts as a wake and what a reader checks to answer
         # "will this campaign come back on its own" -- and with no scheduler in
-        # the process (a one-shot `raven agent -m` turn), schedule_look
+        # the process (a one-shot `rarus agent -m` turn), schedule_look
         # declines and nothing is pending. Measured 2026-08-25: a subagent
         # campaign's trail said wake_scheduled while the wake store said
         # {"jobs": []}, and the resident host polled that empty store forever.

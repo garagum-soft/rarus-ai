@@ -147,7 +147,7 @@ def root_is_raven_owned(root: Path | str) -> bool:
 def _raven_config_raw() -> dict[str, Any]:
     """raven's config.json, parsed and nothing more.
 
-    Raw rather than through the validated config so that ``raven doctor`` and
+    Raw rather than through the validated config so that ``rarus doctor`` and
     the runtime can ask small questions of it without paying for schema
     validation, and so an unrelated validation error elsewhere cannot make the
     memory path unreadable. An absent or unparseable file reads as empty.
@@ -289,7 +289,7 @@ _EMBEDDING_ENV_KEYS = (
 PROVENANCE_ENV = "RAVEN_EVEROS_BOUND"
 """Where the provenance below is kept so it outlives this module object.
 
-``raven gateway --restart`` re-launches through ``os.execv``, which keeps the
+``rarus gateway --restart`` re-launches through ``os.execv``, which keeps the
 environment and builds a new interpreter: the values survive and a set built at
 import does not. A restarted gateway then read its own binding as somebody
 else's export -- blank settings card, refused save, and no second bind -- for
@@ -334,7 +334,7 @@ def ensure_everos_home(root: Path | str | None = None) -> None:
     1. **Migrate** legacy ``config.toml`` → ``everos.toml`` (everos >=1.1
        renamed the config file). Existing content is preserved.
     2. **Create** ``everos.toml`` from the shipped template if absent.
-       Users who already ran ``raven onboard`` have this file; new
+       Users who already ran ``rarus onboard`` have this file; new
        installs get the template with empty API keys (onboard fills
        them later).
     3. **Create** ``ome.toml`` from the shipped template if absent.
@@ -560,7 +560,7 @@ def everos_role_configured(section: str) -> bool:
     written for these sections at all.
 
     Lives beside the writers rather than in the wizard so a reader does not have
-    to import it: the wizard module costs ~290ms to load, which `raven doctor`
+    to import it: the wizard module costs ~290ms to load, which `rarus doctor`
     (a millisecond command) would otherwise pay just to answer this.
 
     Three things now, not two: a model, a vendor, and that vendor resolving to a

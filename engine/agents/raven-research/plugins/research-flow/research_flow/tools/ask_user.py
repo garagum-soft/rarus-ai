@@ -126,7 +126,7 @@ class DRAskUserTool(AskUserTool):
         """Whether a broker round trip can actually reach a user right now.
 
         The gate consults this BEFORE granting: on a surface with no broker (ACP,
-        ``raven agent -m``) the handoff short circuit stays the transport, so the
+        ``rarus agent -m``) the handoff short circuit stays the transport, so the
         round is never spent on a fallback string.
         """
         return self._delivery == "tool" and self._broker is not None and bool(self._cid.get())

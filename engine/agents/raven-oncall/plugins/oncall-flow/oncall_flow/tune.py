@@ -1,10 +1,10 @@
-"""``python -m oncall_flow.tune`` -- the fork's ``raven ops tune``, as a module entry.
+"""``python -m oncall_flow.tune`` -- the fork's ``rarus ops tune``, as a module entry.
 
 The D5 ruling: the product's CLI kind is not a seam the trunk offers a plugin,
 so the one typer command the fork mounted rides the package itself instead.
 Same flags, same flow (sync the trial code, ensure the image, drive the
 campaign from this process, print the table and the best), rendered in plain
-text -- typer and rich were host dress, not behaviour. The ``raven ops
+text -- typer and rich were host dress, not behaviour. The ``rarus ops
 connection`` sub-app did not move: the connection registry's CLI lives on the
 trunk and writes the same store this plugin's reader reads.
 

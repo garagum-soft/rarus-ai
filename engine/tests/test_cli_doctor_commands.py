@@ -476,7 +476,7 @@ class TestTheInstallationSection:
 
         assert r.exit_code == 1, r.stdout
         assert "incomplete" in r.stdout
-        assert "install.sh" in r.stdout
+        assert "installer" in r.stdout
 
     def test_it_outranks_a_config_that_also_looks_wrong(
         self, tmp_config: Path, monkeypatch: pytest.MonkeyPatch

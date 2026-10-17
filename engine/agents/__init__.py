@@ -2,7 +2,7 @@
 
 Each subdirectory is one agent product: a launcher plus its assets (config
 baseline, mode overlays, roster row, secret slots), consuming the installed
-raven as a library and serving over ``raven acp``. The retired vendored
+raven as a library and serving over ``rarus acp``. The retired vendored
 forks were the A side (byte snapshots of their record live under
 ``tests/fixtures/vendored_fork/``); a product here is the B side of the same
 transport face, and the acceptance bar is transport equivalence (transcript

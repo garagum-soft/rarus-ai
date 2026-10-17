@@ -272,7 +272,7 @@ def test_version_flag_matches_installed_metadata() -> None:
     r = runner.invoke(app, ["--version"])
     assert r.exception is None
     assert r.exit_code == 0
-    assert f"Raven v{pkg_version('raven')}" in r.stdout
+    assert f"Rarus AI v{pkg_version('raven')}" in r.stdout
 
 
 def test_cli_import_does_not_pull_litellm() -> None:

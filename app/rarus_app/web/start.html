@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rarus AI</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #272b35; --text: #e8eaf0; --muted: #98a0b3;
+    --accent: #5b8cff; --accent-text: #ffffff; --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+  .card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 32px 28px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { margin: 0 0 20px; color: var(--muted); }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
+    background: var(--accent); color: var(--accent-text); }
+  button.quiet { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button:disabled { opacity: .6; cursor: default; }
+  .error { color: var(--danger); margin-top: 16px; min-height: 1.4em; }
+  .spinner { width: 28px; height: 28px; margin: 0 auto 18px; border-radius: 50%;
+    border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section class="card" id="starting">
+    <div class="spinner"></div>
+    <h1>Rarus AI</h1>
+    <p>Запускаем программу…</p>
+  </section>
+
+  <section class="card" id="signin" hidden>
+    <h1>Вход в Rarus AI</h1>
+    <p>Откроется страница входа в браузере. Войдите так же, как на сайте, — и вернитесь сюда.</p>
+    <button id="signin-go">Войти</button>
+    <div class="error" id="signin-note"></div>
+  </section>
+
+  <section class="card" id="waiting" hidden>
+    <div class="spinner"></div>
+    <h1>Ждём подтверждения</h1>
+    <p>Завершите вход в браузере. Окно обновится само.</p>
+    <button class="quiet" id="signin-cancel">Отмена</button>
+  </section>
+
+  <section class="card" id="failed" hidden>
+    <h1>Не удалось запустить</h1>
+    <p id="failed-text"></p>
+    <button id="retry">Закрыть</button>
+  </section>
+</main>
+<script>
+  const MESSAGES = {
+    keys: "На аккаунте уже десять ключей программы. Отзовите один на сайте.",
+    blocked: "Аккаунт заблокирован.",
+    state: "Страница входа вернулась с неверным кодом. Попробуйте ещё раз.",
+    network: "Нет связи с сервером. Проверьте интернет.",
+    timeout: "Вход не завершён за отведённое время.",
+    cancelled: "Вход отменён.",
+    claim: "Сервер не выдал ключ. Попробуйте ещё раз."
+  };
+  const show = (id) => {
+    for (const el of document.querySelectorAll("main > section")) el.hidden = el.id !== id;
+  };
+  const api = () => window.pywebview && window.pywebview.api;
+  let signing = false;
+
+  async function boot() {
+    const state = await api().boot();
+    if (state.phase === "ready") { window.location.href = state.url; return; }
+    if (state.phase === "error") {
+      document.getElementById("failed-text").textContent = state.error;
+      show("failed"); return;
+    }
+    if (state.phase === "signin" && !signing) show("signin");
+    setTimeout(boot, 400);
+  }
+
+  async function watchSignIn() {
+    const { outcome } = await api().sign_in_outcome();
+    if (outcome === null) { setTimeout(watchSignIn, 500); return; }
+    signing = false;
+    if (outcome === "done") { show("starting"); return; }
+    document.getElementById("signin-note").textContent = MESSAGES[outcome] || MESSAGES.claim;
+    show("signin");
+  }
+
+  document.getElementById("signin-go").onclick = async () => {
+    signing = true; show("waiting");
+    await api().sign_in_start();
+    watchSignIn();
+  };
+  document.getElementById("signin-cancel").onclick = async () => {
+    await api().sign_in_cancel();
+  };
+  document.getElementById("retry").onclick = () => api().quit();
+
+  window.addEventListener("pywebviewready", boot);
+</script>
+</body>
+</html>

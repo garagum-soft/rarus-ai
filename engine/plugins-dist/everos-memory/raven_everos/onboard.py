@@ -1,4 +1,4 @@
-"""EverOS long-term memory screen of the ``raven onboard`` wizard (Step 4).
+"""EverOS long-term memory screen of the ``rarus onboard`` wizard (Step 4).
 
 Owns EverOS role configuration (llm / embedding / rerank / multimodal) end to
 end. The wizard shell -- console, translation, prompt chrome, the back
@@ -1540,7 +1540,7 @@ def _use_found_root(state: Any) -> StepOutcome:
         pid_line = _UI.t("pid {pid} holds", pid=holder.pid) if holder is not None else _UI.t("something holds")
         _UI.console.print(
             _UI.t(
-                "  [yellow]! {pid_line} {a1} but serves no HTTP.[/yellow]\n{detail}  [dim]Stop it and re-run `raven onboard`.[/dim]",
+                "  [yellow]! {pid_line} {a1} but serves no HTTP.[/yellow]\n{detail}  [dim]Stop it and re-run `rarus onboard`.[/dim]",
                 pid_line=pid_line,
                 a1=state.root,
                 detail=detail,
@@ -1611,7 +1611,7 @@ def _step4_memory(
             _UI.console.print(
                 _UI.t(
                     "  [dim]Long-term memory left as it is.[/dim]\n"
-                    "  [dim]Run `raven onboard` again whenever you want to configure it.[/dim]"
+                    "  [dim]Run `rarus onboard` again whenever you want to configure it.[/dim]"
                 )
             )
             return _leave_as_is()
@@ -1705,7 +1705,7 @@ def _step4_memory(
                 _UI.t(
                     "  [yellow]⚠ Gave up long-term memory: Raven will not remember anything "
                     "between sessions.[/yellow]\n"
-                    "  [dim]Run `raven onboard` again whenever you want to configure it.[/dim]"
+                    "  [dim]Run `rarus onboard` again whenever you want to configure it.[/dim]"
                 )
             )
             return StepOutcome.DISABLED
@@ -1776,7 +1776,7 @@ def _step4_memory(
                 return StepOutcome.CONFIGURED
             _UI.console.print(
                 _UI.t(
-                    "  [yellow]! Long-term memory turned off. Run `raven onboard` "
+                    "  [yellow]! Long-term memory turned off. Run `rarus onboard` "
                     "again whenever you want it back.[/yellow]"
                 )
             )
