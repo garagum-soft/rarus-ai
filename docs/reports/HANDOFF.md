@@ -1,5 +1,7 @@
 # Передача работы: Rarus AI — где остановились и что делать дальше
 
+> **Обновление (2026-10-17, позже того же дня).** Разделы 6.1–6.5 выполнены: канвас, экран «Аккаунт», проверки дизайна, сборка PyInstaller, сверка с Raven. Итоги: `milestone-M5.md`, `milestone-M6.md`, `milestone-M7.md`, `docs/compat/`. Осталось: компиляция установщика NSIS (нужно разрешение владельца скачать NSIS), установка на чистую ВМ, живые сценарии (`docs/compat/scenarios.md`), иконка Rarus. Решения 24–36 — в `decisions-by-executor.md`.
+
 Дата снимка: 2026-10-17. Составил предыдущий исполнитель (Claude, сессия 8cbbab59…). Файл написан так, чтобы следующий агент прочитал его, `TECH_SPEC.md` и продолжил без вопросов владельцу.
 
 > **Первое действие:** прочитай разделы 1–3 этого файла, затем `C:\235235\agent_orchestration\rarus_ai_spec\TECH_SPEC.md` (разделы 10.5–10.6 — канвас, 18 — режим alembox, 11–12 — сверка и приёмка). Потом иди к разделу 6 («Что делать дальше»), пункт 1.
@@ -49,7 +51,7 @@
 - Провайдер `rarus` (`raven/providers/rarus_session.py` — ключ в `oauth/rarus.json`, DPAPI; `rarus_client.py` — whoami/models; `rarus_login.py` — вход PKCE через браузер, loopback; `rarus_provider.py`; `rarus_models.py` — встроенные `deepseek-flash`, `auto` + обновление из `/v1/models`; `rarus_account.py` — статус аккаунта, общий для оболочки и страницы).
 - Каталог `RARUS_HOME` (по умолчанию `~/.rarus`) вместо `~/.raven`; команда `rarus` (+ псевдоним `raven`); проверка обновлений Raven отключена (нужен `RARUS_UPDATE_URL`).
 - Защита локального сервера: Host-guard, Origin, nonce→HttpOnly cookie, токен; журналы с редактированием ключей всех форм; `rarus migrate-raven`.
-- `setup.status`: вошедший аккаунт Rarus = настроенный провайдер. RPC `rarus.account`, `org.get`, `org.set` (чарт `subagents.org`: лес, без циклов, глубина ≤ 6; `raven/config/update_org.py`). Контракт: `rpc-schema/openrpc.json`, `raven/rpc/models.py` (`METHOD_MODELS`), `ui-web/src/rpc/generated.ts` (генерируется `node scripts/gen-rpc-client.mjs`).
+- `setup.status`: вошедший аккаунт Rarus = настроенный провайдер. RPC `rarus.account`, `org.get`, `org.set` (чарт `subagents.org`: лес, без циклов, глубина ≤ 6; `raven/agent/subagent/org_store.py`). Контракт: `rpc-schema/openrpc.json`, `raven/rpc/models.py` (`METHOD_MODELS`), `ui-web/src/rpc/generated.ts` (генерируется `node scripts/gen-rpc-client.mjs`).
 - Язык `ru` (конфиг, ответы агента, `ensure_language`).
 
 **Страница**
