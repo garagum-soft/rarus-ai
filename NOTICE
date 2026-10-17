@@ -5,3 +5,5 @@ Origin: raven commit 5a675b61, branch feat/multi-user, imported 2026-10-17.
 The engine/ directory started as an unmodified copy of that commit
 (CLAUDE.md was a symlink to AGENTS.md in Raven; it is a plain copy here).
 Third-party notices: engine/NOTICES.md, engine/LICENSES/.
+Fonts: Instrument Sans and JetBrains Mono (SIL Open Font License 1.1), see
+engine/ui-web/src/assets/fonts/ and engine/NOTICES.md.

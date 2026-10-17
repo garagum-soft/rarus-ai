@@ -61,6 +61,21 @@ Run $py @("-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", (Join-Pat
 $dist = Join-Path $build "dist\RarusAI"
 if (-not (Test-Path (Join-Path $dist "RarusAI.exe"))) { throw "the program was not built" }
 
+# The WebView2 Evergreen bootstrapper is a signed Microsoft file, kept out of the repository (see
+# packaging/redist/README.md). It rides in redist\ so the installer can run it on a machine that has
+# no WebView2; only a file with a valid Microsoft signature is taken.
+$bootstrapper = Join-Path $root "packaging\redist\MicrosoftEdgeWebview2Setup.exe"
+if (Test-Path $bootstrapper) {
+  $signature = Get-AuthenticodeSignature $bootstrapper
+  if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notlike "CN=Microsoft Corporation,*") {
+    throw "the WebView2 bootstrapper has no valid Microsoft signature: $($signature.Status)"
+  }
+  New-Item -ItemType Directory -Force (Join-Path $dist "redist") | Out-Null
+  Copy-Item $bootstrapper (Join-Path $dist "redist")
+} else {
+  Write-Host "packaging\redist\MicrosoftEdgeWebview2Setup.exe is missing: the installer will not carry the WebView2 bootstrapper" -ForegroundColor Yellow
+}
+
 Step 5 "gate: no key shapes and no internal addresses in the build (spec 12.4)"
 Run $py @((Join-Path $PSScriptRoot "check_build.py"), $dist)
 

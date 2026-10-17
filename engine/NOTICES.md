@@ -265,3 +265,12 @@ Users install them separately through their respective package managers.
   `tui-use` to `vendor/tui-use/` and adding its LICENSE to `LICENSES/` plus
   updating this section's "Scope" line to "vendored" — same pattern as
   `hermes-agent` above.
+
+## Fonts bundled with the page (Rarus)
+
+- `ui-web/src/assets/fonts/` holds variable woff2 files of Instrument Sans (Latin, Latin Extended)
+  and JetBrains Mono (Latin, Latin Extended, Cyrillic, Cyrillic Extended), as Google Fonts serves
+  them (fonts.gstatic.com, fetched 2026-10-18). Both families are under the SIL Open Font License
+  1.1; the licence texts sit beside the files (`OFL-InstrumentSans.txt`, `OFL-JetBrainsMono.txt`).
+  The page declares them with `@font-face` in `ui-web/src/styles/page.css`, so nothing is fetched
+  from outside while the program runs.

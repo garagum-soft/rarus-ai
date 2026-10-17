@@ -6,3 +6,6 @@ dist/
 build/
 .venv/
 
+
+# WebView2 bootstrapper: fetched by hand, see packaging/redist/README.md
+packaging/redist/*.exe
