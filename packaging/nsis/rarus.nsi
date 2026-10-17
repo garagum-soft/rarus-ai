@@ -8,9 +8,10 @@
 ; program is closed first, the choices of the earlier install are kept, data is never touched).
 ; The setup log is %TEMP%\rarus-setup.log.
 ;
-; NOT YET COMPILED: this machine has no NSIS and the owner has not allowed downloading it
-; (docs/reports/decisions-by-executor.md). Compile it once NSIS is installed and fix whatever the
-; compiler names.
+; Compiled with NSIS 3.13 (unpacked at build\tools\nsis\nsis-3.13, not part of the repository).
+; The file must keep its UTF-8 byte order mark: without it NSIS reads the Russian and Chinese
+; strings as ANSI. Silent install, silent uninstall and /UPDATE were run on a development machine;
+; see docs/reports/milestone-M6.md for what was and was not checked.
 
 Unicode true
 
@@ -52,6 +53,7 @@ VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${APP_NAME}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "Rarus AI setup"
+VIAddVersionKey "LegalCopyright" "Rarus AI. Built on Raven, Apache License 2.0"
 
 Var IsUpdate
 
