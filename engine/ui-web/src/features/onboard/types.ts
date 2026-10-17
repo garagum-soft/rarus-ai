@@ -3,7 +3,15 @@
 
 import type { JSX } from 'react'
 
-export type StepId = 'model' | 'search' | 'agents' | 'sync'
+export type StepId = 'account' | 'look' | 'launch' | 'model' | 'search' | 'agents' | 'sync'
+
+/** What `rarus.account` says about the signed-in person. */
+export interface AccountInfo {
+  signed_in: boolean
+  email: string
+  balance?: number | null
+  error: string
+}
 
 /** One platform the cold-start importer knows, with what a scan found for it. */
 export interface ImportPlatform {
@@ -37,6 +45,8 @@ export interface OnboardSource {
   /* Whether a provider is configured, re-read when the wizard closes so the
      page's first-run redirects stop once the reader has set one up. */
   providerConfigured(): Promise<boolean>
+  /* The Rarus account behind the first step; a source without it leaves that step unsigned. */
+  account?(): Promise<AccountInfo>
   scan(): Promise<ImportScan>
   startImport(platforms: string[], tier: ImportTier): Promise<ImportStarted>
 }

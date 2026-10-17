@@ -40,6 +40,12 @@ class Bridge:
     def sign_out(self) -> dict[str, Any]:
         return self._controller.sign_out()
 
+    def first_run(self) -> bool:
+        return self._controller.first_run()
+
+    def onboarded(self) -> None:
+        self._controller.onboarded()
+
     def autostart_enabled(self) -> bool:
         return self._controller.autostart_enabled()
 

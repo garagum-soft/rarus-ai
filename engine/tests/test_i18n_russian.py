@@ -81,3 +81,20 @@ class TestThePageCatalogue:
     def test_the_product_is_not_called_raven_in_russian_text(self):
         offenders = [k for k, v in self._ui().items() if "Raven" in v["ru"]]
         assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("key", "name"),
+    [
+        ("gui.onb.lang_ru", "Русский"),
+        ("gui.onb.lang_zh", "中文"),
+        ("gui.onb.lang_en_name", "English"),
+        ("gui.settings.general.lang_ru", "Русский"),
+        ("gui.settings.general.lang_zh", "中文"),
+        ("gui.settings.general.lang_en", "English"),
+    ],
+)
+def test_a_language_is_named_in_itself_in_every_column(key, name):
+    """A picker that said "Русский" twice would leave English unreachable."""
+    cols = json.loads(CATALOGUE.read_text(encoding="utf-8"))["ui"][key]
+    assert cols["ru"] == name

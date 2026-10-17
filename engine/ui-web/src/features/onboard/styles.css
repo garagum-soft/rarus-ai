@@ -85,6 +85,13 @@
   background: var(--paper); box-shadow: var(--elev); transition: transform .16s; }
 .ob-switch[aria-checked="true"] { background: var(--amber); border-color: var(--amber); }
 .ob-switch[aria-checked="true"]::after { transform: translateX(16px); }
+.ob-seg { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.ob-segopt { font: inherit; font-size: 13px; padding: 5px 12px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.ob-segopt:hover { color: var(--text); }
+.ob-segopt[aria-checked="true"] { background: var(--amber-dp); color: var(--text); font-weight: 600; }
+.ob-segopt:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.ob-note { padding: 12px 15px; color: var(--muted); font-size: 13px; }
+.ob-bal { font-variant-numeric: tabular-nums; }
 .ob-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 99px;
   font-size: 11px; font-weight: 600; color: var(--faint); background: var(--raised); }
 .ob-led { width: 6px; height: 6px; border-radius: 99px; background: currentColor; }

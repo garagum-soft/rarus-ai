@@ -28,7 +28,10 @@ describe('first-run model setup', () => {
   it('opens the wizard on a first run, and records the flag the redirect reads', () => {
     expect(wiring).toContain("const firstRun = setup.provider_configured === false")
     expect(wiring).toContain('setupState.providerConfigured = !firstRun')
-    expect(wiring).toMatch(/if \(!cannedInstead && \(firstRun \|\| \/\[\?&\]onboard=1\/\.test\(location\.search\)\)\) \{\s*openOnboard\(\)/)
+    /* Inside the desktop window the shell's own first-run note also opens it. */
+    expect(wiring).toMatch(
+      /if \(!cannedInstead && \(firstRun \|\| \/\[\?&\]onboard=1\/\.test\(location\.search\) \|\| \(await shellFirstRun\(\)\)\)\) \{\s*openOnboard\(\)/,
+    )
   })
 
   it('guards New Task, Send, and the model selector with the same redirect', () => {

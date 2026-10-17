@@ -27,6 +27,7 @@ import { redraw as redrawSettings } from '../features/settings/store'
 import { refreshState as refreshTrajectoryState } from '../features/trajectory/store'
 import { hostPlatformSet } from '../lib/platform'
 import { setCurrent as sessionSet } from '../lib/session'
+import { firstRun as shellFirstRun } from '../lib/shell'
 import { hasUpdateFlag } from '../rpc/capabilities'
 import { gateway } from '../rpc/gateway'
 import { draw as drawCtx } from '../state/ctxChip'
@@ -157,7 +158,10 @@ async function sequence(): Promise<void> {
          transport, whose setup.status answers "first run" until a model is
          picked; opening it here as well would open it twice. */
       const cannedInstead = /[?&]onboard=demo/.test(location.search)
-      if (!cannedInstead && (firstRun || /[?&]onboard=1/.test(location.search))) {
+      /* Inside the desktop window the shell also says whether this is the
+         first start: a signed-in account has a provider, yet still gets the
+         language, theme and autostart steps once. */
+      if (!cannedInstead && (firstRun || /[?&]onboard=1/.test(location.search) || (await shellFirstRun()))) {
         openOnboard()
       }
     } catch (e) {

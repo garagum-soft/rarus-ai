@@ -7,25 +7,29 @@
  * starts -- and asks each step's owning domain, through the step body it was
  * handed, whether the step is loaded and done. */
 
+import { shell } from '../../lib/shell'
 import { pick as pickLang } from '../../state/lang/pick'
 import { ds } from '../../state/sources'
 import { makeStore } from '../../state/store'
 import { setupState } from '../model/source'
 
 import type { Lang } from '../../state/lang'
-import type { FoundAgent, ImportPlatform, ImportScan, OnboardSource, StepId, StepBodies } from './types'
+import type { AccountInfo, FoundAgent, ImportPlatform, ImportScan, OnboardSource, StepId, StepBodies } from './types'
 
+/* The steps Raven shipped: provider, search, agents, data sync. Rarus has no
+   provider step (its models are built in), so these are not on the strip; their
+   bodies and verbs stay, and the tests put them back with `_showStepsForTests`. */
 export const STEPS: readonly StepId[] = ['model', 'search', 'agents', 'sync']
 
-/* The agents and data-sync steps are held back from the strip for now: a first
-   run asks only for a model and a search tool, then enters. Their bodies and
-   verbs stay, so bringing them back is widening this list. */
-const SHOWN: readonly StepId[] = ['model', 'search']
+/* A first run with no API key to type: who is signed in, language and theme,
+   what happens at Windows start. Sign-in itself is the window's start page. */
+export const RARUS_STEPS: readonly StepId[] = ['account', 'look', 'launch']
+const SHOWN: readonly StepId[] = RARUS_STEPS
 let shown: readonly StepId[] = SHOWN
 
 /* The step body whose data each step draws on; the sync step waits on the
    embedding model's. */
-const BODY_OF: Record<StepId, keyof StepBodies> = { model: 'model', search: 'search', agents: 'agents', sync: 'memory' }
+const BODY_OF: Partial<Record<StepId, keyof StepBodies>> = { model: 'model', search: 'search', agents: 'agents', sync: 'memory' }
 
 /** How long the closing fade runs before the island comes down (styles.css). */
 export const CLOSE_MS = 500
@@ -41,6 +45,10 @@ export interface OnboardState {
      it has, and only when it can run. */
   scan: ImportScan | null
   syncPick: Record<string, boolean>
+  /* null until `rarus.account` has answered. */
+  account: AccountInfo | null
+  /* The Windows autostart entry; null when this page is not inside the desktop window. */
+  autostart: boolean | null
   busy: boolean
   closing: boolean
   error: string
@@ -49,11 +57,13 @@ export interface OnboardState {
 const initial = (): OnboardState => ({
   open: false,
   epoch: 0,
-  step: 'model',
+  step: shown[0] as StepId,
   skipped: {},
   bodies: null,
   scan: null,
   syncPick: {},
+  account: null,
+  autostart: null,
   busy: false,
   closing: false,
   error: '',
@@ -87,8 +97,40 @@ export function open(): void {
   if (!bodies) return
   if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
   set({ ...initial(), bodies, open: true, epoch: get().epoch + 1 })
-  for (const key of new Set(shown.map((id) => BODY_OF[id]))) void bodies[key].load().catch(() => {})
+  for (const key of new Set(shown.map((id) => BODY_OF[id]))) if (key) void bodies[key].load().catch(() => {})
   if (shown.includes('sync')) void scan()
+  if (shown.includes('account')) void loadAccount()
+  if (shown.includes('launch')) void loadAutostart()
+}
+
+/* The signed-in person, read again on demand: the page can be open before the
+   window finishes a sign-in, and the reader asks again rather than reloading. */
+export async function loadAccount(): Promise<void> {
+  const ask = source().account
+  if (!ask) { set({ account: { signed_in: false, email: '', balance: null, error: 'unsupported' } }); return }
+  try {
+    set({ account: await ask.call(source()) })
+  } catch (e) {
+    set({ account: { signed_in: false, email: '', balance: null, error: failure(e) } })
+  }
+}
+
+async function loadAutostart(): Promise<void> {
+  try {
+    const api = await shell()
+    set({ autostart: api ? !!(await api.autostart_enabled()) : null })
+  } catch {
+    set({ autostart: null })
+  }
+}
+
+export async function setAutostart(enabled: boolean): Promise<void> {
+  try {
+    const api = await shell()
+    if (api) set({ autostart: !!(await api.set_autostart(enabled)) })
+  } catch (e) {
+    set({ error: failure(e) })
+  }
 }
 
 /* One importer read. The latest one issued is the only one whose answer
@@ -137,6 +179,9 @@ export function visibleSteps(): StepId[] {
 export function stepDone(id: StepId): boolean {
   const s = get()
   if (!s.bodies) return false
+  /* Rarus steps: the first waits on a signed-in account, the others hold nobody. */
+  if (id === 'account') return s.account?.signed_in === true
+  if (id === 'look' || id === 'launch') return true
   if (id === 'model') return s.bodies.model.done()
   /* Search is optional: nothing on the step holds the reader. */
   if (id === 'search') return true
@@ -149,7 +194,7 @@ export function stepDone(id: StepId): boolean {
 /* Which steps carry a Skip. The model step has nothing to skip -- without a
    chat model nothing runs -- and the search step is always done, so a Skip
    there would only be a second way to press the primary. */
-export const skippable = (id: StepId): boolean => id !== 'model' && id !== 'search'
+export const skippable = (id: StepId): boolean => id === 'agents' || id === 'sync'
 
 export function isLast(id: StepId): boolean {
   const steps = visibleSteps()
@@ -220,7 +265,18 @@ export async function finish(): Promise<void> {
       set({ busy: false })
     }
   }
+  void tellShell()
   await close()
+}
+
+/* The window remembers that the wizard was finished, so it is not shown again. */
+async function tellShell(): Promise<void> {
+  try {
+    const api = await shell()
+    if (api) await api.onboarded()
+  } catch {
+    /* Without the note the wizard shows once more; nothing is lost. */
+  }
 }
 
 /* The page's first-run redirects read `setupState`; it is re-read here so a

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { t } from '../../i18n/t'
 import * as lang from '../../state/lang'
+import * as look from '../../state/look'
 import * as store from './store'
 
 import type { StepId, StepBody } from './types'
@@ -15,6 +16,9 @@ import './styles.css'
 
 /* Literal keys, so the i18n gate can read each one. */
 const STEP_NAME: Record<StepId, string> = {
+  account: 'gui.onb.step_account',
+  look: 'gui.onb.step_look',
+  launch: 'gui.onb.step_launch',
   model: 'gui.onb.step_model',
   search: 'gui.onb.step_search',
   agents: 'gui.onb.step_agents',
@@ -104,6 +108,114 @@ function SyncBody(): JSX.Element {
   )
 }
 
+/* Step 1. Sign-in itself is the desktop window's start page; here the reader
+   sees who the session belongs to and that the built-in models need nothing. */
+function AccountBody(): JSX.Element {
+  const s = store.get()
+  const a = s.account
+  if (!a) {
+    return (
+      <div className="ob-card">
+        <div className="ob-ch"><div className="ob-t">{t('gui.onb.account_title')}</div></div>
+        <div className="ob-note">{t('gui.onb.loading')}</div>
+      </div>
+    )
+  }
+  return (
+    <div className="ob-card">
+      <div className="ob-ch"><div className="ob-t">{t('gui.onb.account_title')}</div></div>
+      {a.signed_in ? (
+        <>
+          <div className="ob-row">
+            <div className="ob-am">
+              <div className="ob-at">{t('gui.onb.account_in', { email: a.email })}</div>
+              <div className="ob-ad ob-bal">
+                {typeof a.balance === 'number'
+                  ? t('gui.onb.account_balance', { balance: a.balance })
+                  : t('gui.onb.account_balance_unknown')}
+              </div>
+            </div>
+            <span className="ob-chip"><span className="ob-led" />OK</span>
+          </div>
+          <div className="ob-note">{t('gui.onb.account_models')}</div>
+        </>
+      ) : (
+        <>
+          <div className="ob-note" role="status">{t('gui.onb.account_out')}</div>
+          <div className="ob-row">
+            <button type="button" className="ob-btn ob-ghost" onClick={() => void store.loadAccount()}>
+              {t('gui.onb.account_recheck')}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+const THEMES = [
+  ['dark', 'gui.onb.theme_dark'],
+  ['light', 'gui.onb.theme_light'],
+  ['system', 'gui.onb.theme_system'],
+] as const
+
+/* Step 2: the language and the theme as two small segmented choices. */
+function LookBody(): JSX.Element {
+  const cur = useSyncExternalStore(lang.subscribe, lang.get).lang
+  const [theme, setTheme] = useState(look.get().theme)
+  return (
+    <div className="ob-card">
+      <div className="ob-ch"><div className="ob-t">{t('gui.onb.look_title')}</div></div>
+      <div className="ob-row">
+        <div className="ob-am"><div className="ob-at">{t('gui.onb.look_lang')}</div></div>
+        <div className="ob-seg" role="radiogroup" aria-label={t('gui.onb.look_lang')}>
+          {LANGS.map(([code, key]) => (
+            <button key={code} type="button" role="radio" aria-checked={cur === code} className="ob-segopt"
+              onClick={() => { if (cur !== code) store.setLang(code) }}>
+              {t(key)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="ob-row">
+        <div className="ob-am"><div className="ob-at">{t('gui.onb.look_theme')}</div></div>
+        <div className="ob-seg" role="radiogroup" aria-label={t('gui.onb.look_theme')}>
+          {THEMES.map(([id, key]) => (
+            <button key={id} type="button" role="radio" aria-checked={theme === id} className="ob-segopt"
+              onClick={() => { look.set({ theme: id }); setTheme(id) }}>
+              {t(key)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* Step 3: what happens when Windows starts. The entry belongs to the desktop
+   window, so in a plain browser the step only says where to set it. */
+function LaunchBody(): JSX.Element {
+  const on = store.get().autostart
+  return (
+    <div className="ob-card">
+      <div className="ob-ch"><div className="ob-t">{t('gui.onb.launch_title')}</div></div>
+      {on === null ? (
+        <div className="ob-note">{t('gui.onb.launch_app_only')}</div>
+      ) : (
+        <div className="ob-row">
+          <div className="ob-am">
+            <div className="ob-at">{t('gui.onb.launch_autostart')}</div>
+            <div className="ob-ad">{t('gui.onb.launch_autostart_hint')}</div>
+          </div>
+          <button type="button" className="ob-switch" role="switch" aria-checked={on}
+            aria-label={t('gui.onb.launch_autostart')} onClick={() => void store.setAutostart(!on)} />
+        </div>
+      )}
+      <div className="ob-note">{t('gui.onb.launch_ready')}</div>
+    </div>
+  )
+}
+
 const LANGS = [
   ['ru', 'gui.onb.lang_ru'],
   ['zh', 'gui.onb.lang_zh'],
@@ -189,7 +301,7 @@ function Wizard(): JSX.Element {
   return (
     <div className="ob-app">
       <header className="ob-top">
-        <div className="ob-brand">Raven</div>
+        <div className="ob-brand">Rarus AI</div>
         <nav className="ob-steps" aria-label={t('gui.onb.steps')}>
           {steps.map((id, i) => {
             const state = i < at ? (s.skipped[id] ? 'skipped' : 'done') : i === at ? 'current' : 'upcoming'
@@ -206,7 +318,11 @@ function Wizard(): JSX.Element {
       </header>
       <div className="ob-main" ref={scroll}>
         <div className="ob-col" data-step={s.step}>
-          {s.step === 'sync' ? <SyncBody /> : <Body body={bodies[s.step]} />}
+          {s.step === 'account' ? <AccountBody />
+            : s.step === 'look' ? <LookBody />
+            : s.step === 'launch' ? <LaunchBody />
+            : s.step === 'sync' ? <SyncBody />
+            : <Body body={bodies[s.step]} />}
         </div>
       </div>
       <footer className="ob-foot">

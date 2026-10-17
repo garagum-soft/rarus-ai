@@ -229,3 +229,29 @@ class TestFirstRunLanguage:
         set_language("en")
         account.first_run_language()
         assert json.loads(get_config_path().read_text(encoding="utf-8"))["language"] == "en"
+
+
+class TestThePort:
+    def test_the_same_port_is_chosen_while_it_is_free(self):
+        assert engine_mod.choose_port() == engine_mod.PREFERRED_PORT
+
+    def test_another_port_is_chosen_when_it_is_taken(self):
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as holder:
+            holder.bind(("127.0.0.1", engine_mod.PREFERRED_PORT))
+            holder.listen()
+            port = engine_mod.choose_port()
+        assert port != engine_mod.PREFERRED_PORT
+
+
+class TestFirstRun:
+    def test_the_wizard_is_due_until_it_has_been_finished(self):
+        ctl = Controller(engine_factory=_engine, open_browser=False)
+        assert ctl.first_run() is True
+        ctl.onboarded()
+        assert ctl.first_run() is False
+
+    def test_the_note_survives_a_new_controller(self):
+        Controller(engine_factory=_engine, open_browser=False).onboarded()
+        assert Controller(engine_factory=_engine, open_browser=False).first_run() is False

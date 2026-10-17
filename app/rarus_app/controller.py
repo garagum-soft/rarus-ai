@@ -8,6 +8,10 @@ from typing import Any
 
 from rarus_app import account, autostart, updater
 from rarus_app.engine import Engine, EngineError
+from rarus_app.paths import app_home
+
+# Written when the first-run wizard is finished; its absence means the wizard is still due.
+ONBOARDED_MARK = "onboarded"
 
 
 class Controller:
@@ -97,6 +101,17 @@ class Controller:
     def sign_out(self) -> dict[str, Any]:
         account.sign_out()
         return {"ok": True}
+
+    # -- first run --------------------------------------------------------------
+
+    def first_run(self) -> bool:
+        """True until the page's first-run wizard has been finished once."""
+        return not (app_home() / ONBOARDED_MARK).exists()
+
+    def onboarded(self) -> None:
+        mark = app_home() / ONBOARDED_MARK
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.write_text("1", encoding="utf-8")
 
     # -- settings of the shell itself -------------------------------------------
 

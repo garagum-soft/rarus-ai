@@ -1,10 +1,49 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`the first run as shipped > keeps its rendered shape > model step 1`] = `
+exports[`the first run as shipped > keeps its rendered shape > account step 1`] = `
 "div.ob-app
   header.ob-top
     div.ob-brand
     nav.ob-steps
+      div.ob-sitem[data-state=current]
+        span.ob-dot
+        span
+      div.ob-sitem[data-state=upcoming]
+        span.ob-dot
+        span
+      div.ob-sitem[data-state=upcoming]
+        span.ob-dot
+        span
+    div.ob-lang
+      button.ob-langbtn
+        svg.ob-langch
+          path
+  div.ob-main
+    div.ob-col[data-step=account]
+      div.ob-card
+        div.ob-ch
+          div.ob-t
+        div.ob-row
+          div.ob-am
+            div.ob-at
+            div.ob-ad.ob-bal
+          span.ob-chip
+            span.ob-led
+        div.ob-note
+  footer.ob-foot
+    div.ob-col
+      span.ob-grow
+      button.ob-btn.ob-primary"
+`;
+
+exports[`the first run as shipped > keeps its rendered shape > look step 1`] = `
+"div.ob-app
+  header.ob-top
+    div.ob-brand
+    nav.ob-steps
+      div.ob-sitem[data-state=done]
+        span.ob-dot
+        span
       div.ob-sitem[data-state=current]
         span.ob-dot
         span
@@ -16,10 +55,27 @@ exports[`the first run as shipped > keeps its rendered shape > model step 1`] = 
         svg.ob-langch
           path
   div.ob-main
-    div.ob-col[data-step=model]
-      div.fake-model
+    div.ob-col[data-step=look]
+      div.ob-card
+        div.ob-ch
+          div.ob-t
+        div.ob-row
+          div.ob-am
+            div.ob-at
+          div.ob-seg
+            button.ob-segopt
+            button.ob-segopt
+            button.ob-segopt
+        div.ob-row
+          div.ob-am
+            div.ob-at
+          div.ob-seg
+            button.ob-segopt
+            button.ob-segopt
+            button.ob-segopt
   footer.ob-foot
     div.ob-col
+      button.ob-btn.ob-ghost
       span.ob-grow
       button.ob-btn.ob-primary"
 `;

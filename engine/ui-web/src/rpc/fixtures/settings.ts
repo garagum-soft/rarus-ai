@@ -166,6 +166,7 @@ export function createSettings(env: FixtureEnv, ext: ExtFixture): SettingsFixtur
       'system.version': () => ({ server_version: '0.1.0', schema_version: '1', raven_version: '0.1.0' }),
       'system.ping': () => ({ pong: true, server_time_ms: env.now() }),
       'setup.status': () => ({ provider_configured: true }),
+      'rarus.account': () => ({ signed_in: true, email: 'demo@example.com', balance: 1200, error: '' }),
       'config.get': (p) => {
         const out: Record<string, Json> = {}
         for (const key of p.keys || []) out[key] = pick(config, key) ?? null

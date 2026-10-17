@@ -43,27 +43,52 @@ const opened = async (scan: ImportScan, found: FoundAgent[], done = false, embed
 }
 
 describe('the first run as shipped', () => {
-  it('asks for a model, offers a search tool, then enters', async () => {
-    const scans: number[] = []
-    setSources({ onboard: { ...source(READY), scan: async () => { scans.push(1); return READY } } })
+  it('shows the account, the look and the launch, and asks for no provider', async () => {
+    const asked: string[] = []
+    setSources({
+      onboard: {
+        ...source(READY),
+        account: async () => { asked.push('account'); return { signed_in: true, email: 'me@example.com', balance: 5, error: '' } },
+        scan: async () => { asked.push('scan'); return READY },
+      },
+    })
     const agents = { ...body(true, [{ id: 'hermes', name: 'Hermes' }]), load: vi.fn(async () => {}) }
-    store.setBodies({ model: body(true) as StepBody, search: body(false) as StepBody, agents, memory: body(true) })
+    const model = { ...body(false), load: vi.fn(async () => {}) }
+    store.setBodies({ model: model as StepBody, search: body(false) as StepBody, agents, memory: body(true) })
     store.open()
     await Promise.resolve()
-    expect(store.visibleSteps()).toEqual(['model', 'search'])
-    expect(store.isLast('search')).toBe(true)
-    /* The held-back steps' data is not asked for: the roster's load probes every agent. */
+    await Promise.resolve()
+    expect(store.visibleSteps()).toEqual(['account', 'look', 'launch'])
+    expect(store.isLast('launch')).toBe(true)
+    /* Neither a provider body nor the roster is asked for, and nothing is scanned. */
+    expect(model.load).not.toHaveBeenCalled()
     expect(agents.load).not.toHaveBeenCalled()
-    expect(scans).toEqual([])
+    expect(asked).toEqual(['account'])
+    expect(store.stepDone('account')).toBe(true)
+    expect(store.stepDone('look')).toBe(true)
+    expect(store.skippable('account')).toBe(false)
     await store.next()
-    expect(store.get().step).toBe('search')
-    /* Search is optional: an unset one neither holds the reader nor offers a Skip. */
-    expect(store.stepDone('search')).toBe(true)
-    expect(store.skippable('search')).toBe(false)
-    expect(store.skippable('model')).toBe(false)
-    expect(store.skippable('agents')).toBe(true)
+    expect(store.get().step).toBe('look')
+    await store.next()
     await store.finish()
     expect(store.get().closing).toBe(true)
+  })
+
+  it('does not let the reader past the account step while nobody is signed in', async () => {
+    setSources({ onboard: { ...source(READY), account: async () => ({ signed_in: false, email: '', balance: null, error: '' }) } })
+    store.setBodies({ model: body(false) as StepBody, search: body(false) as StepBody, agents: body(false), memory: body(true) })
+    store.open()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.stepDone('account')).toBe(false)
+  })
+
+  it('treats a source that cannot say who is signed in as nobody signed in', async () => {
+    setSources({ onboard: source(READY) })
+    store.setBodies({ model: body(false) as StepBody, search: body(false) as StepBody, agents: body(false), memory: body(true) })
+    store.open()
+    await Promise.resolve()
+    expect(store.get().account?.signed_in).toBe(false)
   })
 })
 

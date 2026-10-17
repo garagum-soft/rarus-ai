@@ -4,13 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetTranslator, setTranslator } from '../../i18n/t'
 import * as langPick from '../../state/lang/pick'
+import * as look from '../../state/look'
 import { resetSources, setSources } from '../../state/sources'
 import { domSnapshot } from '../../test/domSnapshot'
 import { setupState } from '../model/source'
 import { OnboardApp } from './OnboardPage'
 import * as store from './store'
 
-import type { AgentsBody, FoundAgent, ImportScan, OnboardSource } from './types'
+import type { AccountInfo, AgentsBody, FoundAgent, ImportScan, OnboardSource } from './types'
 import type { JSX } from 'react'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -65,6 +66,7 @@ interface Harness {
   runs: Array<[string[], string]>
   configured: boolean
   started: boolean
+  account: AccountInfo
 }
 
 function install(scan: ImportScan = SCAN_NONE): Harness {
@@ -76,10 +78,12 @@ function install(scan: ImportScan = SCAN_NONE): Harness {
     runs: [],
     configured: true,
     started: true,
+    account: { signed_in: true, email: 'me@example.com', balance: 1200, error: '' },
     source: null as unknown as OnboardSource,
   }
   h.source = {
     providerConfigured: async () => h.configured,
+    account: async () => h.account,
     scan: async () => scan,
     startImport: async (platforms, tier) => {
       h.runs.push([platforms, tier])
@@ -132,18 +136,21 @@ afterEach(() => {
 })
 
 describe('the first run as shipped', () => {
-  it('offers only the model and search steps, and enters from the second without configuring search', async () => {
+  it('offers the account, the look and the launch, and enters from the last', async () => {
     const h = install(SCAN_CLAUDE)
     h.agents.agents = [{ id: 'claude_code', name: 'Claude Code' }]
     mount()
     await open()
-    expect(steps()).toEqual(['1gui.onb.step_model:current', '2gui.onb.step_search:upcoming'])
+    expect(steps()).toEqual(['1gui.onb.step_account:current', '2gui.onb.step_look:upcoming', '3gui.onb.step_launch:upcoming'])
+    /* No provider step, no key field: the built-in models need nothing. */
+    expect(h.model.load).not.toHaveBeenCalled()
     expect(h.agents.load).not.toHaveBeenCalled()
-    await act(async () => { h.model.setDone(true) })
+    expect(document.body.textContent).toContain('gui.onb.account_in:{"email":"me@example.com"}')
+    expect(document.body.textContent).toContain('gui.onb.account_balance:{"balance":1200}')
     await click(button('gui.onb.next'))
-    /* Search is optional: no Skip, and Start chatting takes the reader in as it stands. */
+    await click(button('gui.onb.next'))
+    /* Nothing on the last step is optional or skippable: Start chatting takes the reader in. */
     expect(buttons().map((b) => b.textContent)).toEqual(['gui.onb.back', 'gui.onb.enter'])
-    expect(button('gui.onb.enter').disabled).toBe(false)
     await click(button('gui.onb.enter'))
     expect(host().dataset.off).toBe('1')
     expect(setupState.providerConfigured).toBe(true)
@@ -153,12 +160,78 @@ describe('the first run as shipped', () => {
   })
 
   it('keeps its rendered shape', async () => {
-    const h = install(SCAN_CLAUDE)
-    h.agents.agents = [{ id: 'claude_code', name: 'Claude Code' }]
+    install(SCAN_CLAUDE)
     mount()
     await open()
-    await act(async () => { h.model.setLoaded(true) })
-    expect(domSnapshot(host())).toMatchSnapshot('model step')
+    expect(domSnapshot(host())).toMatchSnapshot('account step')
+    await click(button('gui.onb.next'))
+    expect(domSnapshot(host())).toMatchSnapshot('look step')
+  })
+
+  it('holds the reader on the first step until someone is signed in, and asks again on request', async () => {
+    const h = install()
+    h.account = { signed_in: false, email: '', balance: null, error: '' }
+    mount()
+    await open()
+    expect(document.body.textContent).toContain('gui.onb.account_out')
+    expect(button('gui.onb.next').disabled).toBe(true)
+    h.account = { signed_in: true, email: 'me@example.com', balance: null, error: '' }
+    const again = [...document.querySelectorAll<HTMLButtonElement>('.ob-main button')].find((b) => b.textContent === 'gui.onb.account_recheck')!
+    await click(again)
+    expect(button('gui.onb.next').disabled).toBe(false)
+    expect(document.body.textContent).toContain('gui.onb.account_balance_unknown')
+  })
+
+  it('switches the theme on the look step', async () => {
+    install()
+    mount()
+    await open()
+    await click(button('gui.onb.next'))
+    const light = [...document.querySelectorAll<HTMLButtonElement>('.ob-segopt')].find((b) => b.textContent === 'gui.onb.theme_light')!
+    await click(light)
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(light.getAttribute('aria-checked')).toBe('true')
+    look._resetForTests()
+    delete document.documentElement.dataset.theme
+  })
+
+  it('says autostart lives in the desktop app when the page is in a plain browser', async () => {
+    install()
+    mount()
+    await open()
+    await click(button('gui.onb.next'))
+    await click(button('gui.onb.next'))
+    expect(document.body.textContent).toContain('gui.onb.launch_app_only')
+    expect(document.querySelector('.ob-switch')).toBeNull()
+  })
+
+  it('offers the autostart switch inside the desktop window, and tells it when the wizard is finished', async () => {
+    install()
+    const calls: string[] = []
+    let on = false
+    ;(window as unknown as { pywebview?: unknown }).pywebview = {
+      api: {
+        first_run: async () => true,
+        onboarded: async () => { calls.push('onboarded') },
+        autostart_enabled: async () => on,
+        set_autostart: async (v: boolean) => { on = v; calls.push(`autostart:${v}`); return on },
+        sign_out: async () => ({}),
+      },
+    }
+    try {
+      mount()
+      await open()
+      await click(button('gui.onb.next'))
+      await click(button('gui.onb.next'))
+      const sw = document.querySelector<HTMLButtonElement>('.ob-switch')!
+      expect(sw.getAttribute('aria-checked')).toBe('false')
+      await click(sw)
+      expect(document.querySelector('.ob-switch')!.getAttribute('aria-checked')).toBe('true')
+      await click(button('gui.onb.enter'))
+      expect(calls).toEqual(['autostart:true', 'onboarded'])
+    } finally {
+      delete (window as unknown as { pywebview?: unknown }).pywebview
+    }
   })
 })
 

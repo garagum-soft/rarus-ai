@@ -9,6 +9,7 @@ import { gateway } from '../../rpc/gateway'
 import type { OnboardSource } from './types'
 
 export const onboardSource: OnboardSource = {
+  account: () => gateway().call('rarus.account', {}),
   providerConfigured: async () => {
     try { return (await gateway().call('setup.status', {})).provider_configured !== false }
     catch { return true }

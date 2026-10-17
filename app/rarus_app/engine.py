@@ -52,6 +52,21 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+# The same address on every start: the page keeps its preferences (theme, panel sizes) in the
+# browser's per-address storage, and a new random port each time would start it empty.
+PREFERRED_PORT = 47821
+
+
+def choose_port() -> int:
+    """The preferred port when it is free, otherwise any free one."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", PREFERRED_PORT))
+        except OSError:
+            return free_port()
+    return PREFERRED_PORT
+
+
 def engine_command(port: int, *, python: str | None = None) -> list[str]:
     """The argv that runs the engine.
 
@@ -89,7 +104,7 @@ class Engine:
         start_timeout_s: float = START_TIMEOUT_S,
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
     ) -> None:
-        self.port = port or free_port()
+        self.port = port or choose_port()
         self._command = list(command) if command is not None else engine_command(self.port)
         self._env = {**os.environ, **(env or {})}
         self._start_timeout_s = start_timeout_s

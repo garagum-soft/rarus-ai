@@ -2795,12 +2795,12 @@
     "gui.onb.lang_en": {
       "en": "EN",
       "zh": "EN",
-      "ru": "RU"
+      "ru": "EN"
     },
     "gui.onb.lang_en_name": {
       "en": "English",
       "zh": "English",
-      "ru": "Русский"
+      "ru": "English"
     },
     "gui.onb.lang": {
       "en": "Language",
@@ -15826,6 +15826,111 @@
       "en": "Русский",
       "zh": "俄语",
       "ru": "Русский"
+    },
+    "gui.onb.step_account": {
+      "en": "Account",
+      "zh": "账户",
+      "ru": "Аккаунт"
+    },
+    "gui.onb.step_look": {
+      "en": "Appearance",
+      "zh": "外观",
+      "ru": "Вид"
+    },
+    "gui.onb.step_launch": {
+      "en": "Launch",
+      "zh": "启动",
+      "ru": "Запуск"
+    },
+    "gui.onb.account_title": {
+      "en": "Your Rarus account",
+      "zh": "你的 Rarus 账户",
+      "ru": "Ваш аккаунт Rarus"
+    },
+    "gui.onb.account_in": {
+      "en": "Signed in as {email}",
+      "zh": "已登录：{email}",
+      "ru": "Вы вошли как {email}"
+    },
+    "gui.onb.account_balance": {
+      "en": "Credits left: {balance}",
+      "zh": "剩余额度：{balance}",
+      "ru": "Кредитов на счёте: {balance}"
+    },
+    "gui.onb.account_balance_unknown": {
+      "en": "The balance could not be read right now.",
+      "zh": "暂时无法读取余额。",
+      "ru": "Баланс сейчас получить не удалось."
+    },
+    "gui.onb.account_out": {
+      "en": "You are not signed in. Open the Rarus AI window and sign in, or run `rarus provider login rarus`.",
+      "zh": "尚未登录。请打开 Rarus AI 窗口登录，或运行 `rarus provider login rarus`。",
+      "ru": "Вход не выполнен. Откройте окно Rarus AI и войдите или выполните `rarus provider login rarus`."
+    },
+    "gui.onb.account_recheck": {
+      "en": "Check again",
+      "zh": "重新检查",
+      "ru": "Проверить снова"
+    },
+    "gui.onb.account_models": {
+      "en": "Built-in models are included: nothing to configure.",
+      "zh": "已内置模型，无需额外配置。",
+      "ru": "Встроенные модели уже подключены: ничего настраивать не нужно."
+    },
+    "gui.onb.look_title": {
+      "en": "Language and theme",
+      "zh": "语言与主题",
+      "ru": "Язык и тема"
+    },
+    "gui.onb.look_lang": {
+      "en": "Language",
+      "zh": "语言",
+      "ru": "Язык"
+    },
+    "gui.onb.look_theme": {
+      "en": "Theme",
+      "zh": "主题",
+      "ru": "Тема"
+    },
+    "gui.onb.theme_dark": {
+      "en": "Dark",
+      "zh": "深色",
+      "ru": "Тёмная"
+    },
+    "gui.onb.theme_light": {
+      "en": "Light",
+      "zh": "浅色",
+      "ru": "Светлая"
+    },
+    "gui.onb.theme_system": {
+      "en": "System",
+      "zh": "跟随系统",
+      "ru": "Как в системе"
+    },
+    "gui.onb.launch_title": {
+      "en": "Launch",
+      "zh": "启动",
+      "ru": "Запуск"
+    },
+    "gui.onb.launch_autostart": {
+      "en": "Start Rarus AI when I sign in to Windows",
+      "zh": "登录 Windows 时启动 Rarus AI",
+      "ru": "Запускать Rarus AI при входе в Windows"
+    },
+    "gui.onb.launch_autostart_hint": {
+      "en": "It starts in the tray; the window opens from the tray icon.",
+      "zh": "在托盘中启动，点击托盘图标打开窗口。",
+      "ru": "Запускается в трее, окно открывается по значку в трее."
+    },
+    "gui.onb.launch_app_only": {
+      "en": "Autostart is set in the Rarus AI desktop app.",
+      "zh": "开机自启需在 Rarus AI 桌面应用中设置。",
+      "ru": "Автозапуск настраивается в приложении Rarus AI."
+    },
+    "gui.onb.launch_ready": {
+      "en": "Everything is ready. Start working.",
+      "zh": "一切就绪，开始工作吧。",
+      "ru": "Всё готово. Можно приступать к работе."
     }
   }
 }
