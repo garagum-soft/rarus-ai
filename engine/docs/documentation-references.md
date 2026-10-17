@@ -36,12 +36,6 @@ explanations, and troubleshooting. These are design references, not dependencies
   and `runtime.py` in `raven/playbook/`. Creation is immediately usable;
   disabling affects model discovery, not explicit CLI runs. Stored parameter
   type declarations do not enforce runtime value types.
-- Evolver: `evolver/README.md` (including its planned-retirement notice),
-  `evolver/cli.py`, `evolver/launch/`,
-  `benchmarks/appworld/evolve/entry.py`, `evolver/orchestrator/gates/pipeline.py`,
-  and `evolver/orchestrator/sealed/runner.py`. The launcher registers AppWorld;
-  precheck can call the subject endpoint; navigation promotion is distinct
-  from statistical credit, and finalization is distinct from pausing.
 
 ## Navigation choices
 

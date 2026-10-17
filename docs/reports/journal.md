@@ -7,5 +7,11 @@
 | 2026-10-17 | Raven не менялся: статус чистый, коммит `5a675b61`, ветка `feat/multi-user` | — | — |
 | 2026-10-17 | Запущен базовый полный прогон pytest на копии `git archive` во временной папке, с временным профилем (`USERPROFILE`, `RAVEN_HOME`) | результат — в `docs/reports/milestone-M0.md` после завершения | — |
 | 2026-10-17 | Проверка Q-18 в `wan-site` только по числу совпадений, без вывода значений | 13 файлов с шаблонами `WORKER_TOKEN=`, `sk-…`, `PASSWORD`; `deploy/worker@3.vds.conf` и `deploy/twa/README.md` отслеживаются git; `worker@3.vds.conf` изменён и не закоммичен | — |
+| 2026-10-17 | Первый базовый прогон остановлен: во всех тестах ошибка фикстуры, не установлены плагины `plugins-dist/*` (`raven_everos`) | плагины поставлены в оба окружения (`uv pip install -e`), прогоны перезапущены | — |
+| 2026-10-17 | M2, шаг 1: убран серверный режим аккаунтов (D-17): пакет `raven/accounts`, команда `raven accounts`, три хука движка, тесты и документ | коммит `refactor(engine): drop accounts mode`; 167 файлов тестов сверены с нетронутой копией Raven: те же 329 падений Windows | владелец: «начинай M2» |
+| 2026-10-17 | M2, шаг 2: убран бета-канал, остался только stable | коммит `refactor(engine): drop the beta channel`; 22 файла тестов, новых падений нет. `raven/updates/upgrade.py` пока обращается к релизам Raven на GitHub — замена на клиент манифеста Rarus в M4 (9.6) | — |
+| 2026-10-17 | M2, шаг 3: убраны `install.sh`, `install.ps1`, `Dockerfile`, `docker/`, `deploy/` (GigaAM, D-24) и тесты, читавшие эти файлы | коммит `chore(engine): drop Raven installers, Docker files and deploy tree`; 8 файлов тестов, новых падений нет | — |
+| 2026-10-17 | M2, шаг 4: убраны `experimental/`, `evolver/`, `benchmarks/`, `demos/`, `docs-site/` и ~80 зависящих файлов тестов, скрипты `skill_forge_*`, `docs.yml`, правила в `pyproject.toml` и `Makefile` | сверка полным прогоном — см. запись ниже | — |
+| 2026-10-17 | `ui-tui/` пока не удалён: по Q-12 решение владельца не получено, а команда `raven tui` и её тесты завязаны на него | оставлено до ответа на Q-12 | — |
 
 Внешних действий (VDS, DNS, push, письма) не выполнялось.
