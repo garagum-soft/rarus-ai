@@ -16,12 +16,12 @@ MUTEX_NAME = "Local\\RarusAI"
 _ERROR_ALREADY_EXISTS = 183
 
 
-class AlreadyRunning(RuntimeError):
+class AlreadyRunningError(RuntimeError):
     """Another copy of the program holds the guard."""
 
 
 class SingleInstance:
-    """``with SingleInstance(): ...`` raises :class:`AlreadyRunning` when a copy is up."""
+    """``with SingleInstance(): ...`` raises :class:`AlreadyRunningError` when a copy is up."""
 
     def __init__(self, *, name: str = MUTEX_NAME, lock_file: Path | None = None) -> None:
         self.name = name
@@ -61,7 +61,7 @@ class SingleInstance:
             raise OSError("could not create the single-instance mutex")
         if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
             kernel32.CloseHandle(ctypes.c_void_p(handle))
-            raise AlreadyRunning(self.name)
+            raise AlreadyRunningError(self.name)
         self._handle = ctypes.c_void_p(handle)
 
     def _acquire_file(self, path: Path) -> None:
@@ -71,7 +71,7 @@ class SingleInstance:
             _lock(fd)
         except OSError as exc:
             os.close(fd)
-            raise AlreadyRunning(str(path)) from exc
+            raise AlreadyRunningError(str(path)) from exc
         self._fd = fd
 
     def __enter__(self) -> SingleInstance:

@@ -120,9 +120,9 @@ def _validate_permission_mode(value: Any) -> str:
 
 
 def _validate_language(value: Any) -> str:
-    if value not in ("en", "zh"):
+    if value not in ("en", "zh", "ru"):
         raise ConfigValidationError(
-            "language must be 'en' or 'zh'",
+            "language must be 'en', 'zh' or 'ru'",
             data={"field": "language", "got": repr(value)},
         )
     return value

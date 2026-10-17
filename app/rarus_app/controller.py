@@ -29,6 +29,7 @@ class Controller:
 
         def work() -> None:
             try:
+                account.first_run_language()
                 engine = self._engine_factory()
                 engine.start()
                 with self._lock:

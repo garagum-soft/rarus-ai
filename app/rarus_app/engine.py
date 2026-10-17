@@ -183,9 +183,10 @@ def _end_tree(proc: subprocess.Popen, *, extra_pid: int | None) -> None:
     """
     pids = {proc.pid, *([extra_pid] if extra_pid else [])}
     if sys.platform == "win32":
+        taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
         for pid in pids:
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                [taskkill, "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 check=False,

@@ -7,10 +7,11 @@ import time
 from pathlib import Path
 
 import pytest
-
-from rarus_app import account, engine as engine_mod
-from rarus_app.controller import Controller
 from raven.providers import rarus_session
+
+from rarus_app import account
+from rarus_app import engine as engine_mod
+from rarus_app.controller import Controller
 
 FAKE = str(Path(__file__).with_name("fake_engine.py"))
 KEY = "sk-ab-" + "0123456789abcdef" * 3
@@ -49,7 +50,9 @@ class TestEngine:
 
     def test_an_engine_that_never_answers_times_out(self):
         eng = engine_mod.Engine(
-            command=[sys.executable, "-c", "import time; time.sleep(30)"], port=engine_mod.free_port(), start_timeout_s=1.0
+            command=[sys.executable, "-c", "import time; time.sleep(30)"],
+            port=engine_mod.free_port(),
+            start_timeout_s=1.0,
         )
         with pytest.raises(engine_mod.EngineError, match="in time"):
             eng.start()
@@ -206,3 +209,23 @@ class TestAccount:
                 break
             time.sleep(0.05)
         assert attempt.outcome() == "keys"
+
+
+class TestFirstRunLanguage:
+    def test_a_fresh_install_starts_in_russian(self):
+        import json
+
+        from raven.config.loader import get_config_path
+
+        account.first_run_language()
+        assert json.loads(get_config_path().read_text(encoding="utf-8"))["language"] == "ru"
+
+    def test_a_language_already_chosen_is_left_alone(self):
+        import json
+
+        from raven.config.loader import get_config_path
+        from raven.config.update import set_language
+
+        set_language("en")
+        account.first_run_language()
+        assert json.loads(get_config_path().read_text(encoding="utf-8"))["language"] == "en"

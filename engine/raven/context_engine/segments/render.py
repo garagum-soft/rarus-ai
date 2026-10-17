@@ -79,7 +79,7 @@ def reply_language() -> str:
     """
     from raven import i18n
 
-    return zh_lexicon.LANGUAGE_NAME if i18n.current_language() == "zh" else ""
+    return {"zh": zh_lexicon.LANGUAGE_NAME, "ru": "Russian (русский)"}.get(i18n.current_language(), "")
 
 
 def dispatch_language_line(task: str) -> str:

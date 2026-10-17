@@ -31,7 +31,7 @@ export async function load(): Promise<void> {
   try {
     const r = await gateway().call('config.get', { keys: ['language'] })
     const v = r && r.config && (r.config as Record<string, unknown>).language
-    if (v === 'en' || v === 'zh') { lang.set(v); remember(v) }
+    if (v === 'en' || v === 'zh' || v === 'ru') { lang.set(v); remember(v) }
   } catch { /* stay on the built-in default */ }
 }
 

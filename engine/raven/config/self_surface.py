@@ -733,7 +733,7 @@ SECTIONS: tuple[Section, ...] = (
                 "enum",
                 _E.NEXT_TURN,
                 writer="settings",
-                choices=("en", "zh"),
+                choices=("en", "zh", "ru"),
             ),
         ),
     ),

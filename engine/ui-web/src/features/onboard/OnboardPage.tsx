@@ -105,6 +105,7 @@ function SyncBody(): JSX.Element {
 }
 
 const LANGS = [
+  ['ru', 'gui.onb.lang_ru'],
   ['zh', 'gui.onb.lang_zh'],
   ['en', 'gui.onb.lang_en_name'],
 ] as const
@@ -129,7 +130,7 @@ function LangPick({ cur }: { cur: string }): JSX.Element {
     <div className="ob-lang" ref={box}>
       <button type="button" className="ob-langbtn" aria-haspopup="menu" aria-expanded={open}
         aria-label={t('gui.onb.lang')} onClick={() => setOpen(!open)}>
-        {t(cur === 'zh' ? 'gui.onb.lang_zh' : 'gui.onb.lang_en')}
+        {t(cur === 'zh' ? 'gui.onb.lang_zh' : cur === 'ru' ? 'gui.onb.lang_ru' : 'gui.onb.lang_en')}
         <svg className="ob-langch" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 4l2.5 2.5L7.5 4" /></svg>
       </button>
       {open && (

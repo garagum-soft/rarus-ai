@@ -2594,8 +2594,8 @@ class Config(BaseSettings):
     a2a: A2aConfig = Field(default_factory=A2aConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     # UI language chosen during onboarding. Drives the wizard/CLI copy and the
-    # agent's reply language (injected into the system prompt). "en" | "zh".
-    language: Literal["en", "zh"] = "en"
+    # agent's reply language (injected into the system prompt). "en" | "zh" | "ru".
+    language: Literal["en", "zh", "ru"] = "en"
 
     @property
     def workspace_path(self) -> Path:

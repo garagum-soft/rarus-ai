@@ -19,12 +19,15 @@ from raven.i18n import zh
 _CATALOGS: dict[str, dict[str, str]] = {"zh": zh.MESSAGES}
 _PROMPTS = Path(__file__).resolve().parent.parent / "templates" / "prompts"
 _language = "en"
+# Languages the interface can be in. Russian has no catalog of the command line's own messages:
+# those stay English, while the page (i18n/messages.json) and the agent's replies are Russian.
+_LANGUAGES = frozenset({"en", "zh", "ru"})
 
 
 def set_language(language: str) -> None:
     """Select the language every later :func:`t` renders in; unknown codes mean English."""
     global _language
-    _language = language if language in _CATALOGS else "en"
+    _language = language if language in _LANGUAGES else "en"
 
 
 def current_language() -> str:

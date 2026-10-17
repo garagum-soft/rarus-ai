@@ -640,8 +640,8 @@ async def settings_set(params: dict, *, agent_loop_factory=None) -> dict:
     value = params.get("value")
 
     if key == "language":
-        if value not in ("en", "zh"):
-            raise ConfigValidationError("language must be en | zh")
+        if value not in ("en", "zh", "ru"):
+            raise ConfigValidationError("language must be en | zh | ru")
         from raven import i18n
         from raven.config.update import set_language
 

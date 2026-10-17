@@ -202,7 +202,7 @@ def _config_language() -> str:
     """
     data = _load_raw_config()
     lang = data.get("language")
-    return lang if lang in ("en", "zh") else "en"
+    return lang if lang in ("en", "zh", "ru") else "en"
 
 
 def _pick_language() -> None:
@@ -231,8 +231,9 @@ def _pick_language() -> None:
     console.print()
 
     picked = questionary.select(
-        "Language / 语言",
+        "Language / Язык / 语言",
         choices=[
+            questionary.Choice("Русский", value="ru"),
             questionary.Choice("English", value="en"),
             questionary.Choice("中文(简体)", value="zh"),
         ],

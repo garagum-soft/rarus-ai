@@ -71,7 +71,7 @@ export function General(): JSX.Element {
     <div className="settings-genlist">
       <Setting title={t('gui.settings.general.language')} sub={t('gui.settings.general.language_sub')}>
         <Seg
-          opts={[['zh', t('gui.settings.general.lang_zh')], ['en', t('gui.settings.general.lang_en')]]}
+          opts={[['ru', t('gui.settings.general.lang_ru')], ['zh', t('gui.settings.general.lang_zh')], ['en', t('gui.settings.general.lang_en')]]}
           value={langCode}
           onPick={(v) => store.source().setLang(v)}
         />

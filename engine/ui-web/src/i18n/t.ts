@@ -20,7 +20,7 @@
 
 import catalog from '../../../i18n/messages.json'
 
-export type Lang = 'en' | 'zh'
+export type Lang = 'en' | 'zh' | 'ru'
 
 /* Shapes, not the keys: every lookup below is by a key computed at run time,
    so what the callers need from the catalogue is that a missing entry reads as

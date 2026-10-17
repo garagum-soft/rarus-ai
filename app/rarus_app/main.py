@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from rarus_app.controller import Controller
-from rarus_app.single_instance import AlreadyRunning, SingleInstance
+from rarus_app.single_instance import AlreadyRunningError, SingleInstance
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -21,7 +21,7 @@ def run_app(argv: list[str]) -> int:
     guard = SingleInstance()
     try:
         guard.acquire()
-    except AlreadyRunning:
+    except AlreadyRunningError:
         print("Rarus AI is already running.", file=sys.stderr)
         return 0
     controller = Controller()

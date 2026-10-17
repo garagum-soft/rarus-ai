@@ -44,5 +44,5 @@ export const ESC_LABEL = 'Esc'
 /* The language declaration, from the store that writes it rather than off the
    element. Same answer either way, including before any pick has been applied:
    the store hands back the document's own declaration until then. */
-export const language = (): 'zh' | 'en' =>
-  langTag().startsWith('zh') ? 'zh' : 'en'
+export const language = (): 'zh' | 'ru' | 'en' =>
+  langTag().startsWith('zh') ? 'zh' : langTag().startsWith('ru') ? 'ru' : 'en'

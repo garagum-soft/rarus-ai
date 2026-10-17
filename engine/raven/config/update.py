@@ -305,6 +305,31 @@ def set_language(
     return prev
 
 
+def ensure_language(
+    language: str,
+    *,
+    config_path: Path | None = None,
+) -> bool:
+    """Write ``language`` only when the config names none yet. Returns whether it wrote.
+
+    A fresh Rarus install starts in Russian without overriding a choice someone already made:
+    the page takes the config's answer over the browser's, so a missing key would read as English.
+    """
+    path = config_path or get_config_path()
+    wrote = False
+
+    def _apply(_text: str | None) -> tuple[str, Any]:
+        nonlocal wrote
+        data = read_raw_or_raise(path)
+        if "language" not in data:
+            data["language"] = language
+            wrote = True
+        return json.dumps(data, indent=2, ensure_ascii=False), None
+
+    atomic_update(path, _apply)
+    return wrote
+
+
 def set_default_model(
     model: str,
     *,

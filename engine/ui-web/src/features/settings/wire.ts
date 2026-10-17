@@ -70,7 +70,7 @@ export function install(): void {
     upgrade: askUpgrade,
     /* Not awaited: the pick repaints synchronously and the persist speaks for
        itself if it fails. */
-    setLang: (v: string) => { void langPick(v as 'en' | 'zh', { persist: true }) },
+    setLang: (v: string) => { void langPick(v as 'en' | 'zh' | 'ru', { persist: true }) },
   })
 
   /* The pick's write-back. In a conversation it reaches that conversation only

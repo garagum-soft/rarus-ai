@@ -285,9 +285,10 @@ def _login_rarus() -> None:
 
 def _use_rarus_by_default() -> None:
     """After a sign-in the program should just work: point the default model at Rarus."""
-    from raven.config.update import set_default_model
+    from raven.config.update import ensure_language, set_default_model
 
     set_default_model("rarus/deepseek-flash", provider="rarus")
+    ensure_language("ru")
     console.print("[green]Default model: rarus/deepseek-flash[/green]")
 
 

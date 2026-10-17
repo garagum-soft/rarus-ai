@@ -54,7 +54,7 @@ const REMEMBERED = 'raven.gui.lang'
    answer the same as zh and en. */
 const asLang = (tag: string): Lang | null => {
   const primary = tag.toLowerCase().split('-')[0]
-  return primary === 'zh' ? 'zh' : primary === 'en' ? 'en' : null
+  return primary === 'zh' ? 'zh' : primary === 'en' ? 'en' : primary === 'ru' ? 'ru' : null
 }
 
 /** What the document was served declaring, as one of the two languages. */
@@ -79,13 +79,13 @@ function preferred(): Lang | null {
 function remembered(): Lang | null {
   try {
     const kept = localStorage.getItem(REMEMBERED)
-    return kept === 'en' || kept === 'zh' ? kept : null
+    return kept === 'en' || kept === 'zh' || kept === 'ru' ? kept : null
   } catch {
     return null
   }
 }
 
-const tagOf = (v: Lang): string => (v === 'zh' ? 'zh-CN' : 'en')
+const tagOf = (v: Lang): string => (v === 'zh' ? 'zh-CN' : v)
 
 /** The language the page is in, and whether a reader picked it. */
 export interface LangState {

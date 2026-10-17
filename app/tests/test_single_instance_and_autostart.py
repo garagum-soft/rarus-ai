@@ -7,14 +7,14 @@ import sys
 import pytest
 
 from rarus_app import autostart
-from rarus_app.single_instance import AlreadyRunning, SingleInstance
+from rarus_app.single_instance import AlreadyRunningError, SingleInstance
 
 
 class TestSingleInstance:
     def test_a_second_copy_is_refused_while_the_first_holds_the_lock(self, tmp_path):
         lock = tmp_path / "app.lock"
         with SingleInstance(lock_file=lock):
-            with pytest.raises(AlreadyRunning):
+            with pytest.raises(AlreadyRunningError):
                 SingleInstance(lock_file=lock).acquire()
 
     def test_the_lock_is_free_again_after_release(self, tmp_path):
@@ -28,7 +28,7 @@ class TestSingleInstance:
     def test_on_windows_the_named_mutex_refuses_a_second_holder(self):
         name = "Local\\RarusAITest"
         with SingleInstance(name=name):
-            with pytest.raises(AlreadyRunning):
+            with pytest.raises(AlreadyRunningError):
                 SingleInstance(name=name).acquire()
         with SingleInstance(name=name):
             pass

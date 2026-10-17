@@ -70,7 +70,9 @@ def _manifest(base: str = "https://updates.example.test", version: str = "0.2.0"
 
 
 class TestVersions:
-    @pytest.mark.parametrize(("a", "b"), [("0.2.0", "0.1.9"), ("1.0.0", "0.9.9"), ("v1.2.3", "1.2.2"), ("0.10.0", "0.9.0")])
+    @pytest.mark.parametrize(
+        ("a", "b"), [("0.2.0", "0.1.9"), ("1.0.0", "0.9.9"), ("v1.2.3", "1.2.2"), ("0.10.0", "0.9.0")]
+    )
     def test_ordering(self, a, b):
         assert updater.version_key(a) > updater.version_key(b)
 
