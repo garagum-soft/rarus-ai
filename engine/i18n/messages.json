@@ -15931,6 +15931,221 @@
       "en": "Everything is ready. Start working.",
       "zh": "一切就绪，开始工作吧。",
       "ru": "Всё готово. Можно приступать к работе."
+    },
+    "gui.page.canvas": {
+      "en": "Agent canvas",
+      "zh": "智能体画布",
+      "ru": "Канвас агентов"
+    },
+    "gui.nav.canvas": {
+      "en": "Agent canvas",
+      "zh": "智能体画布",
+      "ru": "Канвас агентов"
+    },
+    "gui.cv.tools": {
+      "en": "Canvas tools",
+      "zh": "画布工具",
+      "ru": "Инструменты холста"
+    },
+    "gui.cv.tree": {
+      "en": "Agent hierarchy",
+      "zh": "智能体层级",
+      "ru": "Иерархия агентов"
+    },
+    "gui.cv.zoom_out": {
+      "en": "Zoom out",
+      "zh": "缩小",
+      "ru": "Уменьшить"
+    },
+    "gui.cv.zoom_in": {
+      "en": "Zoom in",
+      "zh": "放大",
+      "ru": "Увеличить"
+    },
+    "gui.cv.fit": {
+      "en": "Fit",
+      "zh": "适应",
+      "ru": "Вписать"
+    },
+    "gui.cv.layout": {
+      "en": "Auto layout",
+      "zh": "自动布局",
+      "ru": "Раскладка"
+    },
+    "gui.cv.undo": {
+      "en": "Undo",
+      "zh": "撤销",
+      "ru": "Отменить"
+    },
+    "gui.cv.file": {
+      "en": "Export / import",
+      "zh": "导出 / 导入",
+      "ru": "Экспорт / импорт"
+    },
+    "gui.cv.file_hint": {
+      "en": "The chart and card positions as JSON. Copy it out, or paste a file here and apply.",
+      "zh": "层级与卡片位置（JSON）。可复制导出，或粘贴文件后应用。",
+      "ru": "Иерархия и позиции карточек в виде JSON. Скопируйте или вставьте файл и примените."
+    },
+    "gui.cv.file_reset": {
+      "en": "Reload current",
+      "zh": "重新载入当前",
+      "ru": "Показать текущее"
+    },
+    "gui.cv.file_apply": {
+      "en": "Apply",
+      "zh": "应用",
+      "ru": "Применить"
+    },
+    "gui.cv.import_bad": {
+      "en": "This is not a chart file of this page.",
+      "zh": "这不是本页面的层级文件。",
+      "ru": "Это не файл иерархии этой страницы."
+    },
+    "gui.cv.refuse_self": {
+      "en": "An agent cannot report to itself.",
+      "zh": "智能体不能向自己汇报。",
+      "ru": "Агент не может подчиняться сам себе."
+    },
+    "gui.cv.refuse_cycle": {
+      "en": "That would make a loop: a manager cannot report to its own report.",
+      "zh": "这会形成环：上级不能向自己的下级汇报。",
+      "ru": "Получился бы цикл: руководитель не может подчиняться своему подчинённому."
+    },
+    "gui.cv.refuse_depth": {
+      "en": "The chart allows at most six levels.",
+      "zh": "层级最多六级。",
+      "ru": "В иерархии не больше шести уровней."
+    },
+    "gui.cv.refuse_unknown": {
+      "en": "There is no such agent.",
+      "zh": "没有这个智能体。",
+      "ru": "Такого агента нет."
+    },
+    "gui.cv.confirm_remove": {
+      "en": "Take {name} out of the hierarchy? Its reports move up to its manager.",
+      "zh": "将 {name} 移出层级？其下属将归其上级。",
+      "ru": "Убрать {name} из иерархии? Его подчинённые перейдут к его руководителю."
+    },
+    "gui.cv.origin_employee": {
+      "en": "Employee",
+      "zh": "员工",
+      "ru": "Сотрудник"
+    },
+    "gui.cv.origin_agent": {
+      "en": "Agent",
+      "zh": "智能体",
+      "ru": "Агент"
+    },
+    "gui.cv.origin_chart": {
+      "en": "Only in the chart",
+      "zh": "仅在层级中",
+      "ru": "Только в иерархии"
+    },
+    "gui.cv.ready": {
+      "en": "Ready",
+      "zh": "就绪",
+      "ru": "Готов"
+    },
+    "gui.cv.not_ready": {
+      "en": "Not set up",
+      "zh": "未配置",
+      "ru": "Не настроен"
+    },
+    "gui.cv.empty": {
+      "en": "No agents yet.",
+      "zh": "暂无智能体。",
+      "ru": "Агентов пока нет."
+    },
+    "gui.cv.inspector": {
+      "en": "Agent details",
+      "zh": "智能体详情",
+      "ru": "Сведения об агенте"
+    },
+    "gui.cv.close": {
+      "en": "Close",
+      "zh": "关闭",
+      "ru": "Закрыть"
+    },
+    "gui.cv.tab_main": {
+      "en": "Main",
+      "zh": "基本",
+      "ru": "Основное"
+    },
+    "gui.cv.tab_prompt": {
+      "en": "Prompt",
+      "zh": "提示词",
+      "ru": "Промпт"
+    },
+    "gui.cv.tab_links": {
+      "en": "Links",
+      "zh": "关系",
+      "ru": "Связи"
+    },
+    "gui.cv.manager": {
+      "en": "Reports to",
+      "zh": "汇报给",
+      "ru": "Руководитель"
+    },
+    "gui.cv.no_manager": {
+      "en": "Nobody (head)",
+      "zh": "无（负责人）",
+      "ru": "Никто (глава)"
+    },
+    "gui.cv.department": {
+      "en": "Department",
+      "zh": "部门",
+      "ru": "Отдел"
+    },
+    "gui.cv.title": {
+      "en": "Title",
+      "zh": "职位",
+      "ru": "Должность"
+    },
+    "gui.cv.remove": {
+      "en": "Take out of the hierarchy",
+      "zh": "移出层级",
+      "ru": "Убрать из иерархии"
+    },
+    "gui.cv.prompt_none": {
+      "en": "Only hired employees have a prompt that can be edited here.",
+      "zh": "只有已雇用的员工才能在这里编辑提示词。",
+      "ru": "Здесь редактируется промпт только у нанятых сотрудников."
+    },
+    "gui.cv.save": {
+      "en": "Save",
+      "zh": "保存",
+      "ru": "Сохранить"
+    },
+    "gui.cv.history": {
+      "en": "Earlier versions",
+      "zh": "历史版本",
+      "ru": "Прежние версии"
+    },
+    "gui.cv.history_empty": {
+      "en": "No earlier versions yet.",
+      "zh": "暂无历史版本。",
+      "ru": "Прежних версий пока нет."
+    },
+    "gui.cv.rollback": {
+      "en": "Restore",
+      "zh": "还原",
+      "ru": "Вернуть"
+    },
+    "gui.cv.reports": {
+      "en": "Direct reports",
+      "zh": "直接下属",
+      "ru": "Подчинённые"
+    },
+    "gui.cv.no_reports": {
+      "en": "No reports.",
+      "zh": "没有下属。",
+      "ru": "Подчинённых нет."
+    },
+    "gui.cv.unlink": {
+      "en": "Unlink",
+      "zh": "解除",
+      "ru": "Убрать связь"
     }
   }
 }

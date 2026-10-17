@@ -1,0 +1,12 @@
+
+ RUN  v4.1.11 C:/235235/agent_orchestration/raven_build/Raven/ui-web
+
+ ❯ src/features/settings/providers/Roles.test.tsx (30 tests | 2 failed) 593ms
+     × a fixed context window below 1024 is refused; above the model window it saves and warns 23ms
+     × a pinned window is the value the closed disclosure shows, and the mode sits beside it when open 12ms
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 43 passed (45)
+   Start at  15:23:30
+   Duration  3.94s (transform 3.38s, setup 0ms, import 4.53s, tests 1.79s, environment 849ms)
+
