@@ -255,3 +255,29 @@ class TestFirstRun:
     def test_the_note_survives_a_new_controller(self):
         Controller(engine_factory=_engine, open_browser=False).onboarded()
         assert Controller(engine_factory=_engine, open_browser=False).first_run() is False
+
+
+def test_a_windowed_frozen_program_gives_the_engine_streams_to_write_to(monkeypatch):
+    """Without a console both streams are None, and the engine's first print would raise."""
+    import sys
+
+    from rarus_app.__main__ import _give_streams_a_sink
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    _give_streams_a_sink()
+    print("x")
+    print("y", file=sys.stderr)
+    assert sys.stdout is not None and sys.stderr is not None
+
+
+def test_a_present_stream_is_left_alone(monkeypatch):
+    import io
+    import sys
+
+    from rarus_app.__main__ import _give_streams_a_sink
+
+    keep = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", keep)
+    _give_streams_a_sink()
+    assert sys.stdout is keep
