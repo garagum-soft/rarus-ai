@@ -211,3 +211,21 @@ async def test_setup_status_reads_the_config_raven_home_points_at(monkeypatch, t
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
 
     assert (await setup_status({}))["provider_configured"] is False
+
+
+async def test_a_signed_in_rarus_account_is_a_configured_provider(monkeypatch, tmp_path: Path) -> None:
+    """Its key sits in the sealed session file and its models are built in, so the config
+    holds no ``providers`` section -- and the first run must not open the key wizard."""
+    from raven.providers import rarus_session
+
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv(rarus_session.STORE_ENV, "plain")
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "config.json").write_text(
+        json.dumps({"agents": {"defaults": {"provider": "rarus", "model": "rarus/deepseek-flash"}}})
+    )
+    assert (await setup_status({}))["provider_configured"] is False
+
+    rarus_session.save_session("sk-ab-" + "0123456789abcdef" * 3)
+
+    assert (await setup_status({}))["provider_configured"] is True

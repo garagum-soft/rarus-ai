@@ -2281,6 +2281,17 @@ class SetupStatusResult(_Strict):
     provider_configured: bool
 
 
+class RarusAccountParams(_Strict):
+    pass
+
+
+class RarusAccountResult(_Strict):
+    signed_in: bool
+    email: str
+    balance: int | None = None
+    error: str
+
+
 class ReloadMcpParams(_Strict):
     """``confirm`` skips the confirmation gate for this call, and only this one.
 
@@ -6568,6 +6579,7 @@ METHOD_MODELS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     # cli.* / setup.* / reload.* / commands.*
     "cli.dispatch": (CliDispatchParams, CliResult),
     "setup.status": (SetupStatusParams, SetupStatusResult),
+    "rarus.account": (RarusAccountParams, RarusAccountResult),
     "reload.mcp": (ReloadMcpParams, ReloadMcpResult),
     "commands.catalog": (CommandsCatalogParams, CommandsCatalogResponse),
     # import.* -- the onboarding wizard's data-sync step

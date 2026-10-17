@@ -7,51 +7,14 @@ key lives where the engine reads it and nowhere else. The window never receives 
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
-from typing import Any
 
-from raven.providers import rarus_client, rarus_login, rarus_session
+from raven.providers import rarus_client, rarus_login
+from raven.providers.rarus_account import Status, sign_out, status
 
 DEFAULT_MODEL = "rarus/deepseek-flash"
 
-
-@dataclass(frozen=True)
-class Status:
-    """What the window shows: ``signed_in``, the e-mail, the balance and why it is missing."""
-
-    signed_in: bool
-    email: str = ""
-    balance: int | None = None
-    error: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"signed_in": self.signed_in, "email": self.email, "balance": self.balance, "error": self.error}
-
-
-def status(*, refresh: bool = True) -> Status:
-    """Signed-in state; with ``refresh`` the balance comes from the server."""
-    session = rarus_session.load_session()
-    if session is None:
-        return Status(False)
-    if not refresh:
-        return Status(True, email=session.email)
-    try:
-        info = rarus_client.whoami(session.key)
-    except rarus_client.RarusError as exc:
-        if exc.code == "unauthorized":
-            rarus_session.delete_session()
-            return Status(False, error="unauthorized")
-        return Status(True, email=session.email, error=exc.code)
-    balance = info.get("balance")
-    return Status(
-        True,
-        email=str(info.get("email") or session.email),
-        balance=int(balance) if isinstance(balance, (int, float)) else None,
-    )
-
-
-def sign_out() -> None:
-    rarus_session.delete_session()
+# ``rarus_client`` is re-exported: the shell's tests patch the server call through this module.
+__all__ = ["DEFAULT_MODEL", "SignIn", "Status", "first_run_language", "make_default", "rarus_client", "sign_out", "status"]
 
 
 def make_default() -> None:

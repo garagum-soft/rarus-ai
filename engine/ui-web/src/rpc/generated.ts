@@ -3,7 +3,7 @@
 // Source of truth: rpc-schema/openrpc.json (OpenRPC 1.2.6).
 // Drift check: `npm run gen:check` (CI runs this; a stale file fails the build).
 //
-// 245 methods, 131 component schemas.
+// 246 methods, 131 component schemas.
 
 /* eslint-disable */
 /**
@@ -3343,6 +3343,13 @@ export interface SetupStatusParams {}
 export interface SetupStatusResult {
   provider_configured: boolean;
 }
+export interface RarusAccountParams {}
+export interface RarusAccountResult {
+  signed_in: boolean;
+  email: string;
+  balance?: number | null;
+  error: string;
+}
 export interface ReloadMcpParams {
   session_id?: string;
   confirm?: boolean;
@@ -6206,6 +6213,7 @@ export interface RpcMethods {
   'system.version': { params: SystemVersionParams; result: SystemVersionResult };
   'cli.dispatch': { params: CliDispatchParams; result: CliDispatchResult };
   'setup.status': { params: SetupStatusParams; result: SetupStatusResult };
+  'rarus.account': { params: RarusAccountParams; result: RarusAccountResult };
   'reload.mcp': { params: ReloadMcpParams; result: ReloadMcpResult };
   'commands.catalog': { params: CommandsCatalogParams; result: CommandsCatalogResult };
   'voice.toggle': { params: VoiceToggleParams; result: VoiceToggleResult };
@@ -6547,6 +6555,7 @@ export const RPC_METHODS = [
   "process.stop",
   "prompt.background",
   "prompt.submit",
+  "rarus.account",
   "reload.env",
   "reload.mcp",
   "rollback.diff",

@@ -3400,6 +3400,42 @@
       "errors": []
     },
     {
+      "name": "rarus.account",
+      "summary": "Who is signed in to Rarus, and the balance left on the account.",
+      "description": "Reads the sealed session and asks the server for the balance. A failed server call still answers: signed_in stays true and error carries the reason; an unauthorized key signs the person out (signed_in false, error 'unauthorized').",
+      "params": [],
+      "result": {
+        "name": "RarusAccountResult",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "signed_in",
+            "email",
+            "error"
+          ],
+          "properties": {
+            "signed_in": {
+              "type": "boolean"
+            },
+            "email": {
+              "type": "string"
+            },
+            "balance": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "errors": []
+    },
+    {
       "name": "reload.mcp",
       "summary": "Reconcile the live MCP server set with the config on disk.",
       "description": "MUST NOT throw. Today's only caller is the TUI's /reload-mcp, typed by a person; the method is also the seam a config-file watch would use, and such a caller fires on a timer, so a failure is reported as status='noop' with a message rather than as an error. Reloading moves the tool list, which is the first thing in the cached prompt prefix, so a caller that does not send confirm gets status='confirm_required' and nothing is reconnected. There is no 'and stop asking' flag: persisting that needs a settings section this config does not have.",

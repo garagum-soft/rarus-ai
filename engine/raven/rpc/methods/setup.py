@@ -54,6 +54,14 @@ def _detect_provider_configured(payload: dict) -> bool:
     if not (isinstance(model, str) and model):
         return False
 
+    # A signed-in Rarus account is a provider on its own: its key lives in the
+    # sealed session file, not in a `providers` section, and its models are
+    # built in -- so a first run with a session never parks on the setup panel.
+    from raven.providers.rarus_session import load_key
+
+    if load_key() is not None:
+        return True
+
     # `agents.defaults.provider` used to be waved through on its own, as a
     # provider signal from configs predating per-provider sections. It is now
     # written on every model change, so that branch would let a pinned name
