@@ -413,6 +413,15 @@
       "vendorx/zz-probe-1": "openai/vendorx/zz-probe-1",
       "zz-probe-1": "openai/zz-probe-1"
     },
+    "rarus": {
+      "openai/zz-probe-1": "openai/zz-probe-1",
+      "rarus-probe": "openai/rarus-probe",
+      "rarus/deepseek-flash": "openai/deepseek-flash",
+      "rarus/vendorx/zz-probe-1": "openai/vendorx/zz-probe-1",
+      "rarus/zz-probe-1": "openai/zz-probe-1",
+      "vendorx/zz-probe-1": "openai/zz-probe-1",
+      "zz-probe-1": "openai/zz-probe-1"
+    },
     "siliconflow": {
       "openai/zz-probe-1": "openai/zz-probe-1",
       "siliconflow-probe": "openai/siliconflow-probe",

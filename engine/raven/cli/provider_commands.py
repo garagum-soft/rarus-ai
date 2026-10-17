@@ -265,6 +265,23 @@ def _login_minimax_cn() -> None:
     _login_minimax("cn", "MiniMax CN")
 
 
+@_register_login("rarus")
+def _login_rarus() -> None:
+    from raven.providers.rarus_login import LoginError, login
+
+    console.print("[cyan]Opening the sign-in page in your browser...[/cyan]")
+    try:
+        session = login(
+            open_browser=_can_open_browser(),
+            on_url=lambda url: console.print(f"If it did not open, go to:\n  {url}\n"),
+        )
+    except LoginError as exc:
+        console.print(f"[red]Sign-in failed ({exc.code}): {exc}[/red]")
+        raise typer.Exit(1)
+    who = f" as {session.email}" if session.email else ""
+    console.print(f"[green]Signed in to Rarus AI{who}[/green]")
+
+
 def _print_schema_table(name: str) -> None:
     """Render a provider's field-spec table.
 

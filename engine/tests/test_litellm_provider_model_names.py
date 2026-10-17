@@ -35,6 +35,7 @@ BARE_MODEL = {
     "minimax_cn_api": "MiniMax-M3",
     "minimax_global": "MiniMax-M2",
     "minimax_cn": "MiniMax-M2",
+    "rarus": "deepseek-flash",
     "hosted_vllm": "Qwen3.5-9B",
     "lm_studio": "qwen3-8b",
     "ollama_chat": "llama3.2",
@@ -97,6 +98,7 @@ QUALIFIED_RESOLUTION = {
     # MiniMax Global/CN speak Anthropic's API, so the route is the driver's.
     "minimax_global": "anthropic/MiniMax-M2",
     "minimax_cn": "anthropic/MiniMax-M2",
+    "rarus": "openai/deepseek-flash",
     "hosted_vllm": "hosted_vllm/Qwen3.5-9B",
     "lm_studio": "lm_studio/qwen3-8b",
     "ollama_chat": "ollama_chat/llama3.2",
@@ -175,6 +177,7 @@ BARE_RESOLUTION = {
     "minimax_cn_api": "minimax/MiniMax-M3",
     "minimax_global": "minimax/MiniMax-M2",
     "minimax_cn": "minimax/MiniMax-M2",
+    "rarus": "openai/deepseek-flash",
     "hosted_vllm": "hosted_vllm/Qwen3.5-9B",
     "lm_studio": "lm_studio/qwen3-8b",
     "ollama_chat": "ollama_chat/llama3.2",

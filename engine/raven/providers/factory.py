@@ -123,6 +123,14 @@ def make_provider(config: Config, model: str | None = None):
             region="global" if provider_name == "minimax_global" else "cn",
             default_model=model,
         )
+    elif client == "rarus":
+        from raven.providers.rarus_provider import RarusProvider
+
+        provider = RarusProvider(
+            default_model=model,
+            api_base=config.get_api_base(model),
+            model_overrides=config.agents.defaults.model_overrides,
+        )
     elif client == "azure":
         provider = AzureOpenAIProvider(
             api_key=p.effective_api_key,

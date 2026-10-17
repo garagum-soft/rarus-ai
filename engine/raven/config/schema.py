@@ -623,6 +623,7 @@ class ProvidersConfig(Base):
     nvidia_nim: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax_cn_api: ProviderConfig = Field(default_factory=ProviderConfig)
+    rarus: ProviderConfig = Field(default_factory=ProviderConfig)  # Rarus AI, behind a browser sign-in
     minimax_global: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax_cn: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway

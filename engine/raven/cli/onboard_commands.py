@@ -159,6 +159,7 @@ _CURATED_GROUPS: list[dict[str, Any]] = [
                 "label": "MiniMax Global (OAuth)",
             },
             {"name": "minimax_cn", "label": "MiniMax CN (OAuth)"},
+            {"name": "rarus", "label": "Rarus AI (sign in)"},
         ],
     },
     {

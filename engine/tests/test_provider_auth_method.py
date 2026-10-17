@@ -498,6 +498,9 @@ def test_only_the_auth_module_decides_configuredness_from_a_key() -> None:
         "raven/providers/anthropic_messages_provider.py",
         "raven/contracts/llm_provider.py",
         "raven/providers/minimax_oauth_provider.py",
+        # Sets the agent key a browser sign-in left in the sign-in store onto the
+        # client for each call; a config section is never asked.
+        "raven/providers/rarus_provider.py",
         "raven/providers/per_model_provider.py",
         # Other subsystems' credentials entirely: the skill hub, an embedding
         # script.

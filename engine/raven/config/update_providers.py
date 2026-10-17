@@ -520,6 +520,11 @@ def oauth_credentials_present(provider_name: str) -> bool:
 
         return load_token("global" if provider_name == "minimax_global" else "cn") is not None
 
+    if provider_name == "rarus":
+        from raven.providers.rarus_session import load_key
+
+        return load_key() is not None
+
     if provider_name == "openai_codex":
         from raven.providers.chatgpt_token import stored_credentials
 
@@ -859,6 +864,10 @@ def reset_provider(
                 from raven.providers.minimax_oauth import delete_token
 
                 delete_token("global" if name == "minimax_global" else "cn")
+            elif name == "rarus":
+                from raven.providers.rarus_session import delete_session
+
+                delete_session()
 
             for stale in oauth_credential_files(name):
                 stale.unlink(missing_ok=True)
@@ -1428,6 +1437,9 @@ def test_provider(
 
     if spec and spec.name == "claude_subscription":
         return _probe_claude_subscription(timeout_s=timeout_s)
+
+    if spec and spec.name == "rarus":
+        return _probe_rarus(api_base=api_base)
 
     if spec and spec.is_oauth:
         try:
@@ -2126,6 +2138,57 @@ def _probe_claude_subscription(*, timeout_s: float, provider: Any = None) -> dic
         "models_count": None,
         "model_ids": None,
         "error": error,
+    }
+
+
+def _probe_rarus(*, api_base: str | None) -> dict[str, Any]:
+    """Verify the Rarus sign-in by asking the server for its model list.
+
+    The key is the one the browser sign-in stored, not a config field, so the
+    generic probe has nothing to send. ``/v1/models`` is the credential check and
+    the answer to what this account may use; a 402 still lists nothing, which is
+    reported as the account having no credits rather than as a bad key.
+    """
+    import time
+
+    from raven.providers import rarus_client
+    from raven.providers.rarus_session import load_key, site_from_api_base
+
+    start = time.monotonic()
+    key = load_key()
+    if not key:
+        return {
+            "ok": False,
+            "status": "oauth_token_missing",
+            "elapsed_ms": 0,
+            "http_status": None,
+            "models_count": None,
+            "model_ids": None,
+            "error": "not signed in -- run `raven provider login rarus`",
+        }
+    try:
+        ids = rarus_client.models(key, site=site_from_api_base(api_base))
+    except rarus_client.RarusError as exc:
+        status = {"unauthorized": "invalid_key", "no_credits": "quota", "blocked": "invalid_key"}.get(
+            exc.code, "network_error"
+        )
+        return {
+            "ok": False,
+            "status": status,
+            "elapsed_ms": int((time.monotonic() - start) * 1000),
+            "http_status": exc.status,
+            "models_count": None,
+            "model_ids": None,
+            "error": str(exc),
+        }
+    return {
+        "ok": True,
+        "status": "ok",
+        "elapsed_ms": int((time.monotonic() - start) * 1000),
+        "http_status": 200,
+        "models_count": len(ids),
+        "model_ids": ids,
+        "error": None,
     }
 
 
