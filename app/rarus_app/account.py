@@ -57,9 +57,11 @@ def sign_out() -> None:
 def make_default() -> None:
     """Point the engine's configuration at Rarus (what ``rarus provider login rarus`` does)."""
     from raven.config.update import ensure_language, set_default_model
+    from raven.providers.rarus_models import refresh
 
     set_default_model(DEFAULT_MODEL, provider="rarus")
     ensure_language("ru")
+    refresh()
 
 
 def first_run_language() -> None:

@@ -141,3 +141,47 @@ class TestTheConnectionCheck:
 
         assert not result["ok"]
         assert result["status"] == status
+
+
+class TestTheOfferedModels:
+    def test_before_the_server_is_asked_the_two_built_in_models_are_offered(self):
+        from raven.providers import rarus_models
+
+        assert rarus_models.offered() == ("deepseek-flash", "auto")
+
+    def test_the_servers_answer_replaces_them_and_is_kept(self, monkeypatch):
+        from raven.providers import rarus_models
+
+        rarus_session.save_session(KEY)
+        monkeypatch.setattr(rarus_client, "models", lambda key, site=None, client=None: ["deepseek-flash", "qwen-next"])
+
+        assert rarus_models.refresh() == ("deepseek-flash", "qwen-next")
+        assert rarus_models.offered() == ("deepseek-flash", "qwen-next")
+
+    def test_an_unreachable_server_keeps_what_was_there(self, monkeypatch):
+        from raven.providers import rarus_models
+
+        rarus_session.save_session(KEY)
+
+        def down(key, site=None, client=None):
+            raise rarus_client.RarusError("network", "down")
+
+        monkeypatch.setattr(rarus_client, "models", down)
+        assert rarus_models.refresh() == ("deepseek-flash", "auto")
+
+    def test_without_a_sign_in_nothing_is_asked(self, monkeypatch):
+        from raven.providers import rarus_models
+
+        def boom(*a, **k):
+            raise AssertionError("must not ask")
+
+        monkeypatch.setattr(rarus_client, "models", boom)
+        assert rarus_models.refresh() == ("deepseek-flash", "auto")
+
+    def test_the_picker_lists_them_once_signed_in(self):
+        from raven.rpc.methods.model import _build_provider_entry
+
+        rarus_session.save_session(KEY)
+        entry = _build_provider_entry("rarus", current_provider="rarus")
+        assert entry["authenticated"] is True
+        assert "rarus/deepseek-flash" in entry["models"] and "rarus/auto" in entry["models"]

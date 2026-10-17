@@ -208,6 +208,11 @@ def _runtime_models(slug: str, *, configured: bool, section: Any = _UNLOADED) ->
 
         return tuple(_stored_spelling(slug, model) for model in account_models())
 
+    if slug == "rarus":
+        from raven.providers.rarus_models import offered
+
+        return tuple(_stored_spelling(slug, model) for model in offered())
+
     if slug != "lm_studio":
         return ()
 

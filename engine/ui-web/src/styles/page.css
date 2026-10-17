@@ -6887,3 +6887,31 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
 .wchip svg { flex: none; width: 13px; height: 13px; color: var(--faint); }
 .tkout { margin-top: 9px; font-size: 12px; line-height: 1.7; color: var(--muted);
   background: var(--surface); border-radius: 8px; padding: 9px 10px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Rarus AI tokens (spec 10.2). The dark palette above is Raven's; Rarus
+   sets the surfaces, lines and accents the design names and adds the few
+   tokens the Raven page has no name for (--card, --amber-ink). Loaded last
+   so it wins; the light block is left as it was (spec 10.4 item 8 keeps
+   light out of v1 by defaulting the page to dark, not by deleting it).
+   ═══════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] {
+  --surface: #1a1a1a;
+  --raised: #262626;
+  --card: #1b1b1b;
+  --card-2: #202020;
+  --line: #2c2c2c;
+  --line-soft: #262626;
+  --amber-ink: #1d1d1d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #1a1a1a;
+    --raised: #262626;
+    --card: #1b1b1b;
+    --card-2: #202020;
+    --line: #2c2c2c;
+    --line-soft: #262626;
+    --amber-ink: #1d1d1d;
+  }
+}

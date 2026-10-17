@@ -1118,6 +1118,7 @@ def test_provider_login_rarus_makes_rarus_the_default(
     from raven.providers import rarus_login, rarus_session
 
     monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    monkeypatch.setattr("raven.providers.rarus_models.refresh", lambda: ())
     monkeypatch.setenv(rarus_session.STORE_ENV, "plain")
     tmp_config.write_text(json.dumps({"agents": {"defaults": {"model": "anthropic/claude", "provider": "anthropic"}}}))
     key = "sk-ab-" + "0123456789abcdef" * 3
@@ -1137,6 +1138,7 @@ def test_provider_login_rarus_failure_changes_nothing(
     from raven.providers import rarus_login
 
     monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    monkeypatch.setattr("raven.providers.rarus_models.refresh", lambda: ())
     tmp_config.write_text(json.dumps({"agents": {"defaults": {"model": "anthropic/claude"}}}))
 
     def _fail(**_):
@@ -1156,6 +1158,7 @@ def test_provider_login_rarus_starts_a_fresh_install_in_russian(
     from raven.providers import rarus_login, rarus_session
 
     monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    monkeypatch.setattr("raven.providers.rarus_models.refresh", lambda: ())
     monkeypatch.setenv(rarus_session.STORE_ENV, "plain")
     monkeypatch.setattr(rarus_login, "login", lambda **_: rarus_session.save_session("sk-ab-" + "0123456789abcdef" * 3))
 
@@ -1169,6 +1172,7 @@ def test_provider_login_rarus_keeps_a_language_already_chosen(
     from raven.providers import rarus_login, rarus_session
 
     monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    monkeypatch.setattr("raven.providers.rarus_models.refresh", lambda: ())
     monkeypatch.setenv(rarus_session.STORE_ENV, "plain")
     tmp_config.write_text(json.dumps({"language": "zh"}))
     monkeypatch.setattr(rarus_login, "login", lambda **_: rarus_session.save_session("sk-ab-" + "0123456789abcdef" * 3))
