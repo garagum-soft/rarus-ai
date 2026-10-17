@@ -37,7 +37,11 @@ def _no_secrets(message: str) -> str:
     retained file without any exception being raised. Redacting rather than
     dropping the record keeps the host, path, query and status readable.
     """
-    return _SECRET_QUERY.sub(r"\1<redacted>", message)
+    from raven.security.redact import redact
+
+    # Every credential shape first -- a bearer header or an error body can carry the Rarus key
+    # just as well as a URL can -- then the query-string marker this file has always written.
+    return _SECRET_QUERY.sub(r"\1<redacted>", redact(message))
 
 
 def _redact_record(record: dict) -> None:

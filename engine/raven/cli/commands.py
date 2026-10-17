@@ -272,6 +272,10 @@ from raven.cli.import_commands import import_app
 
 app.add_typer(import_app, name="import")
 
+from raven.cli.migrate_commands import migrate_raven
+
+app.command("migrate-raven")(migrate_raven)
+
 
 def run() -> None:
     """Run the app, rendering the failures every command shares; ``cli.entry`` calls it."""
