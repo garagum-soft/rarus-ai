@@ -38,6 +38,7 @@ from raven.rpc.methods.plughub import register_plughub_methods
 from raven.rpc.methods.question import register_question_methods
 from raven.rpc.methods.reload import register_reload_methods
 from raven.rpc.methods.session import register_session_methods
+from raven.rpc.methods.org import register_org_methods
 from raven.rpc.methods.rarus import register_rarus_methods
 from raven.rpc.methods.setup import register_setup_methods
 from raven.rpc.methods.shell import register_shell_methods
@@ -148,6 +149,7 @@ def register_aligned_methods_except_system(
     register_cli_methods(dispatcher, confirm_broker=confirm_broker)
     register_setup_methods(dispatcher)
     register_rarus_methods(dispatcher)
+    register_org_methods(dispatcher)
     register_import_methods(dispatcher)
     register_reload_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_config_methods(dispatcher, agent_loop_factory=agent_loop_factory, ensure_stack=ensure_stack)
@@ -280,6 +282,7 @@ __all__ = [
     "register_commands_methods",
     "register_setup_methods",
     "register_rarus_methods",
+    "register_org_methods",
     "register_import_methods",
     "register_reload_methods",
     "register_config_methods",

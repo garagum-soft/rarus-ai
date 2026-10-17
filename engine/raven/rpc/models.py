@@ -2292,6 +2292,31 @@ class RarusAccountResult(_Strict):
     error: str
 
 
+class OrgMemberRow(_Strict):
+    name: str
+    reports_to: str | None = None
+    department: str = ""
+    title: str = ""
+
+
+class OrgGetParams(_Strict):
+    pass
+
+
+class OrgGetResult(_Strict):
+    members: list[OrgMemberRow]
+    max_depth: int
+
+
+class OrgSetParams(_Strict):
+    members: list[OrgMemberRow]
+
+
+class OrgSetResult(_Strict):
+    members: list[OrgMemberRow]
+    max_depth: int
+
+
 class ReloadMcpParams(_Strict):
     """``confirm`` skips the confirmation gate for this call, and only this one.
 
@@ -6580,6 +6605,8 @@ METHOD_MODELS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "cli.dispatch": (CliDispatchParams, CliResult),
     "setup.status": (SetupStatusParams, SetupStatusResult),
     "rarus.account": (RarusAccountParams, RarusAccountResult),
+    "org.get": (OrgGetParams, OrgGetResult),
+    "org.set": (OrgSetParams, OrgSetResult),
     "reload.mcp": (ReloadMcpParams, ReloadMcpResult),
     "commands.catalog": (CommandsCatalogParams, CommandsCatalogResponse),
     # import.* -- the onboarding wizard's data-sync step

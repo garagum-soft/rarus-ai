@@ -3436,6 +3436,138 @@
       "errors": []
     },
     {
+      "name": "org.get",
+      "summary": "The reporting structure (subagents.org) the agent canvas draws.",
+      "description": "Rows as the config holds them (name, reports_to, department, title) and the deepest level the chart allows.",
+      "params": [],
+      "result": {
+        "name": "OrgGetResult",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "members",
+            "max_depth"
+          ],
+          "properties": {
+            "members": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "reports_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "department": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "max_depth": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "org.set",
+      "summary": "Replace the reporting structure; refused whole when it is not a forest of at most max_depth levels.",
+      "description": "A cycle, a manager outside the chart, a row reporting to itself or a chart deeper than max_depth is refused with a config validation error and nothing is written.",
+      "params": [
+        {
+          "name": "members",
+          "required": true,
+          "schema": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "reports_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "department": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      ],
+      "result": {
+        "name": "OrgSetResult",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "members",
+            "max_depth"
+          ],
+          "properties": {
+            "members": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "reports_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "department": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "max_depth": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "errors": []
+    },
+    {
       "name": "reload.mcp",
       "summary": "Reconcile the live MCP server set with the config on disk.",
       "description": "MUST NOT throw. Today's only caller is the TUI's /reload-mcp, typed by a person; the method is also the seam a config-file watch would use, and such a caller fires on a timer, so a failure is reported as status='noop' with a message rather than as an error. Reloading moves the tool list, which is the first thing in the cached prompt prefix, so a caller that does not send confirm gets status='confirm_required' and nothing is reconnected. There is no 'and stop asking' flag: persisting that needs a settings section this config does not have.",

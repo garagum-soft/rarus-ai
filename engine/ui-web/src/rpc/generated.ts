@@ -3,7 +3,7 @@
 // Source of truth: rpc-schema/openrpc.json (OpenRPC 1.2.6).
 // Drift check: `npm run gen:check` (CI runs this; a stale file fails the build).
 //
-// 246 methods, 131 component schemas.
+// 248 methods, 131 component schemas.
 
 /* eslint-disable */
 /**
@@ -3350,6 +3350,33 @@ export interface RarusAccountResult {
   balance?: number | null;
   error: string;
 }
+export interface OrgGetParams {}
+export interface OrgGetResult {
+  members: {
+    name: string;
+    reports_to?: string | null;
+    department?: string;
+    title?: string;
+  }[];
+  max_depth: number;
+}
+export interface OrgSetParams {
+  members: {
+    name: string;
+    reports_to?: string | null;
+    department?: string;
+    title?: string;
+  }[];
+}
+export interface OrgSetResult {
+  members: {
+    name: string;
+    reports_to?: string | null;
+    department?: string;
+    title?: string;
+  }[];
+  max_depth: number;
+}
 export interface ReloadMcpParams {
   session_id?: string;
   confirm?: boolean;
@@ -6214,6 +6241,8 @@ export interface RpcMethods {
   'cli.dispatch': { params: CliDispatchParams; result: CliDispatchResult };
   'setup.status': { params: SetupStatusParams; result: SetupStatusResult };
   'rarus.account': { params: RarusAccountParams; result: RarusAccountResult };
+  'org.get': { params: OrgGetParams; result: OrgGetResult };
+  'org.set': { params: OrgSetParams; result: OrgSetResult };
   'reload.mcp': { params: ReloadMcpParams; result: ReloadMcpResult };
   'commands.catalog': { params: CommandsCatalogParams; result: CommandsCatalogResult };
   'voice.toggle': { params: VoiceToggleParams; result: VoiceToggleResult };
@@ -6518,6 +6547,8 @@ export const RPC_METHODS = [
   "model.save_key",
   "model.set_fields",
   "model.set_protocol",
+  "org.get",
+  "org.set",
   "playbooks.create",
   "playbooks.credentials.clear",
   "playbooks.credentials.get",
