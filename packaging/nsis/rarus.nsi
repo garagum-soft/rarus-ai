@@ -1,4 +1,4 @@
-; Installer for Rarus AI (NSIS 3.x), written from the NSIS documentation (spec D-20: no code of the
+﻿; Installer for Rarus AI (NSIS 3.x), written from the NSIS documentation (spec D-20: no code of the
 ; Alembox installer is used).
 ;
 ;   makensis /DVERSION=0.1.0 /DSOURCE=build\dist\RarusAI /DOUTFILE=build\RarusSetup-0.1.0.exe packaging\nsis\rarus.nsi
@@ -21,6 +21,7 @@ Unicode true
 
 !insertmacro GetParameters
 !insertmacro GetOptions
+!insertmacro GetFileName
 
 !ifndef VERSION
   !define VERSION "0.0.0"
@@ -106,6 +107,12 @@ FunctionEnd
 
 Section "!$(NAME_MAIN)" SecMain
   SectionIn RO
+  ; The uninstaller removes the whole install folder, so the program always lives in a folder of
+  ; its own: a reader who picks "Documents" gets "Documents\Rarus AI".
+  ${GetFileName} "$INSTDIR" $0
+  ${If} $0 != "Rarus AI"
+    StrCpy $INSTDIR "$INSTDIR\Rarus AI"
+  ${EndIf}
   ; The program may be running: close it so its files can be replaced.
   nsExec::Exec 'taskkill /IM "${APP_EXE}" /F'
   Pop $0
@@ -213,8 +220,11 @@ Section "Uninstall"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "${APP_KEY}"
 
-  ; Only the install folder, and only what the setup put there.
-  RMDir /r "$INSTDIR"
+  ; Only the install folder, and only when it holds the program: a registry value that points
+  ; somewhere else must never turn into a recursive delete of that place.
+  ${If} ${FileExists} "$INSTDIR\${APP_EXE}"
+    RMDir /r "$INSTDIR"
+  ${EndIf}
 
   ; The reader's data (chats, memory, settings, keys) stays unless they say otherwise; a silent
   ; uninstall never removes it.

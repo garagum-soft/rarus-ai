@@ -12,43 +12,39 @@ import re
 import sys
 
 EVIDENCE = (
-    "РўРµСЃС‚С‹ Raven РІС‹РїРѕР»РЅСЏР»РёСЃСЊ РІ Raven Рё РІ Rarus, РїР°РґРµРЅРёСЏ СЃРІРµСЂРµРЅС‹ СЃ Р±Р°Р·РѕР№ (docs/reports/milestone-M7.md); "
-    "RPC Р±РµР· РѕС‚Р»РёС‡РёР№ (docs/compat/2026-10-17-raven-parity.md); СЃС†РµРЅР°СЂРёР№ РёР· 12.6 РЅРµ РІС‹РїРѕР»РЅСЏР»СЃСЏ"
+    "Тесты Raven выполнялись в Raven и в Rarus, падения сверены с базой (docs/reports/milestone-M7.md); "
+    "RPC без отличий (docs/compat/2026-10-18-raven-parity.md); сценарий из 12.6 не выполнялся"
 )
 
 
 def status(decision: str, note: str) -> tuple[str, str]:
     low = decision.lower().replace("*", "").strip()
-    if low.startswith("СѓРґР°Р»"):
+    if low.startswith("удал"):
         return (
-            "РЈРґР°Р»РµРЅРѕ",
-            "СЂРµС€РµРЅРёРµ D-17 Рё РўР— 11.2, РµСЃР»Рё РЅРµ СѓРєР°Р·Р°РЅРѕ РёРЅРѕРµ; РїРѕРґС‚РІРµСЂРґРёС‚СЊ",
+            "Удалено",
+            "решение D-17 и ТЗ 11.2, если не указано иное; подтвердить",
         )
-    if low.startswith("Р·Р°РјРµРЅ"):
-        return "Р—Р°РјРµРЅРµРЅРѕ", "СЃРј. РїСЂРёРјРµС‡Р°РЅРёРµ"
-    if low.startswith("РѕС‚Р»РѕР¶"):
+    if low.startswith("замен"):
+        return "Заменено", "см. примечание"
+    if low.startswith("отлож"):
         return (
-            "РћС‚Р»РѕР¶РµРЅРѕ",
-            "СЃРј. РїСЂРёРјРµС‡Р°РЅРёРµ; СЃСЂРѕРє РЅРµ РЅР°Р·РЅР°С‡РµРЅ",
+            "Отложено",
+            "см. примечание; срок не назначен",
         )
-    if low.startswith("РѕРїС†Рё"):
+    if low.startswith("опци"):
         return (
-            "РЎРѕС…СЂР°РЅРµРЅРѕ",
-            "РѕРїС†РёСЏ: РІРєР»СЋС‡Р°РµС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј",
+            "Сохранено",
+            "опция: включается пользователем",
         )
-    if low.startswith("РґР°"):
-        return "РЎРѕС…СЂР°РЅРµРЅРѕ", ""
-    return "РўСЂРµР±СѓРµС‚ СЂРµС€РµРЅРёСЏ", decision.strip()
+    if low.startswith("да"):
+        return "Сохранено", ""
+    return "Требует решения", decision.strip()
 
 
 def main(spec: str, out: str) -> None:
     with open(spec, encoding="utf-8") as fh:
         text = fh.read()
-    appendix = text[
-        text.index("## РџСЂРёР»РѕР¶РµРЅРёРµ A.") : text.index(
-            "## РџСЂРёР»РѕР¶РµРЅРёРµ B."
-        )
-    ]
+    appendix = text[text.index("## Приложение A.") : text.index("## Приложение B.")]
     rows = []
     for table in re.split(r"\n(?=### A\.)", appendix):
         lines = [ln for ln in table.splitlines() if ln.startswith("|")]
@@ -58,11 +54,7 @@ def main(spec: str, out: str) -> None:
         if "Rarus v1" not in header:
             continue
         i_dec = header.index("Rarus v1")
-        i_note = (
-            header.index("РџСЂРёРјРµС‡Р°РЅРёРµ")
-            if "РџСЂРёРјРµС‡Р°РЅРёРµ" in header
-            else None
-        )
+        i_note = header.index("Примечание") if "Примечание" in header else None
         for line in lines[2:]:
             cells = [c.strip() for c in line.strip("|").split("|")]
             if len(cells) != len(header):
@@ -75,9 +67,9 @@ def main(spec: str, out: str) -> None:
                 for h, c in zip(header, cells)
                 if h
                 in (
-                    "РљРѕРґ РІ Raven",
+                    "Код в Raven",
                     "RPC / CLI",
-                    "РРЅСЃС‚СЂСѓРјРµРЅС‚С‹ (РёРјРµРЅР°)",
+                    "Инструменты (имена)",
                 )
                 and c
             )
@@ -85,19 +77,17 @@ def main(spec: str, out: str) -> None:
                 [
                     cells[0],
                     cells[1],
-                    where or "вЂ”",
+                    where or "—",
                     st
                     + (
                         f" ({extra})"
-                        if extra and st != "РЎРѕС…СЂР°РЅРµРЅРѕ"
+                        if extra and st != "Сохранено"
                         else (f" ({extra})" if extra else "")
                     ),
-                    note or "вЂ”",
-                    EVIDENCE if st == "РЎРѕС…СЂР°РЅРµРЅРѕ" else "вЂ”",
-                    "2026-10-17, Claude",
-                    "РЅРµС‚ (РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ)"
-                    if st != "РЎРѕС…СЂР°РЅРµРЅРѕ"
-                    else "РЅРµС‚",
+                    note or "—",
+                    EVIDENCE if st == "Сохранено" else "—",
+                    "2026-10-18, Claude",
+                    "нет (обязательно)" if st != "Сохранено" else "нет",
                 ]
             )
     with open(out, "w", encoding="utf-8-sig", newline="") as fh:
@@ -105,13 +95,13 @@ def main(spec: str, out: str) -> None:
         w.writerow(
             [
                 "F-ID",
-                "Р¤СѓРЅРєС†РёСЏ",
-                "Р’ Raven",
-                "РЎС‚Р°С‚СѓСЃ РІ Rarus",
-                "РљСЂРёС‚РµСЂРёР№ РїСЂРёС‘РјРєРё",
-                "Р”РѕРєР°Р·Р°С‚РµР»СЊСЃС‚РІРѕ",
-                "Р”Р°С‚Р° Рё РёСЃРїРѕР»РЅРёС‚РµР»СЊ",
-                "РџСЂРѕРІРµСЂРёР» Р·Р°РєР°Р·С‡РёРє",
+                "Функция",
+                "В Raven",
+                "Статус в Rarus",
+                "Критерий приёмки",
+                "Доказательство",
+                "Дата и исполнитель",
+                "Проверил заказчик",
             ]
         )
         w.writerows(rows)

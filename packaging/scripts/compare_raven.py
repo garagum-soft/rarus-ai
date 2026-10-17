@@ -3,7 +3,7 @@
     python packaging/scripts/compare_raven.py \
         --raven <an unmodified copy of Raven> --raven-python <its python> \
         --rarus <this repository> --rarus-python <python that has the engine installed> \
-        --out docs/compat/2026-10-17-raven-parity.md
+        --out docs/compat/2026-10-18-raven-parity.md
 
 Five of the nine steps of 11.4 are mechanical and are done here: the RPC contract, the page's
 feature folders, the command line, the configuration keys and the message catalogue. The test run,
@@ -106,14 +106,22 @@ def catalogue(root: Path) -> dict[str, dict[str, str]]:
     return json.loads(path.read_text(encoding="utf-8"))["ui"]
 
 
+def _brand(text: str | None) -> str | None:
+    """Raven's wording with the product name it carries replaced by ours (the one allowed difference)."""
+    return text.replace("Raven", "Rarus") if text else text
+
+
 def compare_catalogues(raven: dict[str, dict[str, str]], rarus: dict[str, dict[str, str]]) -> dict[str, list[str]]:
-    """Every Raven key in Rarus for en and zh with the same words; every key of Rarus has Russian."""
+    """Every Raven key in Rarus for en and zh with the same words but the product name."""
     missing = sorted(k for k in raven if k not in rarus)
-    reworded = sorted(k for k in raven if k in rarus and any(rarus[k].get(c) != raven[k].get(c) for c in ("en", "zh")))
+    both = [k for k in raven if k in rarus]
+    reworded = sorted(k for k in both if any(rarus[k].get(c) != _brand(raven[k].get(c)) for c in ("en", "zh")))
+    renamed = sorted(k for k in both if any(rarus[k].get(c) != raven[k].get(c) for c in ("en", "zh")))
     no_russian = sorted(k for k, cols in rarus.items() if not (cols.get("ru") or "").strip())
     return {
         "missing": missing,
         "reworded": reworded,
+        "renamed": sorted(set(renamed) - set(reworded)),
         "no_russian": no_russian,
         "added": sorted(k for k in rarus if k not in raven),
     }
@@ -183,7 +191,9 @@ def render(date: str, sections: dict[str, dict]) -> str:
         "",
         *listing("Ключи Raven, которых нет в Rarus", i18n["missing"]),
         "",
-        *listing("Ключи с изменёнными en/zh", i18n["reworded"]),
+        f"Ключей, где в en/zh только «Raven» заменено на «Rarus»: {len(i18n['renamed'])}.",
+        "",
+        *listing("Ключи с другим текстом en/zh (кроме названия)", i18n["reworded"]),
         "",
         *listing("Ключи Rarus без русского текста", i18n["no_russian"]),
         "",

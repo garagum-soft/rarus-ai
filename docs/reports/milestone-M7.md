@@ -15,7 +15,7 @@
 | 7. 30 сценариев | `docs/compat/scenarios.md` | 9 не выполнены (нужна живая модель, сеть до alembox, аккаунт владельца или чужое оборудование), №21 выполнен частично, остальные покрыты тестами; руками на настоящем движке пройден канвас |
 | 8. Импорт данных | `rarus migrate-raven` | проверен тестами на тестовом `RAVEN_HOME`; на данных владельца не запускался |
 
-Матрица приложения А (62 строки) — `docs/compat/parity-matrix.csv`, строится `tools/dev/parity_matrix.py`. Отчёт скрипта — `docs/compat/2026-10-17-raven-parity.md`.
+Матрица приложения А (62 строки) — `docs/compat/parity-matrix.csv`, строится `tools/dev/parity_matrix.py`. Отчёт скрипта — `docs/compat/2026-10-18-raven-parity.md`.
 
 ## Полный прогон Python (движок)
 
