@@ -644,7 +644,7 @@ class TestWhereEmbeddingsEndpointLives:
         assert ue.bind_roles_here()["EVEROS_EMBEDDING__MODEL"] == "ravens/model", "a second start must still bind"
 
     def test_provenance_outlives_the_restart_exec(self, tmp_path: Path) -> None:
-        """`raven gateway --restart` re-launches through `os.execv`: the
+        """`rarus gateway --restart` re-launches through `os.execv`: the
         environment survives and every module object is rebuilt.
 
         A set held in the module was therefore empty in the restarted process

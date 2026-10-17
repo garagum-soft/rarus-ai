@@ -1,4 +1,4 @@
-"""``raven ops connection`` -- the front door to the machine registry.
+"""``rarus ops connection`` -- the front door to the machine registry.
 
 Every ``connections.json`` that has existed so far was written by hand, and the
 cost of that is in the record: five byte-identical copies kept in step by hand,
@@ -184,7 +184,7 @@ def list_connections(as_json: bool = typer.Option(False, "--json")) -> None:
         console.print(f"[red]{found.detail}[/red]")
         raise typer.Exit(1)
     if not found.rows:
-        console.print(f"No machine is set up ({store_path()}). Add one with `raven ops connection add`.")
+        console.print(f"No machine is set up ({store_path()}). Add one with `rarus ops connection add`.")
         return
     table = Table(title=str(store_path()))
     for column in ("id", "name", "how", "what it is", "budget", "at once"):
@@ -400,7 +400,7 @@ def _fleet_drivers(spec: dict[str, Any], simulate: str | None) -> list[Any]:
     names = wanted or sorted(rows)
     missing = [name for name in names if name not in rows]
     if missing:
-        raise typer.BadParameter(f"not registered: {', '.join(missing)} (see raven ops connection list)")
+        raise typer.BadParameter(f"not registered: {', '.join(missing)} (see rarus ops connection list)")
     update = str(spec.get("update_command") or "")
     return [CommandDriver(name, runner_from(rows[name]), update) for name in names]
 

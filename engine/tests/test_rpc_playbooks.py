@@ -822,7 +822,7 @@ async def test_a_traversing_name_never_reaches_the_store(
 
 @pytest.mark.parametrize("bad", ["../victim", "..", "a/b", "/etc", "Up", "a b", "-lead", ""])
 async def test_only_a_library_shaped_name_is_accepted(library: PlaybookStore, bad: str) -> None:
-    """The same rule ``raven playbook create`` enforces on the way out, applied
+    """The same rule ``rarus playbook create`` enforces on the way out, applied
     on the way in. Upper case and a leading dash are here because they are the
     two the pattern rejects that are NOT traversals -- a guard written only
     against ``..`` would let them through to a lookup.

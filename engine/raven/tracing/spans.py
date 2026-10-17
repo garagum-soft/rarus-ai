@@ -23,8 +23,8 @@ _surface: str | None = None
 def set_surface(name: str | None) -> None:
     """Declare which front end this process serves, as the process-wide default.
 
-    This used to be the whole story: ``raven tui`` ran one RPC server over a
-    pipe to its own child and ``raven serve`` ran one WebSocket app, so a
+    This used to be the whole story: ``rarus tui`` ran one RPC server over a
+    pipe to its own child and ``rarus serve`` ran one WebSocket app, so a
     process served exactly one front end for as long as it lived. A gateway
     that hosts the page now serves several at once -- the browser page, the
     GUI shell, a relayed terminal -- so a turn may carry its own surface (see

@@ -1,4 +1,4 @@
-"""CLI tests for ``raven playbook``.
+"""CLI tests for ``rarus playbook``.
 
 Each subcommand is covered against a temp two-layer library: a tmp user layer
 via ``playbooks.dir`` and a tmp builtin layer via the module constant. The
@@ -555,7 +555,7 @@ def test_run_reports_a_server_waiting_on_authorization_and_does_not_wait_for_it(
     assert elapsed < 10, f"the run waited {elapsed:.1f}s on a browser authorization"
     # CliRunner folds stderr into one stream, which is where err_console writes.
     assert "deepwiki" in r.output and "auth_required" in r.output
-    assert "raven plugin auth deepwiki" in r.output
+    assert "rarus plugin auth deepwiki" in r.output
 
 
 # ── secret / auth: the machine-held half of a carried server's credential ────
@@ -800,7 +800,7 @@ class TestWhoHoldsTheStintOpen:
 
 
 class TestTheCommandsWeTellPeopleToRun:
-    """Every `raven playbook stint(s) <verb>` this build prints, against what it
+    """Every `rarus playbook stint(s) <verb>` this build prints, against what it
     registered.
 
     Shipped once wrong in both directions: the verbs moved from a top-level
@@ -839,12 +839,12 @@ class TestTheCommandsWeTellPeopleToRun:
             if path.suffix not in {".py", ".md"}:
                 continue
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                for match in re.finditer(r"raven playbook (stints?)\s+([a-z_]+)", line):
+                for match in re.finditer(r"rarus playbook (stints?)\s+([a-z_]+)", line):
                     group, verb = match.group(1), match.group(2)
                     if verb not in registered.get(group, set()):
                         wrong.append(f"{name}:{number}: {match.group(0)}")
 
-        assert wrong == [], "these name a command `raven playbook --help` does not offer:\n" + "\n".join(wrong)
+        assert wrong == [], "these name a command `rarus playbook --help` does not offer:\n" + "\n".join(wrong)
 
 
 class TestPlanCommands:

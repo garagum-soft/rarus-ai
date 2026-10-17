@@ -331,7 +331,7 @@ def test_login_shell_env_capture_runs_in_its_own_session(
     # `-i` makes bash set up job control, which it does through /dev/tty even
     # with every stdio stream redirected. Sharing raven's session lets it
     # tcsetpgrp the terminal to itself and exit without restoring it, which
-    # leaves `raven tui` in a background process group -- the next keystroke
+    # leaves `rarus tui` in a background process group -- the next keystroke
     # then raises SIGTTIN and stops the whole job.
     captured_kwargs: dict[str, object] = {}
 

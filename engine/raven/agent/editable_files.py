@@ -16,7 +16,7 @@ Every save is checked and recorded:
   the personaliser and the sentinel under their sidecar locks, and a save here
   takes the same lock.
 - **As a revision** in the instruction history (``raven.agent.instructions``),
-  so ``raven instructions``-style log, diff and rollback work for every file
+  so ``rarus instructions``-style log, diff and rollback work for every file
   the page can change. A change made on disk since the last revision is
   recorded first, so the history never skips a version the file really had.
 """

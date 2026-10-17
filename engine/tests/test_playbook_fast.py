@@ -102,7 +102,7 @@ async def test_with_no_checks_the_agents_answer_is_the_result(tmp_path: Path) ->
 def test_the_command_line_does_a_small_task_without_planning_a_playbook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Main path: `raven playbook fast` with a configured agent; the playbook generator is never asked."""
+    """Main path: `rarus playbook fast` with a configured agent; the playbook generator is never asked."""
     from raven.cli.commands import app
     from raven.playbook import PlaybookGenerator
 

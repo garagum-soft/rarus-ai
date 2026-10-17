@@ -754,7 +754,7 @@ def set_provider_fields(
         if forbidden:
             raise RuntimeError(
                 f"Provider '{name}' uses OAuth — cannot set credential fields "
-                f"{forbidden} directly. Run: raven provider login "
+                f"{forbidden} directly. Run: rarus provider login "
                 f"{name.replace('_', '-')}"
             )
 
@@ -1647,7 +1647,7 @@ def _litellm_api_base(spec: Any) -> str:
 #: ``/embeddings/models`` says it outright.
 #:
 #: Only fetched for a full catalogue -- a credential probe is one request, and
-#: three would make ``raven provider test`` three times as slow to answer the
+#: three would make ``rarus provider test`` three times as slow to answer the
 #: same question.
 _CATALOGUE_EXTRAS: dict[str, tuple[tuple[str, str], ...]] = {
     "openrouter": (("embeddings/models", "embedding"), ("images/models", "image-generation")),
@@ -2032,7 +2032,7 @@ def _probe_copilot_seat(*, timeout_s: float, transport: httpx.BaseTransport | No
             "http_status": None,
             "models_count": None,
             "model_ids": None,
-            "error": "no credentials found -- run `raven provider login github-copilot`",
+            "error": "no credentials found -- run `rarus provider login github-copilot`",
         }
 
     from raven.providers.litellm_setup import import_litellm
@@ -2077,7 +2077,7 @@ def _probe_copilot_seat(*, timeout_s: float, transport: httpx.BaseTransport | No
             "http_status": None,
             "models_count": None,
             "model_ids": None,
-            "error": "the credential names no API endpoint -- run `raven provider login github-copilot`",
+            "error": "the credential names no API endpoint -- run `rarus provider login github-copilot`",
         }
 
     return _probe_models_endpoint(
@@ -2164,7 +2164,7 @@ def _probe_rarus(*, api_base: str | None) -> dict[str, Any]:
             "http_status": None,
             "models_count": None,
             "model_ids": None,
-            "error": "not signed in -- run `raven provider login rarus`",
+            "error": "not signed in -- run `rarus provider login rarus`",
         }
     try:
         ids = rarus_client.models(key, site=site_from_api_base(api_base))
@@ -2216,7 +2216,7 @@ def _probe_codex_catalog(*, timeout_s: float) -> dict[str, Any]:
             "http_status": None,
             "models_count": None,
             "model_ids": None,
-            "error": "no credentials found -- run `raven provider login openai-codex`",
+            "error": "no credentials found -- run `rarus provider login openai-codex`",
         }
 
     # Strict, so a failure is reported rather than flattened into an empty list --
@@ -2252,7 +2252,7 @@ def _probe_codex_catalog(*, timeout_s: float) -> dict[str, Any]:
             "model_ids": None,
             "error": (
                 f"the account refused this credential ({exc.response.status_code}) -- "
-                "run `raven provider login openai-codex`"
+                "run `rarus provider login openai-codex`"
                 if refused
                 else str(exc)
             ),
@@ -2278,7 +2278,7 @@ def _probe_codex_catalog(*, timeout_s: float) -> dict[str, Any]:
             "models_count": 0,
             "model_ids": [],
             "error": "the account offers no models -- the credential may have been revoked; "
-            "run `raven provider login openai-codex`",
+            "run `rarus provider login openai-codex`",
         }
 
     return {

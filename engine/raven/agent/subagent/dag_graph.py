@@ -59,7 +59,7 @@ class DagNodeSpec(BaseModel):
             graph -- it is how a later graph names this node's output.
         subagent (`str`):
             Which agent runs this node: a name on the agent table, exactly as the
-            roster advertises it. Any kind will do -- a built-in raven agent, a
+            roster advertises it. Any kind will do -- a built-in rarus agent, a
             cli agent, an acp one. The field names a role rather than a
             provenance: whichever row it points at, that row runs this step as a
             child of the calling turn. The table it indexes is spelled

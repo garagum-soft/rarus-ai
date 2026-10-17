@@ -1,4 +1,4 @@
-"""Tests for the ``raven sentinel`` CLI subapp — covers all
+"""Tests for the ``rarus sentinel`` CLI subapp — covers all
 user-facing commands plus the ``[Internal]`` ``discover-now`` entry
 used by the proactivity-eval longrun.
 
@@ -628,7 +628,7 @@ def test_discover_now_cleans_up_runner_on_exception(runner, monkeypatch):
 
 
 def test_sentinel_subapp_registered(runner):
-    """``raven sentinel --help`` should list the user-facing commands."""
+    """``rarus sentinel --help`` should list the user-facing commands."""
     result = runner.invoke(sentinel_app, ["--help"])
     assert result.exit_code == 0
     for cmd in ("status", "enable", "disable", "tick", "ticks", "nudges", "decisions", "routines"):

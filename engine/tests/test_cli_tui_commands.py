@@ -1,4 +1,4 @@
-"""CLI tests for ``raven tui`` -- the launcher in ``raven/cli/tui_commands.py``.
+"""CLI tests for ``rarus tui`` -- the launcher in ``raven/cli/tui_commands.py``.
 
 ``tui`` builds the agent loop a session runs on, decides whether to host that
 loop in-process behind an RPC server or to attach to a gateway already hosting
@@ -762,7 +762,7 @@ def test_tui_exposes_a_workspace_flag():
 
 
 def test_the_tui_is_told_which_raven_to_call_back_into(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """The picker signs a user in by running ``raven provider login``, and that
+    """The picker signs a user in by running ``rarus provider login``, and that
     writes a credential. Resolved through PATH it can be a different install --
     one that writes it where this process does not look, so the login reports
     success and the provider stays unauthenticated."""
@@ -881,7 +881,7 @@ def test_a_machine_with_no_browser_is_told_apart_before_anything_starts(monkeypa
 
 
 def test_bare_raven_opens_the_page_when_a_browser_is_there(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The installer ends in `raven web`, so the bare command has to land on the
+    """The installer ends in `rarus web`, so the bare command has to land on the
     same surface rather than a second, quieter one."""
     from typer.testing import CliRunner
 
@@ -1222,7 +1222,7 @@ def test_teardown_stops_the_skill_file_watcher() -> None:
     process exit safe while it sits in native code: CPython runs
     ``Py_FinalizeEx`` under that call and the process dies of SIGSEGV (-11, or
     139 in a shell) after the turn and the teardown have both already
-    succeeded. Measured 2026-09-18: a real ``raven tui`` exited -11, and
+    succeeded. Measured 2026-09-18: a real ``rarus tui`` exited -11, and
     building the loop this module's factory builds and then letting the
     interpreter finalize reproduced 139 -- 0 when the watcher was stopped first.
 
@@ -1275,9 +1275,9 @@ def test_bare_raven_dev_reaches_the_web_launcher(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize(
     ("argv", "says"),
     [
-        (["--dev", "web"], "raven web --dev"),
-        (["--dev", "serve"], "raven serve --dev"),
-        (["--dev", "gateway"], "raven gateway --dev"),
+        (["--dev", "web"], "rarus web --dev"),
+        (["--dev", "serve"], "rarus serve --dev"),
+        (["--dev", "gateway"], "rarus gateway --dev"),
         (["--dev", "tui"], "bare `raven` only"),
     ],
 )

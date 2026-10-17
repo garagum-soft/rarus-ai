@@ -17,7 +17,7 @@ A change goes through the writer that owns it. ``raw`` settings are written by
 the catalog's own validated writer; the rest go through the RPC methods the
 settings page uses, reached through a caller the entrance lends
 (:meth:`RavenConfigTool.set_rpc_caller`). Where no entrance lent one -- a
-one-shot ``raven agent`` -- those settings are read-only and the tool says so.
+one-shot ``rarus agent`` -- those settings are read-only and the tool says so.
 Restarting is the gateway's to perform (:meth:`RavenConfigTool.set_restarter`);
 it waits for the turn that asked to finish.
 
@@ -1123,7 +1123,7 @@ class RavenConfigTool(Tool):
             if outcome == "unreachable":
                 line += (
                     ". Saved; no gateway answered, so the channel starts once Raven runs as a gateway "
-                    "(`raven gateway`, or `raven web`, which starts one); nothing else needs setting for that"
+                    "(`rarus gateway`, or `rarus web`, which starts one); nothing else needs setting for that"
                 )
             elif outcome:
                 line += f". Gateway said: {outcome}"
@@ -1354,7 +1354,7 @@ class RavenConfigTool(Tool):
         if self._call is None:
             raise ValueError(
                 "this setting is changed through Raven's settings service, which this process does not "
-                "serve (e.g. a one-shot `raven agent`). Ask the user to change it in Settings."
+                "serve (e.g. a one-shot `rarus agent`). Ask the user to change it in Settings."
             )
         try:
             return await self._call(method, params)
@@ -1473,7 +1473,7 @@ class RavenConfigTool(Tool):
         if not status.get("gateway_running"):
             out["state"] = (
                 "no gateway is running, so no channel is connected: channels are served by Raven running as a "
-                "gateway (`raven gateway`, or `raven web`, which starts one)"
+                "gateway (`rarus gateway`, or `rarus web`, which starts one)"
             )
             return out
         scan = bool(row.get("qr_login")) or not any(f.get("required") for f in row.get("fields") or [])

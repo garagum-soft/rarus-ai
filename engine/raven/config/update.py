@@ -4,7 +4,7 @@ Unlike ``save_config`` which re-serializes the entire Pydantic model (and
 would bake every runtime default back into the file), these helpers read
 the raw JSON, patch a small set of fields, and rewrite through the locked
 read-modify-write transaction in ``raven.utils.atomic_io``. Used by
-``raven cron config set`` and the onboarding wizard so the change persists
+``rarus cron config set`` and the onboarding wizard so the change persists
 across restarts without touching unrelated fields.
 """
 
@@ -315,7 +315,7 @@ def set_default_model(
 
     Used by the onboarding wizard after the user picks a provider: the wizard
     needs to swap the default model to one that matches the chosen provider
-    (otherwise ``raven agent`` would still route to whatever the freshly
+    (otherwise ``rarus agent`` would still route to whatever the freshly
     created ``Config()`` baked in, which is typically a different vendor).
 
     ``provider`` writes ``agents.defaults.provider`` in the same patch. That field
@@ -805,7 +805,7 @@ def initialize_a2a_server(*, config_path: Path | None = None) -> str | None:
 
     ``enabled`` is not written here at all. The inbound face is a second network
     surface, and finishing an unrelated install is not consent to open one --
-    ``set_a2a_server_enabled`` is, reached through ``raven a2a enable``. Leaving
+    ``set_a2a_server_enabled`` is, reached through ``rarus a2a enable``. Leaving
     the key absent rather than writing ``false`` also keeps a repeat onboard
     from closing a face the operator opened by hand.
 

@@ -1303,7 +1303,7 @@ class SubagentManager:
         if interface_mode(session_key, agent, handle) == "terminal":
             raise RuntimeError(
                 f"instance {handle!r} is in its terminal right now; switch it back to chat first "
-                f"(raven sessions switch {session_key} {agent} {handle} --to chat)"
+                f"(rarus sessions switch {session_key} {agent} {handle} --to chat)"
             )
         row = self.registry.get(agent)
         if media and row is not None and not row.caps.reads_local_files:

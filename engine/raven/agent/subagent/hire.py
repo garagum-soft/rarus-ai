@@ -1,7 +1,7 @@
 """Hiring an employee: an agent of one's own with a name, a role, a model and its own instructions.
 
 One step writes a folder agent under ``<RARUS_HOME>/employees/<id>`` -- the
-same shape ``raven agents new`` scaffolds, without the plugin harness -- so the
+same shape ``rarus agents new`` scaffolds, without the plugin harness -- so the
 roster discovers it like any product and the main agent can delegate to it:
 
 - ``subagent.json``: the name, the role the dispatching model reads to decide
@@ -103,11 +103,11 @@ def _taken_names() -> set[str]:
 
 
 _RUN_PY = '''#!/usr/bin/env python
-"""Launcher of the employee {display}, written by ``raven agents hire``.
+"""Launcher of the employee {display}, written by ``rarus agents hire``.
 
 Renders its config -- its own key from ``.env`` when it has one, else the host's
 keys with its own model -- seeds its system prompt into its agent home on the
-first launch, and execs ``raven acp``. stdout belongs to the protocol.
+first launch, and execs ``rarus acp``. stdout belongs to the protocol.
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ def render_config() -> Path:
 
 def main() -> int:
     rendered = render_config()
-    log(f"[run] exec {{sys.executable}} -m raven acp (config {{rendered}})")
+    log(f"[run] exec {{sys.executable}} -m rarus acp (config {{rendered}})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)

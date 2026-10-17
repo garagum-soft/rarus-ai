@@ -65,7 +65,7 @@ async def test_concurrency_is_capped() -> None:
 
 
 def test_the_command_line_runs_a_playbook_once_per_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The main path: `raven playbook batch` over a stored playbook and a CLI agent."""
+    """The main path: `rarus playbook batch` over a stored playbook and a CLI agent."""
     from raven.cli.commands import app
 
     home = tmp_path / "home"

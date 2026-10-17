@@ -588,7 +588,7 @@ async def test_composition_says_when_it_withheld_a_secret():
 
 
 async def test_prompt_mode_composes_when_there_is_no_caller_to_hand_it_to():
-    """The CLI's shape. Without it, ``raven playbook run`` could not run a
+    """The CLI's shape. Without it, ``rarus playbook run`` could not run a
     prompt-mode playbook at all -- there is no model in the room to compose."""
     tool = FakeDagTool()
     provider = ComposeProvider([json.dumps(GOOD_GRAPH)])
@@ -731,7 +731,7 @@ async def test_prompt_mode_missing_tool_does_not_enter_content_repair():
     assert len(provider.calls) == 1
 
 
-# --- The spec's own mcpServers, on the way to the graph tool. `raven playbook
+# --- The spec's own mcpServers, on the way to the graph tool. `rarus playbook
 # --- run` wires a pre-flight that has heard of them; a conversation wires
 # --- nothing, so without this hand-off the same file resolved every server it
 # --- ships to "not configured" through `load_playbook` and worked on the CLI.
@@ -876,7 +876,7 @@ async def test_a_disabled_playbook_is_invisible_to_the_model_and_runnable_by_han
 
     There is no passive matcher left to mute, so the enforcement is that the model
     never sees it -- and cannot name it, since the enum comes from the same list.
-    An explicit ``raven playbook run`` is the user's own hand and still resolves it.
+    An explicit ``rarus playbook run`` is the user's own hand and still resolves it.
     """
     rt = _runtime(tmp_path, [_dag_spec()], disabled=["weekly-feedback"])
 
@@ -1160,7 +1160,7 @@ async def test_an_unset_secret_is_a_reminder_not_a_gap(tmp_path, monkeypatch):
     assert plan.kind == "dag"
     assert "was not run" not in plan.reply
     assert "secret param 'PG_PASSWORD' is not set on this machine" in plan.reply
-    assert f"raven playbook secret set {spec.name} PG_PASSWORD" in plan.reply
+    assert f"rarus playbook secret set {spec.name} PG_PASSWORD" in plan.reply
     assert tool.calls[0]["mcp_servers"]["local-pg"].env == {}
 
 

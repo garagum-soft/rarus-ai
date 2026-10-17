@@ -314,7 +314,7 @@ def test_the_workspace_follows_raven_home_too(tmp_path, monkeypatch) -> None:
 
 def test_both_derivations_of_the_workspace_agree(tmp_path, monkeypatch) -> None:
     """`Config.workspace_path` is not the only one: `get_workspace_path()` is the
-    second, and it is what the CLI session commands and `raven onboard` reach
+    second, and it is what the CLI session commands and `rarus onboard` reach
     for. Moving one and not the other is worse than moving neither -- the
     gateway then writes sessions into a tree the CLI does not read."""
     from raven.config.loader import load_config

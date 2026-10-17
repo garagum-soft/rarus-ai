@@ -138,7 +138,7 @@ def test_a_profile_save_waits_for_the_consolidators_lock(home: Path) -> None:
 
 
 def test_the_default_history_still_tracks_only_the_instruction_files(home: Path) -> None:
-    """F36 is unchanged: the agent's file tools and `raven instructions` keep the three files."""
+    """F36 is unchanged: the agent's file tools and `rarus instructions` keep the three files."""
     plain = InstructionHistory(home)
 
     assert plain.is_tracked("TOOLS.md") and not plain.is_tracked("user_memory/profile/user.md")

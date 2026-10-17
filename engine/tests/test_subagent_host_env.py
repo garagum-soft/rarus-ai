@@ -75,7 +75,7 @@ async def test_acp_child_inherits_custom_raven_home(tmp_path: Path, monkeypatch:
 
 async def test_acp_child_is_told_it_serves_as_a_subagent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Without this the gate in ``raven.agent.subagent.role`` never fires: a child
-    ``raven acp`` builds a full registry because nothing ever tells it otherwise,
+    ``rarus acp`` builds a full registry because nothing ever tells it otherwise,
     which is how a DAG node's sub-agent came to hold ``spawn`` and delegate the
     node's whole task to a background receipt."""
     observed = tmp_path / "observed.txt"

@@ -74,10 +74,10 @@ def print_probe_troubleshooting(provider: str | None) -> None:
     console.print("\n  [dim]Troubleshooting:[/dim]")
     if provider:
         console.print(
-            f"  [dim]·[/dim] [cyan]raven provider test {provider}[/cyan] — re-check credentials without spending tokens"
+            f"  [dim]·[/dim] [cyan]rarus provider test {provider}[/cyan] — re-check credentials without spending tokens"
         )
         console.print(
-            f"  [dim]·[/dim] [cyan]raven provider get {provider}[/cyan] — inspect what's actually stored on disk"
+            f"  [dim]·[/dim] [cyan]rarus provider get {provider}[/cyan] — inspect what's actually stored on disk"
         )
     console.print(
         "  [dim]·[/dim] Check the model id in [cyan]~/.rarus/config.json[/cyan] "
@@ -126,7 +126,7 @@ def print_deprecated_memory_window_notice(config: Config) -> None:
         console.print(
             "[yellow]Hint:[/yellow] Detected deprecated `memoryWindow` without "
             "`contextWindowTokens`. `memoryWindow` is ignored; run "
-            "[cyan]raven onboard[/cyan] to refresh your config template."
+            "[cyan]rarus onboard[/cyan] to refresh your config template."
         )
 
 
@@ -138,7 +138,7 @@ def print_config_migration_notices() -> None:
     takes over the screen -- once printed, the notices are gone.
 
     On stderr, because stdout is a command's answer and this is not part of it:
-    ``raven doctor --json`` and ``raven import --json`` are documented for
+    ``rarus doctor --json`` and ``raven import --json`` are documented for
     automation, and a line appended to their output is not a cosmetic problem
     but an unparseable document. That is also where the rest of this class of
     message already goes -- ``commands.run``'s own ConfigReadError branch and

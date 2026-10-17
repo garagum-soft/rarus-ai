@@ -1,7 +1,7 @@
 """Run-scoped MCP definitions: the third scope, and what keeps it out of the other two.
 
 A playbook that ships its own ``mcpServers`` had them resolvable on
-``raven playbook run`` and nowhere else: in a conversation the host's config
+``rarus playbook run`` and nowhere else: in a conversation the host's config
 mapping had never heard of the name, so ``resolve_grant`` answered
 ``not_configured``. What was missing was the *definition lookup*, never a
 service -- ``raven.mcp.endpoint`` already dials one upstream per (node, server)
@@ -508,7 +508,7 @@ async def test_an_in_process_node_runs_without_a_server_nothing_dialled(tmp_path
     the host's already-connected wrappers -- so a server that reaches it as a
     definition and nothing more is not deliverable. Said in a notice and not by
     refusing: the servers are an attachment to the work, so this costs the node
-    its tools and must not cost the graph its run. ``raven playbook run`` differs
+    its tools and must not cost the graph its run. ``rarus playbook run`` differs
     on purpose: its pre-flight dials and registers before the graph starts.
     """
     host: dict[str, MCPServerConfig] = {}

@@ -2,7 +2,7 @@
 
 `skill.*` and `mcp.*` are declared in `models.py` METHOD_MODELS and in
 `rpc-schema/openrpc.json` but no register call backs them, so calling them
-in a real `raven tui` returns -32601. That gap predates this test and is
+in a real `rarus tui` returns -32601. That gap predates this test and is
 allowlisted below rather than silently tolerated: the point of the test is that
 no NEW method joins it.
 

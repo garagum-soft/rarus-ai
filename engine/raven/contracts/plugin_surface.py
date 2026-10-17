@@ -118,7 +118,7 @@ class RuntimeHandles:
     """Keyed one-shot wakes on the host's scheduler, namespaced to the
     contributing plugin (paper: contracts/scheduling.py) -- a holder's keys
     can neither see nor move another plugin's wakes, nor any plain reminder.
-    ``None`` where the host runs no scheduler (a one-shot ``raven agent -m``,
+    ``None`` where the host runs no scheduler (a one-shot ``rarus agent -m``,
     a test locator), which a binder treats as a decline."""
 
     usage_recorder: Any = None

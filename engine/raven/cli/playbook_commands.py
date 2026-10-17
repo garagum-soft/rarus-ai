@@ -1,6 +1,6 @@
 """Playbook subcommands — owns the ``playbook_app`` Typer instance.
 
-Bundles all ``raven playbook ...`` subcommands over the two-layer library
+Bundles all ``rarus playbook ...`` subcommands over the two-layer library
 (packaged builtins under a writable user layer) and the ``playbooks.disabled``
 switch in config:
 
@@ -202,7 +202,7 @@ def playbook_new_stint(
     out field by field what this build accepts. This is the cheap half of the
     answer: no model, no network, a shape with every field explained and the
     traps named next to the field that springs them. It validates as written, so
-    the first `raven playbook validate` reports what you changed rather than
+    the first `rarus playbook validate` reports what you changed rather than
     where you started.
     """
     import re
@@ -235,7 +235,7 @@ def playbook_new_stint(
         "Two roles, three rounds, nothing checked -- a shape, not a plan. Fill in the "
         "promptTemplates and what each role owns, then:"
     )
-    console.print(f"  raven playbook validate {escape(name)}")
+    console.print(f"  rarus playbook validate {escape(name)}")
     console.print(
         "[dim]It is usable as soon as it validates; no enabling step. Read it before you run it -- "
         "one approval covers every round.[/dim]"
@@ -298,7 +298,7 @@ def playbook_create(
     # Not switched off on arrival, matching the tool entry: the deny list is
     # read live now, so writing the name onto it here would make a playbook the
     # user just created immediately invisible to a running agent.
-    console.print(f"Usable now. Review the file, and `raven playbook disable {name}` if you want it held back.")
+    console.print(f"Usable now. Review the file, and `rarus playbook disable {name}` if you want it held back.")
 
 
 @playbook_app.command("enable")
@@ -561,9 +561,9 @@ def playbook_run(
                 hint = ""
                 if state == "auth_required":
                     fix = (
-                        f"raven playbook auth {name} {server}"
+                        f"rarus playbook auth {name} {server}"
                         if server in spec.mcp_servers
-                        else f"raven plugin auth {server}"
+                        else f"rarus plugin auth {server}"
                     )
                     hint = f" -- run: {fix}"
                 err_console.print(f"[yellow]MCP server {escape(server)}: {escape(state)}{escape(hint)}[/yellow]")
@@ -579,7 +579,7 @@ def playbook_run(
                     console.print(
                         "[dim]Holding this terminal: a stint's rounds run in this process, and nothing "
                         "else here would advance them. Ctrl-C stops it where it is; "
-                        "`raven playbook stints resume` takes it up.[/dim]"
+                        "`rarus playbook stints resume` takes it up.[/dim]"
                     )
                     await hold_until_the_stints_end(executor.rounds)
                     held.append(plan)
@@ -946,7 +946,7 @@ def playbook_fast(
         enabled = [m.name for m in manager.list_agents() if getattr(m, "enabled", True)]
         picked = choose(task, enabled, matrix)
         if picked is None:
-            err_console.print("[red]No probed agent to pick from: run `raven agents probe` first.[/red]")
+            err_console.print("[red]No probed agent to pick from: run `rarus agents probe` first.[/red]")
             raise typer.Exit(code=1)
         agent = picked.agent
         console.print(f"agent: {agent} (picked by the capability matrix: {picked.why})", markup=False, soft_wrap=True)
@@ -1014,7 +1014,7 @@ def playbook_delete(
     if origin == "builtin":
         err_console.print(
             f"[red]{escape(repr(name))} is a builtin and cannot be deleted. "
-            f"Use: raven playbook disable {escape(name)}[/red]"
+            f"Use: rarus playbook disable {escape(name)}[/red]"
         )
         raise typer.Exit(code=1)
     directory = store.path_for(name).parent
@@ -1036,7 +1036,7 @@ playbook_app.add_typer(stints_app, name="stints")
 # The project side of the same feature, under the singular: `stints` answers
 # "what has run on this machine", and `stint` acts on one project's own layout
 # and the backlog its roles share. One family, because a person who found
-# `raven playbook run` has no reason to guess at a second top-level noun.
+# `rarus playbook run` has no reason to guess at a second top-level noun.
 playbook_app.add_typer(stint_app, name="stint")
 
 
@@ -1106,7 +1106,7 @@ def _require_stint(config, stint_id: str):
     from raven.stint.record import mark_adrift
 
     if not re.fullmatch(r"[A-Za-z0-9_-]+", stint_id):
-        err_console.print(f"[red]{escape(stint_id)} is not a stint id; see `raven playbook stints list`.[/red]")
+        err_console.print(f"[red]{escape(stint_id)} is not a stint id; see `rarus playbook stints list`.[/red]")
         raise typer.Exit(code=1)
     homes = _stint_homes(config)
     mark_adrift([store for _home, store in homes])
@@ -1230,7 +1230,7 @@ def plan_pause(stint_id: str = typer.Argument(..., help="Stint id, as listed")):
     store.write(record)
     console.print(
         f"Paused {escape(stint_id)}. A round already in flight finishes; no further round opens. "
-        f"Take it up again with `raven playbook stints resume {escape(stint_id)}`."
+        f"Take it up again with `rarus playbook stints resume {escape(stint_id)}`."
     )
 
 

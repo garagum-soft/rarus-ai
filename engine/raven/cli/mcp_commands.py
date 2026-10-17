@@ -1,4 +1,4 @@
-"""``raven mcp bridge``: the frame pump's process shell. ``raven mcp serve``: Raven's own MCP server.
+"""``rarus mcp bridge``: the frame pump's process shell. ``rarus mcp serve``: Raven's own MCP server.
 
 A sub-agent spawns this and speaks newline-delimited JSON-RPC to its stdin and
 stdout, so the only bytes allowed on stdout are frames. ``claim_stdout`` is what
@@ -31,8 +31,8 @@ def bridge(socket_path: str = typer.Argument(..., help="Unix socket the host is 
 def serve() -> None:
     """Serve Raven's own tools (tasks, sessions, agents, channels) to an MCP client over stdio.
 
-    Drives the Raven running on this machine (`raven web`): register this
-    command as a stdio MCP server in the client, e.g. `raven mcp serve`.
+    Drives the Raven running on this machine (`rarus web`): register this
+    command as a stdio MCP server in the client, e.g. `rarus mcp serve`.
     """
     from raven.mcp.platform_server import main
 
@@ -52,7 +52,7 @@ def onboard(
         for known in CLIENTS:
             where = f"  writes {known.filename}" if known.filename else ""
             typer.echo(f"{known.id:<16}{known.label}{where}")
-        typer.echo("\nPick one: raven mcp onboard <client>")
+        typer.echo("\nPick one: rarus mcp onboard <client>")
         return
     try:
         result = build(client, asyncio.run(tool_catalog()))

@@ -1,4 +1,4 @@
-"""Tests for ``raven plugins`` and ``raven plugin auth``.
+"""Tests for ``rarus plugins`` and ``rarus plugin auth``.
 
 ``plugins`` is read-only: it renders the activated plugins -- here the
 registered entry-points one, raven_everos -- and resolves
@@ -35,7 +35,7 @@ runner = CliRunner()
 
 
 # ---------------------------------------------------------------------------
-# ``raven plugin auth`` -- refusals in front of the one network call
+# ``rarus plugin auth`` -- refusals in front of the one network call
 # ---------------------------------------------------------------------------
 
 
@@ -138,7 +138,7 @@ def test_a_failed_authorization_exits_non_zero_and_names_the_reason(
 
 
 # ---------------------------------------------------------------------------
-# ``raven plugins`` -- the listing table and the backend-selection block
+# ``rarus plugins`` -- the listing table and the backend-selection block
 # ---------------------------------------------------------------------------
 
 
@@ -146,7 +146,7 @@ def _make_runner_args(tmp_path: Path, config: dict[str, Any]) -> list[str]:
     """Write a config file + return the typer args to point at it."""
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
-    # ``raven plugins -c <path>``
+    # ``rarus plugins -c <path>``
     return ["plugins", "-c", str(config_path)]
 
 

@@ -153,7 +153,7 @@ def _login_openai_codex() -> None:
         pass
     else:
         console.print("[green]Already signed in to OpenAI Codex.[/green]")
-        console.print("[dim]To sign in as someone else: raven provider reset openai-codex[/dim]")
+        console.print("[dim]To sign in as someone else: rarus provider reset openai-codex[/dim]")
         return
 
     # Otherwise the driver would wait for the earlier attempt to land rather than
@@ -364,7 +364,7 @@ def _parse_provider_flags(extra_args: list[str], provider_name: str) -> dict[str
             key = _normalize(flag[3:])
             if key not in specs:
                 raise typer.BadParameter(
-                    f"Unknown field '--no-{flag[3:]}'. Run 'raven provider show {provider_name}' for available flags."
+                    f"Unknown field '--no-{flag[3:]}'. Run 'rarus provider show {provider_name}' for available flags."
                 )
             out[key] = False
             continue
@@ -373,7 +373,7 @@ def _parse_provider_flags(extra_args: list[str], provider_name: str) -> dict[str
         if key not in specs:
             raise typer.BadParameter(
                 f"Unknown field '--{flag}' for provider '{provider_name}'. "
-                f"Run 'raven provider show {provider_name}' for available flags."
+                f"Run 'rarus provider show {provider_name}' for available flags."
             )
 
         if value is None:
@@ -501,9 +501,9 @@ def _register_config_commands(app: typer.Typer) -> None:
 
         Examples:
 
-            raven provider set openrouter --api-key sk-or-v1-...
-            raven provider set azure-openai --api-key X --api-base https://...
-            raven provider set gemini --api-key-list k1,k2
+            rarus provider set openrouter --api-key sk-or-v1-...
+            rarus provider set azure-openai --api-key X --api-base https://...
+            rarus provider set gemini --api-key-list k1,k2
         """
         if help_requested(ctx.args):
             _print_schema_table(name)
@@ -532,7 +532,7 @@ def _register_config_commands(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         console.print(f"[green]✓[/green] {name} updated: {', '.join(prev)}")
-        console.print(f"  [dim]Run 'raven provider test {name}' to verify the credentials.[/dim]")
+        console.print(f"  [dim]Run 'rarus provider test {name}' to verify the credentials.[/dim]")
 
     @app.command("test")
     def provider_test_cmd(
@@ -563,11 +563,11 @@ def _register_config_commands(app: typer.Typer) -> None:
             return
 
         hints = {
-            "not_configured": f"Run: raven provider set {name} --api-key <KEY>",
-            "invalid_key": f"Run: raven provider set {name} --api-key <NEW-KEY>",
+            "not_configured": f"Run: rarus provider set {name} --api-key <KEY>",
+            "invalid_key": f"Run: rarus provider set {name} --api-key <NEW-KEY>",
             "no_credits": "Fund your account at the provider's billing page",
             "rate_limited": "Wait a few minutes and retry, or switch provider",
-            "oauth_token_missing": (f"Run: raven provider login {name.replace('_', '-')}"),
+            "oauth_token_missing": (f"Run: rarus provider login {name.replace('_', '-')}"),
             "network_error": "Check network / firewall / VPN settings",
             "certificate_untrusted": (
                 "If a corporate proxy or private CA signs it, add that CA to the system certificate store. "
@@ -602,7 +602,7 @@ def _register_config_commands(app: typer.Typer) -> None:
         The pair, not the id alone: `openrouter` serving
         `anthropic/claude-haiku-4-5` and `anthropic` serving
         `claude-haiku-4-5` are both real and bill different accounts, and an id
-        cannot tell them apart. `raven provider list` shows the configured ones.
+        cannot tell them apart. `rarus provider list` shows the configured ones.
 
         Changing it used to mean re-running the whole wizard: the TUI picker and
         onboarding could both switch models and the CLI could not, so a user on a
@@ -624,15 +624,15 @@ def _register_config_commands(app: typer.Typer) -> None:
         # key. The same rule the TUI's `/model` enforces.
         if not provider:
             console.print(f"[red]✗[/red] --provider is required: {model!r} does not name whose credential serves it.")
-            console.print(f"  [dim]raven provider use {model} --provider <name>[/dim]")
-            console.print("  [dim]raven provider list  # the ones you have configured[/dim]")
+            console.print(f"  [dim]rarus provider use {model} --provider <name>[/dim]")
+            console.print("  [dim]rarus provider list  # the ones you have configured[/dim]")
             raise typer.Exit(1)
 
         name = provider
 
         # Before the write, not after. A typo used to exit 0 with the config
         # already changed, and the credential warning that followed suggested
-        # `raven provider set <typo> --api-key ...` -- advice that would have
+        # `rarus provider set <typo> --api-key ...` -- advice that would have
         # created an orphan section for a vendor nothing routes to. The TUI's
         # `/model` builds the provider first and raises before it saves; this is
         # the same order, with the same test `provider set` already applies.
@@ -646,7 +646,7 @@ def _register_config_commands(app: typer.Typer) -> None:
         except KeyError as exc:
             detail = exc.args[0] if exc.args else str(exc)
             console.print(f"[red]✗[/red] {detail}")
-            console.print("  [dim]raven provider list  # the ones you have configured[/dim]")
+            console.print("  [dim]rarus provider list  # the ones you have configured[/dim]")
             raise typer.Exit(1) from exc
 
         stored = stored_model_id(name, model) if name else model
@@ -733,13 +733,13 @@ def _register_config_commands(app: typer.Typer) -> None:
             dashed = name.replace("_", "-")
             kind = auth_shape(name)
             if kind == SHAPE_OAUTH:
-                back = f"raven provider login {dashed}"
+                back = f"rarus provider login {dashed}"
             elif kind == SHAPE_LOCAL:
-                back = f"raven provider set {dashed} --api-base <URL>"
+                back = f"rarus provider set {dashed} --api-base <URL>"
             elif kind == SHAPE_ENDPOINT:
-                back = f"raven provider set {dashed} --api-key <KEY> --api-base <URL>"
+                back = f"rarus provider set {dashed} --api-key <KEY> --api-base <URL>"
             else:
-                back = f"raven provider set {dashed} --api-key <KEY>"
+                back = f"rarus provider set {dashed} --api-key <KEY>"
             console.print("  [yellow]Your default model is served by this provider and no longer works.[/yellow]")
             console.print(f"  [dim]Pick another with /model in the TUI, or set it up again: {back}[/dim]")
 

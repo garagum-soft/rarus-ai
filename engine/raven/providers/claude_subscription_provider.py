@@ -2,7 +2,7 @@
 
 There is no API key on this path. The Agent SDK runs Claude Code's own CLI (the
 SDK bundles it), and the CLI signs in with the login the user made on this
-machine (``raven provider login claude_subscription`` runs that login, or
+machine (``rarus provider login claude_subscription`` runs that login, or
 ``CLAUDE_CODE_OAUTH_TOKEN`` carries one).
 
 Raven's loop owns its tools and runs them itself, while the CLI is an agent
@@ -42,7 +42,7 @@ PROVIDER = "claude_subscription"
 SERVER = "raven"
 TOOL_PREFIX = f"mcp__{SERVER}__"
 DEFAULT_MODEL = "sonnet"
-LOGIN_HINT = "run `raven provider login claude_subscription` (it opens the Claude sign-in in your browser)"
+LOGIN_HINT = "run `rarus provider login claude_subscription` (it opens the Claude sign-in in your browser)"
 
 Runner = Callable[..., AsyncIterator[Any]]
 

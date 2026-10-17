@@ -71,7 +71,7 @@ class IntegrationResult:
         if self.status == "unreviewed":
             return (
                 f"{self.branch} was not merged into {self.into}: {self.detail} Review it with "
-                f"`raven review show {self.review}`, then `raven review merge {self.review}`."
+                f"`rarus review show {self.review}`, then `rarus review merge {self.review}`."
             )
         return f"{self.branch} was not merged into {self.into or 'the project'}: {self.detail}"
 

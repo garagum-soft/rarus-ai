@@ -249,7 +249,7 @@ class SentinelRunner:
         # Discover-trigger drain runs on its own fast cadence — it's
         # event-driven (CLI write), not time-driven, so it has no
         # business sharing the LLM tick's 10-minute sleep. Without this,
-        # ``raven sentinel discover-now`` violates its own name and
+        # ``rarus sentinel discover-now`` violates its own name and
         # waits up to ``interval_s`` before firing.
         if self._discover_trigger_store is not None:
             self._trigger_task = asyncio.create_task(self._run_trigger_loop())
@@ -282,7 +282,7 @@ class SentinelRunner:
 
     async def _run_trigger_loop(self) -> None:
         """Fast-poll CLI-queued discover triggers. Decoupled from the
-        LLM tick so ``raven sentinel discover-now`` actually fires
+        LLM tick so ``rarus sentinel discover-now`` actually fires
         within seconds. ``consume_all`` short-circuits when the file is
         empty, so cost is fcntl + tiny read every poll — negligible."""
         while self._running:

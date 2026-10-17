@@ -228,7 +228,7 @@ def test_a_backlog_with_a_repeated_id_is_refused(tmp_path: Path) -> None:
 def test_a_project_with_no_backlog_says_how_to_get_one(tmp_path: Path) -> None:
     with pytest.raises(BacklogError) as caught:
         backlog_mod.load(tmp_path)
-    assert "raven playbook stint task add" in str(caught.value)
+    assert "rarus playbook stint task add" in str(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -259,7 +259,7 @@ def test_adding_keeps_the_name_and_round_trips_it() -> None:
 def test_blocking_on_a_question_nobody_asked_is_refused() -> None:
     """The answer that would lift such a block can never arrive."""
     backlog = _backlog(Task(id=1, title="the work"))
-    with pytest.raises(BacklogError, match="raven playbook stint ask"):
+    with pytest.raises(BacklogError, match="rarus playbook stint ask"):
         backlog_mod.apply(
             backlog, "block", role=PLANNER, task_id=1, blocker="human:q_7_2_definition", known_questions=["Q01"]
         )

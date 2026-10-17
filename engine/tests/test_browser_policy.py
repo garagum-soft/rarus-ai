@@ -139,7 +139,7 @@ async def test_the_rpc_stack_teardown_closes_the_browser(monkeypatch: pytest.Mon
     """Chromium is a child process too, and a persistent-profile one.
 
     Leaving it running holds the profile lock the next launch needs, so the next
-    `raven serve` silently falls back to a throwaway profile and the reader's
+    `rarus serve` silently falls back to a throwaway profile and the reader's
     logins are gone.
     """
     import raven.browser as browser_module

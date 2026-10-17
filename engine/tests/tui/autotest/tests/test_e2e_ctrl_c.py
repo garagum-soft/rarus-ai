@@ -31,7 +31,7 @@ _PARTIAL = "partial input that will never send"
 
 @pytest.mark.e2e
 def test_ctrl_c_at_idle_prompt(harness):
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     assert harness.wait(READY_RE, timeout=60.0), f"TUI status bar never reported ready; screen=\n{harness.screen()}"
     harness.press("ctrl+c")
     assert harness.expect_exit(0, timeout=10.0), f"TUI did not exit 0 on idle Ctrl+C; final screen=\n{harness.screen()}"
@@ -40,7 +40,7 @@ def test_ctrl_c_at_idle_prompt(harness):
 @pytest.mark.e2e
 def test_ctrl_c_clears_the_composer_before_it_exits(harness):
     """First Ctrl+C clears a pending line and leaves the process up; second exits."""
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     assert harness.wait(READY_RE, timeout=60.0), f"TUI status bar never reported ready; screen=\n{harness.screen()}"
 
     harness.type(_PARTIAL)

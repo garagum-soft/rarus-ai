@@ -1,4 +1,4 @@
-"""``raven playbook stint`` subapp: lay a project out for a stint, and work its backlog.
+"""``rarus playbook stint`` subapp: lay a project out for a stint, and work its backlog.
 
 ``init`` writes ``.stint/`` -- a guard file per role, the shared prose, and a
 link to the project's own specification -- which is what a ``mode: stint``
@@ -6,7 +6,7 @@ playbook reads before its first round. The rest is the backlog the roles share:
 ``task`` moves one card through the state machine, ``ask`` files a question for
 a person, and ``confirm`` is the person's word that the stint is the stint.
 
-Nothing here starts a run. A run is a playbook (`raven playbook run <name>`),
+Nothing here starts a run. A run is a playbook (`rarus playbook run <name>`),
 and these verbs are what a person uses around it.
 """
 
@@ -243,7 +243,7 @@ def task_block(
     project: Path | None = _PROJECT,
     role: str | None = _ROLE,
 ):
-    """Something is holding this up. A question for a person is `raven playbook stint ask`."""
+    """Something is holding this up. A question for a person is `rarus playbook stint ask`."""
     from raven.stint import decisions as decisions_mod
 
     workspace, _, _ = _task_context(project, role)

@@ -1,6 +1,6 @@
 """The agents/ ppt launcher: rendering, refusals, the trunk exec, the pinned face.
 
-The exec target is installed raven's own ``raven acp``; the deck capability
+The exec target is installed raven's own ``rarus acp``; the deck capability
 reaches it as the ppt-engine wheel through the entry-point group, never by
 directory. The launch contract is still the fork launcher's ACP half: an own
 key reaches every provider block, PPT_MODEL/PPT_API_BASE apply on the own-key
@@ -1183,7 +1183,7 @@ def test_a_missing_engine_wheel_refuses_before_rendering(grounded, tmp_path, mon
 
 
 def test_the_exec_lane_is_installed_ravens_acp_with_no_chdir(grounded, tmp_path, monkeypatch):
-    """The served argv is this interpreter's ``python -m raven acp`` (the
+    """The served argv is this interpreter's ``python -m rarus acp`` (the
     roster row's {PYTHON} resolves at install to one that imports raven), the
     rendered file exists when the exec takes over, and nothing chdirs: the
     fork engine resolved assets from its checkout, the wheel resolves them

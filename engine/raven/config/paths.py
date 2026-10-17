@@ -64,7 +64,7 @@ def default_workspace() -> Path:
 
     The one derivation ``Config.workspace_path`` and ``get_workspace_path``
     both read -- two callers reach the workspace by different roads (the
-    gateway through the config, ``raven session list`` / ``raven onboard``
+    gateway through the config, ``raven session list`` / ``rarus onboard``
     through here), and a home that moved only one of them would write
     sessions where the other does not read them.
     """

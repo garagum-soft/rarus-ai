@@ -1,4 +1,4 @@
-"""Tests for `raven tui` Typer subcommand."""
+"""Tests for `rarus tui` Typer subcommand."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def test_tui_check_node_missing(monkeypatch):
     result = runner.invoke(app, ["tui", "--check"])
     assert result.exit_code == 1
     assert "Node" in result.output
-    assert "raven agent -m" in result.output
+    assert "rarus agent -m" in result.output
 
 
 def test_tui_check_node_too_old(monkeypatch):
@@ -374,7 +374,7 @@ def test_rpc_handshake_timeout_helper_real(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 #
 # These exercise the production-path helper `_spawn_with_rpc_socket` which
-# replaces `pass_fds=(3,4)` for the real `raven tui` invocation. The
+# replaces `pass_fds=(3,4)` for the real `rarus tui` invocation. The
 # `pass_fds` variant is kept for `--check` smoke compat + existing
 # Python-only tests above; do NOT remove those.
 
@@ -396,7 +396,7 @@ def test_production_dispatcher_includes_all_umbrella_methods():
     to the umbrella ``register_aligned_methods``, but ``tui_commands.py``
     hand-expanded the umbrella inline and forgot to add the new helper —
     so the demo runner had ``slash.exec`` / ``session.status`` /
-    ``complete.{slash,path}`` registered while ``raven tui`` returned
+    ``complete.{slash,path}`` registered while ``rarus tui`` returned
     -32601 for the exact same methods.
 
     This test asserts that every method the umbrella registers is also
@@ -439,7 +439,7 @@ def test_production_dispatcher_includes_all_umbrella_methods():
     # production. These are the ones the dogfood bug surfaced.
     for required in ("slash.exec", "session.status", "complete.slash", "complete.path"):
         assert required in production_methods, (
-            f"{required} missing from production dispatcher — `raven tui` will return -32601 for it"
+            f"{required} missing from production dispatcher — `rarus tui` will return -32601 for it"
         )
 
 

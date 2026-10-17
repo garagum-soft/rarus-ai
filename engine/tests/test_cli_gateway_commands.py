@@ -1,4 +1,4 @@
-"""CLI tests for ``raven gateway``.
+"""CLI tests for ``rarus gateway``.
 
 The ``gateway`` command spawns the full agent loop + channel manager + cron +
 heartbeat stack and runs forever. Smoke-level coverage only: ``--help`` works,
@@ -27,7 +27,7 @@ def tmp_config(tmp_path: Path) -> Path:
 
 
 def test_gateway_help_works() -> None:
-    """``raven gateway --help`` lists the documented options."""
+    """``rarus gateway --help`` lists the documented options."""
     r = runner.invoke(app, ["gateway", "--help"])
     assert r.exit_code == 0
     assert "Start the Raven gateway" in r.stdout
@@ -44,7 +44,7 @@ def test_gateway_help_describes_the_channel_workspace_root():
     <agent home>/ws)", which is why that wording outlived the design it
     described -- it was load-bearing for a test rather than for a reader. The
     gateway isolates per channel now and `<agent home>/ws` was removed, so
-    `raven gateway --help` must not send anyone looking for it.
+    `rarus gateway --help` must not send anyone looking for it.
 
     Pinned at 80 columns because Typer truncates help it cannot fit, and a
     half-printed path is worse than none -- the first replacement wording was
@@ -258,8 +258,8 @@ def test_the_swap_and_the_upgrade_refuse_on_one_busy_answer() -> None:
 
 
 def test_run_warms_the_deck_template_covers_once_the_page_is_mounted() -> None:
-    """`raven web` is `raven gateway --page-port` underneath, so the gallery's
-    covers are drawn from here, after the page mount, not from `raven serve`
+    """`rarus web` is `rarus gateway --page-port` underneath, so the gallery's
+    covers are drawn from here, after the page mount, not from `rarus serve`
     alone; pinned by source for the same reason as above."""
     import inspect
 
@@ -308,7 +308,7 @@ def test_gateway_refuses_second_instance(tmp_config: Path, monkeypatch) -> None:
 
 
 class TestTheGatewayWillNotServeAHalfWrittenInstall:
-    """`raven web` supervises the gateway, and the supervisor restarts it the
+    """`rarus web` supervises the gateway, and the supervisor restarts it the
     moment it exits -- including during an upgrade, when uv has removed the old
     environment and not yet written the new one. `build_app` picks the page
     route once, so a gateway that came up in that window answers `/` with the
@@ -353,7 +353,7 @@ class TestTheGatewayWillNotServeAHalfWrittenInstall:
 
     def test_the_refusal_names_the_gateway_not_serve(self, monkeypatch) -> None:
         """Both surfaces reach the same guard, and a reader told to restart
-        `raven serve` when the gateway refused would restart the wrong one."""
+        `rarus serve` when the gateway refused would restart the wrong one."""
         from raven.updates import install_guard as _install_guard
 
         monkeypatch.setattr(
@@ -365,8 +365,8 @@ class TestTheGatewayWillNotServeAHalfWrittenInstall:
         r = runner.invoke(app, ["gateway"])
 
         # The module runner mixes the streams, so the refusal is read off output.
-        assert "raven gateway:" in r.output
-        assert "raven serve:" not in r.output
+        assert "rarus gateway:" in r.output
+        assert "rarus serve:" not in r.output
 
     def test_a_sound_install_is_not_stopped_here(self, monkeypatch) -> None:
         """The guard must be invisible on every normal start."""
@@ -481,7 +481,7 @@ def test_gateway_channels_derived_from_config_model_fields() -> None:
 
 def test_gateway_channels_exclude_tui_even_when_the_page_is_enabled() -> None:
     """Wanting the page is not hosting it. ``mount_page`` yields to a resident
-    standalone `raven serve`, so ``page.enabled`` alone says nothing about
+    standalone `rarus serve`, so ``page.enabled`` alone says nothing about
     whether this process has a tui outlet -- the partition must be decided by
     the mount's outcome, and this helper only ever answers for the IM side."""
     from types import SimpleNamespace
@@ -1284,7 +1284,7 @@ async def test_question_for_a_dead_conversation_is_reported_not_swallowed() -> N
 class TestWhereThePageIsServed:
     """``page_target``: whether this gateway serves the browser page, and where.
 
-    `raven web` supervises a gateway now rather than a standalone `raven serve`,
+    `rarus web` supervises a gateway now rather than a standalone `rarus serve`,
     because only the gateway runs the channel adapters the entrances page acts
     on. Its ``--page-port`` therefore has to be able to overrule config: the
     supervisor started this process for the page, and its tab is on that port.
@@ -1321,7 +1321,7 @@ class TestWhereThePageIsServed:
 
 
 # ---------------------------------------------------------------------------
-# raven gateway reload | status | stop -- the control plane's CLI clients
+# rarus gateway reload | status | stop -- the control plane's CLI clients
 # ---------------------------------------------------------------------------
 
 
@@ -1397,7 +1397,7 @@ def test_gateway_stop_defers_to_raven_web_when_supervised(monkeypatch) -> None:
     r = runner.invoke(app, ["gateway", "stop"])
     assert r.exit_code == 1
     # Rich wraps at the runner's width; compare whitespace-normalized.
-    assert "raven web --stop" in " ".join(r.stdout.split())
+    assert "rarus web --stop" in " ".join(r.stdout.split())
     assert called == []
 
 
@@ -1603,7 +1603,7 @@ async def test_the_control_plane_falls_back_to_an_os_assigned_port(monkeypatch) 
     must still come up. Windows reserves whole hundred-port blocks (winnat), a
     host whose dynamic range starts low gets them over 8765..8784, and a bind
     inside one fails while netstat shows the port unused. The raise reached no
-    handler, so `raven web` died on a port nobody had asked for."""
+    handler, so `rarus web` died on a port nobody had asked for."""
     from raven.cli.gateway_commands import _control_plane_port
     from raven.rpc.transports import ws
 

@@ -128,7 +128,7 @@ def adopt_legacy_endpoint(raw: dict) -> bool:
     """Rewrite the memory backend's endpoint as an ``embedding`` pin, in ``raw``.
 
     Mutates the caller's already-loaded config dict rather than writing a file:
-    ``raven doctor --fix`` applies several corrections in one atomic write, and
+    ``rarus doctor --fix`` applies several corrections in one atomic write, and
     a second writer here would race it.
 
     The retired block held an address and a key; the pin names a provider and
@@ -243,7 +243,7 @@ def load_embedding_config() -> EmbeddingConfig | None:
 
     Nothing is inherited from the memory backend any more. An install whose
     endpoint only ever lived in ``everos.toml`` is migrated once, by
-    ``raven doctor --fix``; reading that file on every call is what made a
+    ``rarus doctor --fix``; reading that file on every call is what made a
     knowledge base stop working when the memory plugin was not installed.
     """
     try:

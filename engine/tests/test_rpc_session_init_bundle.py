@@ -412,12 +412,12 @@ async def test_default_session_info_carries_the_upgrade_nudge(fake_agent_loop, c
     exact defect the nudge feature fixed -- and nothing else in the suite fails
     if this wiring is removed.
     """
-    monkeypatch.setattr(session_module, "update_notice", lambda _v: (True, "raven upgrade"))
+    monkeypatch.setattr(session_module, "update_notice", lambda _v: (True, "rarus upgrade"))
 
     info = await _default_session_info(fake_agent_loop, config)
 
     assert info["update_available"] is True
-    assert info["update_command"] == "raven upgrade"
+    assert info["update_command"] == "rarus upgrade"
 
 
 async def test_default_session_info_omits_the_nudge_when_up_to_date(fake_agent_loop, config, monkeypatch) -> None:

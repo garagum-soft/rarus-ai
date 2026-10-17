@@ -690,7 +690,7 @@ def cancel_pending(server: str, *, reason: str = "superseded by a newer authoriz
 
     ``reason`` is what the parked waiter is told, and the two callers owe
     different answers. A short-lived host that never opened a browser -- a
-    playbook pre-flight, one `raven agent -m` turn -- ends by detaching the
+    playbook pre-flight, one `rarus agent -m` turn -- ends by detaching the
     server, and reporting that as a newer attempt sends the reader looking for
     a second flow that never existed.
     """

@@ -379,7 +379,7 @@ def test_a2a_init_mints_a_token_and_leaves_the_face_off(cfg_path: Path) -> None:
     """Onboarding provisions the credential; it does not open the door.
 
     The inbound face is a second network surface, so it is opened by an
-    explicit ``raven a2a enable`` rather than as a side effect of finishing an
+    explicit ``rarus a2a enable`` rather than as a side effect of finishing an
     unrelated install.
     """
     token = initialize_a2a_server(config_path=cfg_path)
@@ -397,7 +397,7 @@ def test_a2a_init_writes_no_enabled_flag_at_all(cfg_path: Path) -> None:
 
     Writing ``enabled: false`` here would spell the schema's own default a
     second time, and it would close a face the operator had opened by hand the
-    next time an unrelated ``raven onboard`` ran.
+    next time an unrelated ``rarus onboard`` ran.
     """
     initialize_a2a_server(config_path=cfg_path)
     assert "enabled" not in _read(cfg_path)["a2a"]["server"]
@@ -416,7 +416,7 @@ def test_a2a_init_leaves_a_face_the_operator_switched_off(cfg_path: Path) -> Non
 
     Keying on ``enabled`` instead would re-assert it on every onboard, and an
     operator who deliberately closed the face would find it reopened by an
-    unrelated ``raven onboard``.
+    unrelated ``rarus onboard``.
     """
     initialize_a2a_server(config_path=cfg_path)
     data = _read(cfg_path)

@@ -1,7 +1,7 @@
 """Engine assembly for the local surfaces: one runtime for a TUI, page or ACP host.
 
 The gateway assembles per generation with its transports around it; the local
-surfaces (the TUI launcher, ``raven serve``, the ACP server) all want the same
+surfaces (the TUI launcher, ``rarus serve``, the ACP server) all want the same
 smaller thing -- config, a lazy provider behind model routing, a session
 manager grouped by the launch directory, a workdir resolver, a cron service
 scoped to the local channel, and the loop. It is assembly, so it lives here;

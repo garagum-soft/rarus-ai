@@ -8,7 +8,7 @@ across every conversation, ordered by how much they need the operator now.
 
 Kept on the server, in one JSON file under the raven home, so it outlives a
 page reload and a restart. Written under the file's lock: the gateway and a
-``raven tui`` process both raise items.
+``rarus tui`` process both raise items.
 
 Rules, borrowed from Gas City's attention registry and taken further:
 

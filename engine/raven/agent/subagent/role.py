@@ -3,7 +3,7 @@
 ``RavenLoopBackend`` narrows an in-process sub-agent by construction: it registers
 into an empty ``ToolRegistry`` and never adds the orchestration tools, so a
 sub-agent cannot delegate the task it was handed. A ``kind: acp`` agent whose
-command is ``raven acp`` gets none of that narrowing -- the child is a separate
+command is ``rarus acp`` gets none of that narrowing -- the child is a separate
 raven process that builds its own full registry from its own config and has no way
 to tell a DAG node from a user. Measured on a graph whose first node ran the
 built-in ``Raven`` agent over acp: the child answered by handing the node's whole

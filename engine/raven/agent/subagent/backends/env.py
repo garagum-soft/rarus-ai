@@ -307,7 +307,7 @@ def _capture(*, consequence: str) -> dict[str, str] | None:
             # /dev/tty for that even with all three stdio streams redirected away
             # from the terminal. It then tcsetpgrp's the terminal to its own
             # process group and exits without restoring it, leaving raven in a
-            # background group: the next keystroke in `raven tui` raises SIGTTIN
+            # background group: the next keystroke in `rarus tui` raises SIGTTIN
             # and stops the whole job. A new session gives it no controlling
             # terminal to take.
             start_new_session=True,
@@ -342,7 +342,7 @@ def _capture(*, consequence: str) -> dict[str, str] | None:
 def host_identity_env() -> dict[str, str]:
     """Return the custom raven home that identifies the spawning host.
 
-    Read at spawn time because tests and ``raven serve`` may point one process
+    Read at spawn time because tests and ``rarus serve`` may point one process
     at different homes between child launches.
     """
     from raven.contracts.path_policy import HOME_ENV_VAR

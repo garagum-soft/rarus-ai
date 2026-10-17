@@ -47,14 +47,14 @@ class TestUnknownSubcommand:
 @pytest.mark.e2e
 class TestSmokeSubcommand:
     def test_smoke_succeeds_on_tui_check(self):
-        # `raven tui --check` exits 0 cleanly; smoke should report ok
+        # `rarus tui --check` exits 0 cleanly; smoke should report ok
         result = _run(
             "smoke",
             "--wait-readiness",
             r"(?!).*",  # impossible pattern — but tui --check exits before any wait kicks in
             "--wait-timeout",
             "5",
-            "uv run raven tui --check",
+            "uv run rarus tui --check",
         )
         # Either smoke detects clean exit (rc=0) or readiness times out
         # but subprocess still exits 0 (acceptable as rc=0:

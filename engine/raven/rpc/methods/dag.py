@@ -162,7 +162,7 @@ async def _node_off_disk(
     file layout is not restated here.
 
     The factory is threaded through rather than resolved fresh: the running
-    manager carries the project grouping (``raven serve`` builds it with a
+    manager carries the project grouping (``rarus serve`` builds it with a
     ``project_slug`` from the launch directory), and a manager built here
     without it resolves ``sessions/<channel>/`` instead of ``sessions/<slug>/``.
     That is a directory the run was never written to, so every node the lister

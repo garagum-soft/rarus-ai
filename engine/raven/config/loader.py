@@ -743,7 +743,7 @@ def _migrate_vendored_tree_rows(data: dict[str, Any], *, notify: bool = False) -
                     f"Migrated: subagents.{alias}[{name}] still points at the retired vendored "
                     "subagents tree and cannot be re-aimed onto the current product; it keeps "
                     "running only while the old copy remains on disk -- re-run onboarding "
-                    "(raven onboard) to register the current product, then remove this row"
+                    "(rarus onboard) to register the current product, then remove this row"
                 )
                 continue
             for container, key, value in _walk_strings(row):

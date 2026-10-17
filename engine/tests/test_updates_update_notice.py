@@ -20,6 +20,7 @@ def cache(tmp_path, monkeypatch):
     """
     path = tmp_path / "update_check.json"
     monkeypatch.delenv(un._OPT_OUT_ENV, raising=False)
+    monkeypatch.setenv(un._SOURCE_ENV, "https://updates.example.test/manifest.json")
     monkeypatch.setattr(un, "_cache_path", lambda: path)
     monkeypatch.setattr(un, "_upgrade_command_works", lambda: True)
     return path
@@ -36,7 +37,7 @@ def test_no_cache_yields_no_notice(cache):
 
 def test_newer_cached_release_yields_notice(cache):
     _write(cache, "0.2.0")
-    assert un.update_notice("0.1.9") == (True, "raven upgrade")
+    assert un.update_notice("0.1.9") == (True, "rarus upgrade")
 
 
 def test_same_version_yields_no_notice(cache):
@@ -59,7 +60,7 @@ def test_unparseable_versions_are_ignored(cache):
 
 def test_v_prefix_is_tolerated(cache):
     _write(cache, "v0.2.0")
-    assert un.update_notice("v0.1.9") == (True, "raven upgrade")
+    assert un.update_notice("v0.1.9") == (True, "rarus upgrade")
 
 
 @pytest.mark.parametrize("installed", ["0.1.9rc1", "0.1.9.dev1", "0.1.9+local"])
@@ -67,7 +68,7 @@ def test_prerelease_installs_still_get_the_notice(cache, installed):
     # The strict grammar matches the whole string, so without normalising the
     # suffix these users would silently never see the hint.
     _write(cache, "0.2.0")
-    assert un.update_notice(installed) == (True, "raven upgrade")
+    assert un.update_notice(installed) == (True, "rarus upgrade")
 
 
 def test_prerelease_of_the_latest_release_is_not_nagged(cache):
@@ -77,7 +78,7 @@ def test_prerelease_of_the_latest_release_is_not_nagged(cache):
 
 
 def test_refresh_skipped_when_upgrade_command_would_fail(cache, monkeypatch):
-    # An install that cannot run `raven upgrade` never sees the result, so it
+    # An install that cannot run `rarus upgrade` never sees the result, so it
     # should not pay for the fetch either.
     monkeypatch.setattr(un, "_upgrade_command_works", lambda: False)
     spawned = []
@@ -94,7 +95,7 @@ def test_corrupt_cache_is_ignored(cache):
 @pytest.mark.parametrize("payload", ['"0.2.0"', "[1]", "42", "null"])
 def test_non_object_cache_is_ignored(cache, monkeypatch, payload):
     # Valid JSON that is not an object used to raise AttributeError out of
-    # update_notice(), which took `raven tui` and session.create down with it.
+    # update_notice(), which took `rarus tui` and session.create down with it.
     #
     # A non-object reads back as "no cache", so the refresh call below would
     # spawn a real thread whose write lands after monkeypatch has restored
@@ -325,3 +326,19 @@ def test_check_now_treats_a_free_silence_as_reached(cache, monkeypatch):
     monkeypatch.setenv(un._OPT_OUT_ENV, "1")
 
     assert un.check_now("0.1.0") == (None, True)
+
+
+def test_without_a_named_source_nothing_is_fetched(cache, monkeypatch):
+    """Rarus has no default update source: the program never asks a third party."""
+    monkeypatch.delenv(un._SOURCE_ENV)
+    fetched = {"n": 0}
+
+    def _fetch():
+        fetched["n"] += 1
+        return "9.9.9"
+
+    monkeypatch.setitem(sys.modules, "raven.updates.upgrade", _FakeUpgrade(_fetch))
+
+    assert un.check_for_update("0.1.0") is None
+    un.maybe_refresh_async()
+    assert fetched["n"] == 0

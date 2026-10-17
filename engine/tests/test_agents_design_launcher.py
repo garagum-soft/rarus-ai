@@ -573,7 +573,7 @@ def test_a_missing_engine_wheel_refuses_before_rendering(grounded, tmp_path, mon
 
 
 def test_the_exec_lane_is_installed_ravens_acp_with_no_chdir(grounded, tmp_path, monkeypatch):
-    """The served argv is this interpreter's ``python -m raven acp``, the
+    """The served argv is this interpreter's ``python -m rarus acp``, the
     rendered file exists when the exec takes over, and nothing chdirs: the
     fork engine resolved its corpus from its checkout, the wheel resolves it
     from its own package -- execv replaces the image, so the pid sweep is

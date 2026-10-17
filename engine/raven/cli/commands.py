@@ -47,8 +47,8 @@ from rich.console import Console
 from raven import __logo__, __version__
 
 app = typer.Typer(
-    name="raven",
-    help=f"{__logo__} Raven - Agent Framework",
+    name="rarus",
+    help=f"{__logo__} Rarus AI",
     no_args_is_help=False,
     invoke_without_command=True,
 )
@@ -57,7 +57,7 @@ console = Console()
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} Raven v{__version__}")
+        console.print(f"{__logo__} Rarus AI v{__version__}")
         raise typer.Exit()
 
 
@@ -102,14 +102,14 @@ def main(
 ):
     """Raven - Agent Framework.
 
-    Bare ``raven`` (no subcommand) opens the page, the same as ``raven web``:
+    Bare ``raven`` (no subcommand) opens the page, the same as ``rarus web``:
     that is where the installer ends, so the command a reader types the next day
     should not land them somewhere else.
 
     Where no browser can be opened the page would be a URL nobody can reach, so
     the bare command runs the native TUI instead -- through the ``tui`` callback,
     so the startup gate (onboard when provider+model are missing, else launch the
-    session) is identical either way. ``raven web`` and ``raven tui`` still name
+    session) is identical either way. ``rarus web`` and ``rarus tui`` still name
     a surface outright and are unaffected.
     """
     i18n.set_language(_saved_language())
@@ -131,14 +131,14 @@ def main(
 
         _web(DEFAULT_PORT, dev=dev)
         return
-    console.print("No browser to open the page with; starting the terminal UI. `raven web` prints the URL instead.")
+    console.print("No browser to open the page with; starting the terminal UI. `rarus web` prints the URL instead.")
     if dev:
         # The TUI's own --dev means "run from the TypeScript source", so the
         # flag is dropped here rather than forwarded under a different meaning.
         console.print("the terminal UI has no trajectory view; --dev is ignored here")
     from raven.cli.tui_commands import tui as _tui_entry
 
-    # Delegate to the exact `raven tui` callback so the onboarding gate and
+    # Delegate to the exact `rarus tui` callback so the onboarding gate and
     # launch behavior are identical for both entry points. Every option of
     # `tui` must be passed an explicit plain default: its typer.Option
     # defaults are OptionInfo sentinels that only typer resolves, and an
@@ -282,7 +282,7 @@ def run() -> None:
         # Arguments arrive as typed. On Windows Click otherwise expands any `*`, `?`
         # or `[..]` argument into the files it matches before a command sees it --
         # quotes do not stop it, Windows strips them first -- so a path pattern
-        # (`raven areas assign -p "src/**"`) became a list of files, and a message
+        # (`rarus areas assign -p "src/**"`) became a list of files, and a message
         # that happened to match a file name was replaced by it. No raven command
         # takes a list of files to expand into; on POSIX the shell decides, as before.
         app(windows_expand_args=False)

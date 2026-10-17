@@ -31,7 +31,7 @@ whose surface matches, including duck-typed mocks. That's the trade we
 want: contract tests don't have to inherit from a base class.
 
 Failure contract. A session host -- the agent loop, the TUI, the gateway,
-``raven serve`` -- wraps every call into a backend and treats a raise as the
+``rarus serve`` -- wraps every call into a backend and treats a raise as the
 loss of that one call: ``recall`` counts as no hits, ``store`` as not landed,
 ``start`` as no long-term memory for this session, ``feedback`` and ``stop``
 as logged and ignored. The import CLI (``raven import``) is the deliberate
@@ -119,7 +119,7 @@ class BackendHealth:
     """A backend's own account of itself, for the two hosts that ask.
 
     ``ready`` answers the importer's question; ``checks`` answers
-    ``raven doctor``'s. They are separate because a backend can be
+    ``rarus doctor``'s. They are separate because a backend can be
     diagnosable and not usable: a server that starts on demand has nothing
     wrong with it and still cannot take a write this second.
     """
@@ -130,7 +130,7 @@ class BackendHealth:
     consuming the source list."""
 
     checks: list[HealthCheck]
-    """What ``raven doctor`` prints, one line each, in this order. Empty is
+    """What ``rarus doctor`` prints, one line each, in this order. Empty is
     valid: a backend with nothing to report and nothing wrong."""
 
 
@@ -155,7 +155,7 @@ class MemoryBackend(Protocol):
        when ``injected_skill_ids`` contains source-qualified entries
        belonging to this backend.
     4. :meth:`start` / :meth:`stop` — lifecycle, awaited by the host.
-    5. :meth:`health` — asked by ``raven doctor`` and ``raven import``,
+    5. :meth:`health` — asked by ``rarus doctor`` and ``raven import``,
        off the turn path, before or after ``start``.
     6. :meth:`delete` — asked by the memory browser when a person removes
        one memory; never on the turn path.
@@ -303,7 +303,7 @@ class MemoryBackend(Protocol):
         warm caches, run migrations).
 
         The host calls this once at boot, but may not await it before the
-        first turn: the TUI and ``raven serve`` spawn it as a task, so
+        first turn: the TUI and ``rarus serve`` spawn it as a task, so
         ``recall`` and ``store`` must tolerate being called while ``start``
         is still running -- no hits and not landed are the expected answers
         then. A raise leaves the session without this backend; it does not
@@ -321,7 +321,7 @@ class MemoryBackend(Protocol):
         """Whether the backend can work now, and what a person should look at
         when it cannot.
 
-        Callable before or after ``start``: ``raven doctor`` asks an instance
+        Callable before or after ``start``: ``rarus doctor`` asks an instance
         it never started, ``raven import`` asks after starting one. ``ready``
         is the import gate (a write now would land);
         ``checks`` is what doctor prints, verbatim, one line each. Only a real

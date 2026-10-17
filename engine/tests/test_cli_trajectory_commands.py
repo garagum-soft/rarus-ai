@@ -1,4 +1,4 @@
-"""Tests for the ``raven trajectory`` CLI subapp."""
+"""Tests for the ``rarus trajectory`` CLI subapp."""
 
 from __future__ import annotations
 
@@ -964,7 +964,7 @@ def _replay_bundle(root, *, recorded_input=None):
 def test_replay_unknown_target_exits_1(state) -> None:
     r = runner.invoke(trajectory_app, ["replay", "no-such-id"])
     assert r.exit_code == 1
-    assert "raven trajectory save" in r.stdout
+    assert "rarus trajectory save" in r.stdout
 
 
 def test_replay_bundle_path_runs_to_completion(state, tmp_path) -> None:

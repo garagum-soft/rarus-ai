@@ -314,7 +314,7 @@ class SessionManager:
         Args:
             workspace: Agent home; sessions live under ``<workspace>/sessions``.
             project_slug: Groups this process's sessions under one directory
-                (``raven tui`` / ``raven agent`` pass the slugged launch
+                (``rarus tui`` / ``rarus agent`` pass the slugged launch
                 directory, so a project's conversations stay together). Leave
                 unset on the gateway, where the grouping directory is the
                 channel name instead -- one daemon serves every project, so a
@@ -1005,7 +1005,7 @@ class SessionManager:
         # carried on each entry but deliberately not sorted on here: three
         # callers take ``[0]`` off this list to decide *where a message gets
         # delivered* -- the gateway's heartbeat target, the sentinel's nudge
-        # target, and `raven sessions list`, whose table renders ``updated_at``
+        # target, and `rarus sessions list`, whose table renders ``updated_at``
         # in its own Updated column. Re-ordering for a picker's benefit would
         # silently re-route those. A surface that wants latest conversational
         # activity sorts on the field itself; ``session.list`` does.

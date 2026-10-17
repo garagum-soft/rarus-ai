@@ -372,7 +372,7 @@ def test_the_packaged_library_ships_only_what_cannot_be_generated(tmp_path):
     """The builtin layer is a mechanism, and it carries exactly one file.
 
     A ``dag`` or ``prompt`` playbook is user-layer product: written on the
-    machine that runs it, by ``raven playbook create`` or the
+    machine that runs it, by ``rarus playbook create`` or the
     ``create_playbook`` tool. Packaging those puts demo content into every
     install and into the public release, so none are shipped.
 

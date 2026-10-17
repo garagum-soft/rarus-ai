@@ -40,7 +40,7 @@ class ProviderSpec:
     # LiteLLM env var, e.g. "DASHSCOPE_API_KEY". Also shown in the model picker
     # as the variable to export. Empty for OAuth and direct providers.
     env_key: str = ""
-    display_name: str = ""  # shown in `raven status`
+    display_name: str = ""  # shown in `rarus status`
     homepage: str = ""
     # Where the vendor hands out API keys. Empty for OAuth and local providers
     # and for vendors the registry carries no console link for.
@@ -1294,7 +1294,7 @@ def normalize_provider_name(name: str | None) -> str:
     return (name or "").strip().lower().replace("-", "_")
 
 
-SHAPE_OAUTH = "oauth"  # a token file, written by `raven provider login`
+SHAPE_OAUTH = "oauth"  # a token file, written by `rarus provider login`
 SHAPE_LOCAL = "local"  # reached by address; there is no key
 SHAPE_ENDPOINT = "endpoint"  # a key plus a base URL the user supplies
 SHAPE_KEY = "key"  # a key alone, including vendors Raven carry no spec for

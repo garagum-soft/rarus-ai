@@ -17,7 +17,7 @@ Its *role* is where it came from -- who put it on this machine:
   Opening a checkout is not consent to run the code inside it.
 
 ``plugins.roles`` replaces a role's default set. What a role does not cover, a
-*grant* can: ``raven plugin grant <id>`` records the operator's consent for
+*grant* can: ``rarus plugin grant <id>`` records the operator's consent for
 exactly the permissions the plugin needs, at exactly the version they read
 (after Multica's install consent: scopes must match the manifest, and an
 upgrade is a second consent). A plugin whose role and grant do not cover what
@@ -280,7 +280,7 @@ class AccessDecision:
         return (
             f"plugin {self.plugin_id!r} needs {', '.join(sorted(self.missing))}, which its role "
             f"{self.role!r} does not give and no grant covers{note}; "
-            f"`raven plugin grant {self.plugin_id}` consents to it"
+            f"`rarus plugin grant {self.plugin_id}` consents to it"
         )
 
 

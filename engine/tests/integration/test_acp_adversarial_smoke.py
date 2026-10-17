@@ -1,4 +1,4 @@
-"""``raven acp`` under a client that is legal and unhelpful.
+"""``rarus acp`` under a client that is legal and unhelpful.
 
 Every case here is something a real client does -- string request ids, a version
 of the wrong type, two requests in flight, a frame split across writes -- and

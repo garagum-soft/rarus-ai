@@ -1,4 +1,4 @@
-"""``raven table``: table apps and the sources they sync from."""
+"""``rarus table``: table apps and the sources they sync from."""
 
 from __future__ import annotations
 

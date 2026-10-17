@@ -1,6 +1,6 @@
 """``create_playbook`` — capture a procedure from the conversation as a playbook.
 
-The conversational half of the creation story (the other is ``raven playbook
+The conversational half of the creation story (the other is ``rarus playbook
 create``): when the user asks to save a workflow they just described or ran,
 the agent hands the description to the same generator the CLI uses, and the
 product lands in the same place under the same rules — the user layer of the
@@ -147,7 +147,7 @@ class CreatePlaybookTool(Tool):
         # user to review, which read as caution and behaved as a dead end: the
         # only way back off that list was a CLI command, and the runtime had read
         # the list once at start, so even running it did nothing until the next
-        # process. Disabling is still a real need and `raven playbook disable`
+        # process. Disabling is still a real need and `rarus playbook disable`
         # still serves it -- it is just not the state a fresh playbook starts in.
         adopted = self._adopt(name) if self._adopt is not None else True
         notes = "".join(f"\n- {n}" for n in generated.notes)
@@ -161,7 +161,7 @@ class CreatePlaybookTool(Tool):
             )
         return (
             f"Created playbook {name!r} at {path}, and it is available now -- `load_playbook` "
-            f"can run it in this conversation, or `raven playbook run {name}` from a shell. "
+            f"can run it in this conversation, or `rarus playbook run {name}` from a shell. "
             f"Tell the user where it landed and what it does; do not run it unless they "
             f"ask.{review}"
         )

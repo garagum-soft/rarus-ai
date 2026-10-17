@@ -4,7 +4,7 @@ A reminder that fires for a local (``tui``) job runs as a CRON turn whose
 conversation has no subscriber, so its reply reaches the client only through
 the ``cron.delivered`` fan-out here; a past-due one-shot dropped at start-up
 is reported through ``cron.missed``. Shared by the TUI launcher, the headless
-rpc stack (``raven serve``, ACP) and the gateway's page mount.
+rpc stack (``rarus serve``, ACP) and the gateway's page mount.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def build_cron_callback_spine(
     ``default_channel``, the same resolution ``make_on_cron_job`` applies) being
     ``tui``: a job addressed to an IM channel is delivered there by the hub, and
     echoing its reply to every page session would deliver it twice. In `raven
-    tui` / `raven serve` every job resolves to tui and the gate never bites; the
+    tui` / `rarus serve` every job resolves to tui and the gate never bites; the
     gateway passes its own default so only its tui-addressed jobs fan out.
 
     A job naming a sub-agent instance is skipped for the same "already delivered"

@@ -1,8 +1,8 @@
-"""The real raven-research ACP chain: launcher -> exec `raven acp` -> frames.
+"""The real raven-research ACP chain: launcher -> exec `rarus acp` -> frames.
 
 The unit tests prove the discovery row and the config rendering separately;
 this proves the chain a real dispatch walks -- the discovered command spawning
-`run.py`, the exec into the installed raven's own `raven acp`, and a
+`run.py`, the exec into the installed raven's own `rarus acp`, and a
 handshake whose answers are the ones the host's capability verify stands on
 (`loadSession`, `sessionCapabilities.resume`). No LLM is dialled: `initialize`
 and `session/new` never prompt.

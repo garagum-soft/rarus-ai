@@ -2194,7 +2194,7 @@ def test_a_backend_gets_its_own_home_under_the_data_dir() -> None:
 def test_instance_identity_survives_into_the_child(monkeypatch):
     """RARUS_HOME / RAVEN_CONNECTIONS name which install a `raven ...` child
     resolves its config and registry against -- paths, not secrets. Measured
-    2026-08-31 on a cold start: with them stripped, a `raven ops connection add`
+    2026-08-31 on a cold start: with them stripped, a `rarus ops connection add`
     run from a tool call wrote the row into the default home, and the machine
     the owner had just registered stayed invisible to this instance."""
     from raven.sandbox.direct_executor import baseline_env

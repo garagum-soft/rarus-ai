@@ -6,9 +6,9 @@ independently and disagreed:
 * ``config.schema.section_has_credentials`` gates routing -- a section it rejects is
   skipped when matching a model id to a provider.
 * ``config.update_providers.list_providers`` gates display -- it is what
-  ``raven provider list`` and the pickers show.
+  ``rarus provider list`` and the pickers show.
 * ``providers.factory.check_provider_credentials`` gates startup -- it decides
-  whether ``raven agent`` runs at all.
+  whether ``rarus agent`` runs at all.
 
 A provider the second accepted and the first rejected was configured according
 to the CLI and invisible to the router -- Gemini holding only ``api_key_list``
@@ -138,7 +138,7 @@ def _routing_says(case: dict[str, Any], path: Path) -> bool:
 
 
 def _display_says(case: dict[str, Any], path: Path) -> bool:
-    """Would `raven provider list` show this provider as configured?"""
+    """Would `rarus provider list` show this provider as configured?"""
     from raven.config.update_providers import list_providers
 
     rows = list_providers(config_path=path)
@@ -147,7 +147,7 @@ def _display_says(case: dict[str, Any], path: Path) -> bool:
 
 
 def _startup_says(case: dict[str, Any], path: Path) -> bool:
-    """Would `raven agent` start?"""
+    """Would `rarus agent` start?"""
     from raven.providers.auth import MissingCredentialsError
     from raven.providers.factory import check_provider_credentials
 
@@ -160,7 +160,7 @@ def _startup_says(case: dict[str, Any], path: Path) -> bool:
 
 
 def _status_says(case: dict[str, Any], path: Path) -> bool:
-    """Would `raven status` print this provider as set up?
+    """Would `rarus status` print this provider as set up?
 
     Driven through the command rather than the helper it calls: this gate is a
     line of formatting logic, and testing the helper would have missed it for

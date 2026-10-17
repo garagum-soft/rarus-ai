@@ -334,7 +334,7 @@ def configure_subagents(*, non_interactive: bool = False, warnings: Optional[lis
         return 0
 
     if non_interactive:
-        warnings.append("sub-agents: skipped (non-interactive; run `raven onboard` to set up their keys)")
+        warnings.append("sub-agents: skipped (non-interactive; run `rarus onboard` to set up their keys)")
         return 0
 
     # Offering an option the launcher cannot honour is the failure this step

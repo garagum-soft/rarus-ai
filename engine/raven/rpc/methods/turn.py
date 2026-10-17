@@ -52,7 +52,7 @@ def _resolve_media(paths: list[str] | None) -> tuple[Media, ...]:
     Resolved with the filesystem tools' own policy rather than against the
     process cwd. A caller sends what it holds, and what it holds is a workspace
     path (``uploads/shot.png``) -- the same spelling every file tool takes, and
-    one that resolves to nothing from wherever ``raven serve`` happens to have
+    one that resolves to nothing from wherever ``rarus serve`` happens to have
     been started. The downstream check is a bare ``is_file()`` that drops a miss
     in silence, so a cwd-relative resolve loses the attachment with no error
     anywhere.

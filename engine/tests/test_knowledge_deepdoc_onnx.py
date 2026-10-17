@@ -44,7 +44,7 @@ class TestModelPath:
     def test_requiring_an_absent_model_names_the_command_that_fixes_it(self, weights: Path) -> None:
         """The alternative is onnxruntime's own message, which names a path and
         not the install step that was skipped."""
-        with pytest.raises(_onnx.ModelsMissingError, match="raven resources"):
+        with pytest.raises(_onnx.ModelsMissingError, match="rarus resources"):
             _onnx.model_path("layout", required=True)
 
     def test_requiring_a_model_that_is_there_answers_its_path(self, weights: Path) -> None:

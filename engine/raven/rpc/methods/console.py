@@ -1402,7 +1402,7 @@ def everos_follows_provider(slug: str, agent_loop_factory: Any) -> None:
     reads as healthy right up until memory fails in EverOS's own log.
 
     ``roles_changed_since_spawn`` catches this at the next session whatever
-    wrote the credential, ``raven provider set`` and a hand-edited config.json
+    wrote the credential, ``rarus provider set`` and a hand-edited config.json
     included. This is the half that makes it the moment the person made the
     change instead.
 

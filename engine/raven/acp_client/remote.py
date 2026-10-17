@@ -93,15 +93,15 @@ def machine(conn_id: str) -> Machine:
     found = connections.read()
     if found.state == connections.UNREADABLE:
         raise RemoteMachineError(
-            f"machine {wanted!r}: the machine registry cannot be read; run `raven ops connection doctor`"
+            f"machine {wanted!r}: the machine registry cannot be read; run `rarus ops connection doctor`"
         )
     rows = [r for r in found.rows if str(r.get("id") or "").strip() == wanted]
     if not rows:
-        raise RemoteMachineError(f"machine {wanted!r} is not registered; add it with `raven ops connection add`")
+        raise RemoteMachineError(f"machine {wanted!r} is not registered; add it with `rarus ops connection add`")
     row = rows[0]
     if len(rows) > 1 or not connections.usable([row]):
         raise RemoteMachineError(
-            f"machine {wanted!r} is registered, but its entry cannot be used; run `raven ops connection doctor`"
+            f"machine {wanted!r} is registered, but its entry cannot be used; run `rarus ops connection doctor`"
         )
     if connections.transport_of(row) == connections.LOCAL:
         raise RemoteMachineError(

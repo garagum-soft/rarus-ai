@@ -154,7 +154,7 @@ class TestConcurrency:
     async def test_a_finite_input_still_gets_its_answers(self, stub):
         """EOF arrives before the handlers have run at all when the input is a
         fixed payload. Cancelling on EOF would answer a batch of three requests
-        with nothing -- which is what ``echo '...' | raven acp`` and every smoke
+        with nothing -- which is what ``echo '...' | rarus acp`` and every smoke
         test look like."""
         out = io.BytesIO()
         payload = b"".join(b'{"jsonrpc":"2.0","id":%d,"method":"initialize","params":{}}\n' % n for n in (1, 2, 3))

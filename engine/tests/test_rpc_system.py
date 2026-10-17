@@ -193,7 +193,7 @@ async def test_dispatcher_parse_response_id_echoed():
 async def test_version_reports_a_pending_upgrade(monkeypatch: pytest.MonkeyPatch):
     from raven.updates import update_notice as un
 
-    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "raven upgrade"))
+    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "rarus upgrade"))
     monkeypatch.setattr(un, "read_cache", lambda: {"latest_version": "9.9.9"})
 
     result = await system_version({})
@@ -244,8 +244,8 @@ def _plan(tmp_path, monkeypatch):
 
 
 class TestUpgradingFromAGatewayHostedPage:
-    """`raven web` runs `raven gateway`, so this is the page nearly every reader
-    has. The old relaunch brought back a bare `raven serve`, which builds no
+    """`rarus web` runs `rarus gateway`, so this is the page nearly every reader
+    has. The old relaunch brought back a bare `rarus serve`, which builds no
     ChannelManager: the IM channels would have vanished without a word. The
     restart now goes through the supervisor instead."""
 
@@ -279,7 +279,7 @@ class TestUpgradingFromAGatewayHostedPage:
     async def test_the_helper_waits_for_the_supervisor_not_the_gateway(self, monkeypatch, tmp_path):
         """The supervisor's own cleanup runs after the gateway exits and removes
         web.json. A new supervisor started before that finishes has its file
-        removed from under it, and the next `raven web` starts a second one."""
+        removed from under it, and the next `rarus web` starts a second one."""
         from raven.cli.serve_commands import SERVE
         from raven.rpc.methods.system import system_upgrade
 
@@ -294,7 +294,7 @@ class TestUpgradingFromAGatewayHostedPage:
         assert spawned["parent_pid"] == 4242
 
     async def test_it_refuses_a_gateway_nothing_would_bring_back(self, monkeypatch, tmp_path):
-        """Started by hand, or under `raven web --foreground`: no supervisor.
+        """Started by hand, or under `rarus web --foreground`: no supervisor.
         Installing would end with nothing running at all."""
         from raven.cli.serve_commands import SERVE
         from raven.rpc.methods.system import system_upgrade
@@ -500,7 +500,7 @@ async def test_hello_announces_the_trajectory_surface_only_on_a_dev_launch(dev_l
 
 async def test_hello_defaults_to_the_shared_local_channel() -> None:
     """The terminal and the served page share one session pool, so they share
-    one channel: a browser that opened `raven serve` finds the conversations it
+    one channel: a browser that opened `rarus serve` finds the conversations it
     started in the terminal."""
     from raven.rpc import LOCAL_CHANNEL
 
@@ -619,7 +619,7 @@ async def _check_with(monkeypatch, *, latest: str | None, sink=None) -> tuple[di
     from raven.updates import update_notice as un
 
     monkeypatch.setattr(un, "check_for_update", lambda _cur: latest)
-    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "raven upgrade") if latest else None)
+    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "rarus upgrade") if latest else None)
     monkeypatch.setattr(un, "read_cache", lambda: {"latest_version": latest} if latest else {})
 
     frames: list = []
@@ -657,7 +657,7 @@ async def test_a_transport_with_no_sink_announces_nothing(monkeypatch) -> None:
     from raven.updates import update_notice as un
 
     monkeypatch.setattr(un, "check_for_update", lambda _cur: "9.9.9")
-    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "raven upgrade"))
+    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "rarus upgrade"))
     monkeypatch.setattr(un, "read_cache", lambda: {"latest_version": "9.9.9"})
 
     async def _forbidden(*_args, **_kwargs):
@@ -680,7 +680,7 @@ async def test_a_plain_version_call_never_announces(monkeypatch) -> None:
     from raven.rpc.methods import system as system_mod
     from raven.updates import update_notice as un
 
-    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "raven upgrade"))
+    monkeypatch.setattr(un, "update_notice", lambda _cur: (True, "rarus upgrade"))
     monkeypatch.setattr(un, "read_cache", lambda: {"latest_version": "9.9.9"})
 
     frames: list = []

@@ -1,7 +1,7 @@
 """Production-path smoke (pytest integration).
 
 Spawns the EXACT RPC server / dispatcher / socket transport that
-``raven tui`` uses, drives it from a Python child process, and asserts
+``rarus tui`` uses, drives it from a Python child process, and asserts
 the 5 production-path methods (``system.hello`` + 4 umbrella methods) all
 return success.
 

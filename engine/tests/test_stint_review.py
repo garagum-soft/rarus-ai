@@ -134,7 +134,7 @@ def test_a_merge_without_an_approving_verdict_is_blocked(book, repos) -> None:
     assert "has no review" in unrequested.detail
     assert "no review verdict yet" in unjudged.detail
     assert "rejected" in rejected.detail and "wrong value" in rejected.detail
-    assert f"raven review show {req.id}" in rejected.escalation()
+    assert f"rarus review show {req.id}" in rejected.escalation()
     assert _git(project, "rev-parse", "HEAD") == before and not (project / "feature.py").exists()
     # The project's branch was not even merged into the checkout: the gate stands before both steps.
     assert _git(tree, "log", "--format=%s", "-1") == "the coder's work"

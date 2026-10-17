@@ -610,7 +610,7 @@ async def test_dispose_retires_a_detached_start_before_stopping_the_backend(monk
     readiness when the generation is retired would outlive it -- reporting a
     failure for a generation that is gone, and on process exit raising "Task
     was destroyed but it is pending". ``dispose`` is the one retirement point
-    both the gateway and ``raven a2a serve`` go through, so the cancel belongs
+    both the gateway and ``rarus a2a serve`` go through, so the cancel belongs
     there and nowhere else.
     """
     from raven.core import plugin_stack

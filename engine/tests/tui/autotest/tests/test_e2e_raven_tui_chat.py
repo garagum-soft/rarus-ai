@@ -1,4 +1,4 @@
-"""E2E ⭐ ACCEPTANCE: `raven tui` alt-screen chat pipeline liveness.
+"""E2E ⭐ ACCEPTANCE: `rarus tui` alt-screen chat pipeline liveness.
 
 If this passes, the harness can drive a full Ink alt-screen TUI through
 RPC + streaming + slash routing + Ctrl+C autonomy — i.e., Claude Code can
@@ -46,7 +46,7 @@ def test_tui_chat_round_trip(harness):
     # turn.send/turn.subscribe + SubscriptionEmitter are wired; this test
     # runs as a regular live E2E ACCEPTANCE for the chat streaming path
     # through the TUI.
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     # Wait for the status bar to report ready, not merely for the banner: the
     # banner paints seconds before the app accepts input, so keying off it drops
     # the prompt and the turn never starts.
@@ -139,7 +139,7 @@ def test_tui_chat_multi_turn_accumulates_the_session(harness):
     sessions = SessionManager(load_runtime_config(None, None).workspace_path)
     before = sessions.find_most_recent_chat_id("tui")
 
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     _await_ready(harness)
 
     prompts = [

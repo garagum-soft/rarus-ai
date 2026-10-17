@@ -2891,7 +2891,7 @@ async def test_the_rpc_stack_teardown_closes_the_pool(tmp_path: Path) -> None:
 
     The child is launched with ``start_new_session``, deliberately: an agent that
     reparents a worker would otherwise survive ``proc.kill()``. The cost is that
-    it does not get the terminal's signals either, so `raven tui` or `raven serve`
+    it does not get the terminal's signals either, so `rarus tui` or `rarus serve`
     exiting leaves the agent process running until the machine is rebooted. Only
     the tests called ``close_pool`` before this.
     """

@@ -58,7 +58,7 @@ async def _control_plane_port() -> int:
     a host whose dynamic range starts low gets them in the 8000s, and a bind
     inside one fails with WinError 10013 while netstat shows the port free. The
     raise reached no handler, so the gateway died on a port nobody asked for --
-    `raven web` could not start at all on such a host.
+    `rarus web` could not start at all on such a host.
 
     Falling back costs nothing: no client needs this port to be predictable,
     they all read it from the lock payload, and ``ControlPlaneServer.start``
@@ -98,7 +98,7 @@ def _risk_banner(config) -> str | None:
     ]
     for name in sorted(open_channels):
         lines.append(f"   - channels.{name}.allow_from contains '*' (anyone can command this agent)")
-    lines.append("   Restrict senders:  raven channels set <name> --allow-from <id1,id2>")
+    lines.append("   Restrict senders:  rarus channels set <name> --allow-from <id1,id2>")
     lines.append("   Enable a sandbox:  set tools.sandbox.backend to 'auto' or 'boxlite' in your config")
     return "\n".join(lines)
 
@@ -118,7 +118,7 @@ def _build_gateway_channels(config) -> set[str]:
 
     ``tui`` is deliberately NOT derived from ``gateway.page.enabled`` here. The
     partition has to follow the mount's outcome, not the config's intent:
-    ``mount_page`` yields the page to a resident standalone `raven serve`, so
+    ``mount_page`` yields the page to a resident standalone `rarus serve`, so
     "enabled but not mounted" is a routine state in which this process has no
     ``tui`` outlet at all. Claiming ``tui`` from config would then burn a whole
     model turn on a reminder the hub drops, and a restart would delete a
@@ -260,7 +260,7 @@ def page_target(page_config: "GatewayPageConfig", page_port: int | None) -> int 
     """Which port to serve the browser page on, or None for a channel-only run.
 
     Two callers, and the flag is the one that wins. ``gateway.page.enabled`` is
-    the operator's standing preference; ``--page-port`` is `raven web` saying it
+    the operator's standing preference; ``--page-port`` is `rarus web` saying it
     started this process FOR the page and its open tab is on that port -- so the
     flag both mounts the page where config had it off (a supervisor with no page
     is a process nobody asked for) and pins the port, because a page that comes
@@ -387,7 +387,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
             "--page-port",
             help=(
                 "Serve the browser page on this port, whatever gateway.page.enabled says. "
-                "Used by `raven web`, which pins the page to the port its open tab is on."
+                "Used by `rarus web`, which pins the page to the port its open tab is on."
             ),
         ),
         workspace: str | None = typer.Option(
@@ -426,13 +426,13 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
         # whole install, and holding the lock through it is what would stop the
         # gateway that the finished install is supposed to bring back.
         #
-        # `raven serve` has guarded this since the marker existed; the gateway
-        # is the surface `raven web` actually supervises, so a restart landing
+        # `rarus serve` has guarded this since the marker existed; the gateway
+        # is the surface `rarus web` actually supervises, so a restart landing
         # inside an upgrade window came up on a half-written environment and
         # served the placeholder page for the rest of its life.
         from raven.cli.serve_commands import _refuse_incomplete_install
 
-        _refuse_incomplete_install("raven gateway")
+        _refuse_incomplete_install("rarus gateway")
         from raven.agent.loop.bundles import HostWiring, TurnPolicy
         from raven.agent.loop.recovery import limits_from_defaults
         from raven.agent.workdir import WorkdirPolicy, WorkdirResolver, validate_override
@@ -676,7 +676,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
                 )
 
         async def run():  # noqa: C901 (cc 68: pre-existing, above the ceiling)
-            # `raven web --stop` and a systemd stop deliver SIGTERM. Parity
+            # `rarus web --stop` and a systemd stop deliver SIGTERM. Parity
             # with Ctrl-C means cancelling THIS task in-loop so the graceful
             # chain below runs: the stdlib runner converts only SIGINT into a
             # main-task cancel, and a handler that raises KeyboardInterrupt
@@ -876,7 +876,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
                 # while the page is mounted it is the surface that renders those.
                 # The question brokers are re-bound below to a routing shim over
                 # both surfaces, not left last-write-wins. mount_page returns
-                # None when a live standalone `raven serve` already owns the
+                # None when a live standalone `rarus serve` already owns the
                 # page; the IM round-trip above is then the wiring, untouched.
                 #
                 # Which port, and whether at all, is `page_target` above.
@@ -932,7 +932,7 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
                     # Only now is this process a tui surface, so only now may it
                     # claim tui cron jobs. Deciding the partition here rather
                     # than from gateway.page.enabled is what keeps a gateway
-                    # that yielded the page to a standalone `raven serve` from
+                    # that yielded the page to a standalone `rarus serve` from
                     # running a page-set reminder the hub then has to drop, and
                     # from deleting a past-due one-shot the serve can still
                     # deliver. _owns_channel reads the set live and cron.start()

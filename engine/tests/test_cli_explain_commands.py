@@ -1,4 +1,4 @@
-"""``raven explain`` and the one-shot reply hint read the config in force."""
+"""``rarus explain`` and the one-shot reply hint read the config in force."""
 
 from __future__ import annotations
 

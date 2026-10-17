@@ -233,7 +233,7 @@ def _handle_missing_node(channel: str, *, non_interactive: bool) -> str:
 def _scancode_login(channel: str, *, non_interactive: bool = False) -> None:
     """Run a scancode channel's real QR login (reuses ``channel.login``).
 
-    Mirrors ``raven channels login``: enable the channel so its config section
+    Mirrors ``rarus channels login``: enable the channel so its config section
     persists, build the adapter via its spec factory, then drive
     ``await channel.login()`` (which for WhatsApp builds the bridge, displays
     the QR, and waits). A failed / timed-out login drops into a numbered
@@ -272,7 +272,7 @@ def _scancode_login(channel: str, *, non_interactive: bool = False) -> None:
                     continue
                 oc.console.print(
                     t(
-                        "  [dim]Skipped {channel}; install Node.js then run raven channels login {channel}.[/dim]",
+                        "  [dim]Skipped {channel}; install Node.js then run rarus channels login {channel}.[/dim]",
                         channel=channel,
                     )
                 )
@@ -329,7 +329,7 @@ def _scancode_login(channel: str, *, non_interactive: bool = False) -> None:
                 continue
             oc.console.print(
                 t(
-                    "  [dim]{channel} not connected — finish later with raven channels login {channel}.[/dim]",
+                    "  [dim]{channel} not connected — finish later with rarus channels login {channel}.[/dim]",
                     channel=channel,
                 )
             )
@@ -338,7 +338,7 @@ def _scancode_login(channel: str, *, non_interactive: bool = False) -> None:
         if not logged_in:
             # Any non-login exit (skip, no-config, submenu Ctrl+C, mid-scan
             # interrupt) reverts the enable so a cancelled scan never persists as
-            # "connected". The config section is kept for `raven channels login`.
+            # "connected". The config section is kept for `rarus channels login`.
             disable_channel(channel)
 
 
@@ -402,7 +402,7 @@ def _manage_existing_channels() -> None:
             disable_channel(target)
             oc.console.print(
                 t(
-                    "  [green]✓ Disabled {target} (credentials kept; re-enable later with raven channels enable {target}).[/green]",
+                    "  [green]✓ Disabled {target} (credentials kept; re-enable later with rarus channels enable {target}).[/green]",
                     target=target,
                 )
             )
@@ -424,7 +424,7 @@ def _step3_channel(*, channel: Optional[str], skip: bool, non_interactive: bool)
             oc.console.print(
                 f"[red]--channel {channel} given but non-interactive mode can't "
                 "prompt for credential fields.[/red]\n"
-                f"Run [accent]raven channels enable {channel} --<field> <value> ...[/accent] "
+                f"Run [accent]rarus channels enable {channel} --<field> <value> ...[/accent] "
                 "after onboard finishes."
             )
             raise typer.Exit(2)
@@ -454,7 +454,7 @@ def _step3_channel(*, channel: Optional[str], skip: bool, non_interactive: bool)
                 choices=[
                     questionary.Choice(t("Add a channel"), value="add"),
                     questionary.Choice(
-                        t("Skip (add later with raven channels enable)"),
+                        t("Skip (add later with rarus channels enable)"),
                         value="skip",
                     ),
                 ],

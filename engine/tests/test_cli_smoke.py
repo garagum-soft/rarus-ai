@@ -43,7 +43,7 @@ def tmp_config(tmp_path: Path) -> Path:
 
 TOP_LEVEL_COMMANDS = [
     "onboard",
-    # The owner's machine registry (`raven ops connection add/list/doctor`),
+    # The owner's machine registry (`rarus ops connection add/list/doctor`),
     # lifted from the on-call agent's checkout. Campaigns stay in that checkout;
     # what the host registers here is which machines exist and how to reach them.
     "ops",
@@ -149,21 +149,21 @@ def test_sentinel_subcommand_help_does_not_crash(subcmd: str) -> None:
 
 
 def test_status_command_body_does_not_crash(tmp_config: Path) -> None:
-    """``raven status`` reads config + prints rows without crashing."""
+    """``rarus status`` reads config + prints rows without crashing."""
     r = runner.invoke(app, ["status"])
     assert r.exception is None, f"status crashed: {r.exception!r}"
     assert r.exit_code == 0
 
 
 def test_channels_list_body_does_not_crash(tmp_config: Path) -> None:
-    """``raven channels list`` enumerates channels without crashing."""
+    """``rarus channels list`` enumerates channels without crashing."""
     r = runner.invoke(app, ["channels", "list"])
     assert r.exception is None
     assert r.exit_code == 0
 
 
 def test_cron_list_body_does_not_crash(tmp_config: Path) -> None:
-    """``raven cron list`` reads cron jobs without crashing."""
+    """``rarus cron list`` reads cron jobs without crashing."""
     r = runner.invoke(app, ["cron", "list"])
     assert r.exception is None
     assert r.exit_code == 0
@@ -172,11 +172,11 @@ def test_cron_list_body_does_not_crash(tmp_config: Path) -> None:
 # Full set of top-level commands + subcommand groups registered on the root
 # app (superset of TOP_LEVEL_COMMANDS, which only lists the --help-probed ones).
 REGISTERED_COMMAND_NAMES = {
-    # The A2A protocol face (`raven a2a serve`): refuses to start in a
+    # The A2A protocol face (`rarus a2a serve`): refuses to start in a
     # sub-agent process, since serving a port does not ride the tool
     # registry the way outbound `a2a_send` does.
     "a2a",
-    # The ACP agent server: an editor spawns `raven acp` and speaks
+    # The ACP agent server: an editor spawns `rarus acp` and speaks
     # JSON-RPC to its stdio. Distinct from the client direction, which is
     # not a command -- raven spawns those agents itself.
     "acp",
@@ -206,13 +206,13 @@ REGISTERED_COMMAND_NAMES = {
     # Agent mail: sub-agents of one conversation write to each other by name;
     # an external agent sends with it, the operator reads the history.
     "mail",
-    # Plumbing a sub-agent spawns, not something a person types: `raven mcp
+    # Plumbing a sub-agent spawns, not something a person types: `rarus mcp
     # bridge <socket>` pumps frames to a server the host holds open.
     "mcp",
     # Operator notifications: rules route events to webhook, ntfy, sound or desktop.
     "notify",
     "onboard",
-    # The owner's machine registry (`raven ops connection add/list/doctor`),
+    # The owner's machine registry (`rarus ops connection add/list/doctor`),
     # lifted from the on-call agent's checkout. Campaigns stay in that checkout;
     # what the host registers here is which machines exist and how to reach them.
     "ops",

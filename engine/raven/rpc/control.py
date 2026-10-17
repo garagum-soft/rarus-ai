@@ -1,6 +1,6 @@
 """The gateway control plane: the daemon's window for other raven processes.
 
-A channel adapter is a live object owned by the ``raven gateway`` process, and
+A channel adapter is a live object owned by the ``rarus gateway`` process, and
 so is the running generation. Facts about them (is this channel actually
 paired? what is the login QR? which generation is serving?) and commands on
 them (start this adapter now, rebuild from config, stop) can only be answered
@@ -274,7 +274,7 @@ def register_control_methods(
         """Start (or stop) one channel's adapter now, without a gateway restart.
 
         The switch is written by whichever process the reader is talking to --
-        the page's ``raven serve``, the TUI, the CLI -- and the adapter only
+        the page's ``rarus serve``, the TUI, the CLI -- and the adapter only
         exists here. So enabling a channel used to mean nothing until the next
         launch: no adapter, no QR to scan, no messages. ``outcome`` is a word
         from ChannelManager, every value of which is a state the caller draws.

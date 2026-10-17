@@ -5,7 +5,7 @@ consumes, then redacted. The regression suite (``tests/trajectories/``) checks
 trajectories into git, where the repository forbids large files and secrets
 are unacceptable — a raw bundle (multi-MB spans + artifacts, full model I/O)
 qualifies for neither. The cassette keeps the bundle directory layout, so
-:func:`raven.trajectory.replay.load_recording` and ``raven trajectory replay``
+:func:`raven.trajectory.replay.load_recording` and ``rarus trajectory replay``
 consume it unchanged.
 
 What survives minimization (the ``load_recording`` consumption surface):

@@ -16,7 +16,7 @@ merged mapping is also what the manager dials, so every definition the source
 can answer with is one this run connected, and a shadowed name has no host
 connection left to be confused with.
 
-And ``raven playbook run`` wired no MCP source at all, so every declared server
+And ``rarus playbook run`` wired no MCP source at all, so every declared server
 resolved to ``not_connected`` however well the machine was configured.
 :func:`preflight_mcp_source` is what it wires: one short-lived
 ``MCPConnectionManager`` over a throwaway registry, connected once before the
@@ -99,7 +99,7 @@ def servers_missing_a_credential(spec: "PlaybookSpec", values: Mapping[str, str]
     server is withheld instead of handed over.
 
     Secrets only, because withholding is answered by a place to put the value:
-    the playbook's Credentials tab and ``raven playbook secret set``, neither of
+    the playbook's Credentials tab and ``rarus playbook secret set``, neither of
     which holds a param of any other type. An ordinary param left empty drops
     its own entry and the server still runs, on whatever default it has for it.
     """

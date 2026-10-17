@@ -20,7 +20,7 @@ actually drifts: a field gets added to a response and nobody opens models.py.
 
 Not covered, and each for a reason rather than for convenience:
 
-* ``system.upgrade`` -- its only reachable branch outside a live ``raven serve``
+* ``system.upgrade`` -- its only reachable branch outside a live ``rarus serve``
   is the refusal, so there is no result to check. Its params are empty.
 * the ``plug.* / plughub.* / skillhub.*`` group and the rest of ``subagents.*``
   -- validated against ``METHOD_MODELS`` in their own modules, where the

@@ -1829,7 +1829,7 @@ class TestRoleDigest:
     The gap this closes: EverOS builds its model clients once, in the API
     lifespan, and raven hands it credentials only as environment variables at
     the spawn. Everything that edits a provider afterwards -- the models page,
-    ``raven provider set``, a hand-edited config.json -- changes the file and
+    ``rarus provider set``, a hand-edited config.json -- changes the file and
     not the process, and /health cannot see the difference because it never
     touches a model. So memory goes on failing against a revoked key with every
     surface green.

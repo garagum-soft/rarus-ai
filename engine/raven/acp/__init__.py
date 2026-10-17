@@ -1,6 +1,6 @@
 """Raven as an ACP agent: the stdio channel, and the protocol served over it.
 
-An editor spawns ``raven acp`` as a subprocess and speaks newline-delimited
+An editor spawns ``rarus acp`` as a subprocess and speaks newline-delimited
 JSON-RPC to its stdin and stdout. That makes fd 1 a wire rather than a console,
 which is the constraint this package is organised around: :mod:`raven.acp.stdio`
 makes the channel safe to speak on, and everything else speaks.

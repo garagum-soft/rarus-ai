@@ -1,4 +1,4 @@
-"""Tests for the ``raven sessions`` CLI subapp."""
+"""Tests for the ``rarus sessions`` CLI subapp."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_session_help_works() -> None:
 
 
 def test_group_registered_as_sessions_not_session() -> None:
-    """The group is mounted as ``raven sessions``; the legacy ``raven
+    """The group is mounted as ``rarus sessions``; the legacy ``raven
     session`` name is gone (hard rename, no deprecated alias)."""
     ok = runner.invoke(app, ["sessions", "--help"])
     assert ok.exit_code == 0

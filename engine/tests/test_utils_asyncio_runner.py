@@ -128,7 +128,7 @@ def test_every_shutdown_bearing_entry_point_uses_the_bounded_runner() -> None:
 def test_no_owning_entry_point_slips_back_to_the_stdlib_runner() -> None:
     """The guard above only proves the bounded call is present. This one proves
     no *other* `asyncio.run` survives in those modules except the probes named
-    as exempt -- which is how the relay and `raven acp` were missed once."""
+    as exempt -- which is how the relay and `rarus acp` were missed once."""
     for module in _OWNING_ENTRY_POINTS:
         src = (_REPO / "raven" / module).read_text(encoding="utf-8")
         stray = [

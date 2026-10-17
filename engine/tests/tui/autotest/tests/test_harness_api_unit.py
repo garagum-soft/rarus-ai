@@ -52,7 +52,7 @@ class TestSpawn:
             _completed(),
         ]
         h = Harness(cols=100, rows=30)
-        h.spawn("uv run raven tui")
+        h.spawn("uv run rarus tui")
 
         start_call = mock_run.call_args_list[0]
         cmd = start_call.args[0]
@@ -108,7 +108,7 @@ class TestSpawn:
         ]
         h = Harness()
         h.env_set({"FORCE_COLOR": "1", "FOO": "bar"})
-        h.spawn("uv run raven tui")
+        h.spawn("uv run rarus tui")
         start_call = mock_run.call_args_list[0]
         # env passed as kwarg to subprocess.run
         env = start_call.kwargs.get("env")
@@ -119,7 +119,7 @@ class TestSpawn:
     def test_spawn_sets_default_force_color(self, mock_run):
         mock_run.side_effect = [_completed(stdout="sid\n"), _completed()]
         h = Harness()
-        h.spawn("uv run raven tui")
+        h.spawn("uv run rarus tui")
         env = mock_run.call_args_list[0].kwargs.get("env")
         # FORCE_COLOR default = "1" per specs/tui-autotest.md §S5.1
         assert env["FORCE_COLOR"] == "1"

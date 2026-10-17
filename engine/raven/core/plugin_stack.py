@@ -21,8 +21,8 @@ responsibility. These helpers only construct; CLI bootstrap code does
 the await around them.
 
 The same leniency has to reach the host surfaces that talk to the EverOS
-plugin directly rather than through the registry -- ``raven doctor``,
-``raven onboard``, ``raven import``, the ``memory.*`` RPC methods and the
+plugin directly rather than through the registry -- ``rarus doctor``,
+``rarus onboard``, ``raven import``, the ``memory.*`` RPC methods and the
 sub-agent trace writer. :func:`everos_plugin_installed` and
 :func:`everos_plugin_missing_note` are what they ask before importing it.
 """
@@ -109,7 +109,7 @@ def plugin_discovery_sources() -> dict:
     """Resolve the four fixed discovery-source locations the host scans.
 
     Shared by :func:`build_plugin_registry` (live boot) and the
-    ``raven plugins`` CLI command so both see the same set:
+    ``rarus plugins`` CLI command so both see the same set:
 
     - bundled — ``raven/plugins/bundled/`` inside the installed package: the
       wheel's own plugin shelf (the playbook entry tools live there), scanned

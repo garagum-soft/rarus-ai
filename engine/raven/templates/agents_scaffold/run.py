@@ -3,7 +3,7 @@
 
 Renders this agent's config.json (secrets merged, LLM inherited from the
 host when the agent holds no key of its own, state root and plugin roots
-pinned) and execs the installed raven's own ``raven acp``, so every turn runs
+pinned) and execs the installed raven's own ``rarus acp``, so every turn runs
 through the same assembly door as the host's TUI and gateway. stdout belongs
 to the protocol; every diagnostic goes to stderr.
 """
@@ -133,7 +133,7 @@ def main() -> int:
         )
 
     rendered = render_config(Path(args.config).resolve())
-    log(f"[run] exec {sys.executable} -m raven acp (config {rendered})")
+    log(f"[run] exec {sys.executable} -m rarus acp (config {rendered})")
     # Windows has no exec: os.execv there ends this process, which the client reads as the
     # agent gone, so the library serves from a child on the same stdio (exec_raven_acp).
     exec_acp = getattr(render, "exec_raven_acp", None)

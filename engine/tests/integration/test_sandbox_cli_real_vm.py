@@ -1,7 +1,7 @@
 """Integration tests for sandbox CLI commands — require KVM / Hypervisor.framework.
 
 Skipped automatically when /dev/kvm is unavailable (Linux) or boxlite is not
-installed. Tests verify `raven sandbox list/ls/exec/shell` end-to-end:
+installed. Tests verify `rarus sandbox list/ls/exec/shell` end-to-end:
 
     CLI process  ──unix socket──>  SandboxDebugServer  ──>  real boxlite VM
 
@@ -237,7 +237,7 @@ class TestExecRealVM:
 # test loop on the main thread but our `_invoke` helper offloads to a thread
 # pool, which makes the process multi-threaded and forkpty() unsafe (deadlock).
 def _spawn_shell_under_pty(socket_path: Path) -> tuple[subprocess.Popen, int]:
-    """Spawn `raven sandbox shell` in a subprocess whose stdio is a PTY.
+    """Spawn `rarus sandbox shell` in a subprocess whose stdio is a PTY.
 
     The subprocess inherits the current Python interpreter and runs the CLI
     with ``--socket-path``-equivalent monkey patching done via a wrapper

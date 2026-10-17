@@ -358,7 +358,7 @@ def test_subagent_sandbox_mounts_agent_home_when_the_session_dir_does_not_cover_
 
 
 def test_subagent_sandbox_skips_the_home_volume_when_the_session_dir_is_above_home(tmp_path: Path) -> None:
-    """``cd ~ && raven tui`` with agent home at ``~/.rarus/workspace``: the
+    """``cd ~ && rarus tui`` with agent home at ``~/.rarus/workspace``: the
     session mount already contains agent home, so a second volume would only
     shadow it."""
     home = tmp_path / ".rarus" / "workspace"

@@ -227,7 +227,7 @@ class PlaybookSpec(CamelBase):
     review: ReviewSpec | None = None
     """rounds mode: an independent review of the branch before it merges. The
     finished stint's diff is put up for review, and no merge happens without an
-    approving verdict from someone who did not write it (``raven review``)."""
+    approving verdict from someone who did not write it (``rarus review``)."""
 
     STINT_SECTIONS: ClassVar[tuple[str, ...]] = (
         "roles",

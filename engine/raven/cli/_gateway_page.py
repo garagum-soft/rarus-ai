@@ -1,10 +1,10 @@
 """Mount the served page inside the gateway process.
 
-`raven serve` standalone assembles WsGateway + build_rpc_stack + the aiohttp
+`rarus serve` standalone assembles WsGateway + build_rpc_stack + the aiohttp
 app around an AgentLoop it builds itself. This module performs the same
 assembly around the gateway's existing loop, so the browser page and the IM
 channels run on one engine. Every piece is serve's own, imported rather than
-copied: the auth model, the app routes, the serve.json shape `raven web` and
+copied: the auth model, the app routes, the serve.json shape `rarus web` and
 the GUI shell read, the update announcer.
 
 Deliberately NOT ported from `_serve_main`: ``set_surface("page")``. It is
@@ -59,7 +59,7 @@ def _adopt_credentials(ws_gateway: Any, adopt_stored_cookie: Callable[[Any], Non
 
 
 async def _standalone_serve_owner() -> tuple[int, int] | None:
-    """(pid, port) of a live standalone `raven serve` recorded in serve.json.
+    """(pid, port) of a live standalone `rarus serve` recorded in serve.json.
 
     ``None`` unless three facts line up, mirroring ``_gateway_hosted_page``
     read the other way: serve.json names a pid that is not ours, that pid is
@@ -93,13 +93,13 @@ async def _standalone_serve_owner() -> tuple[int, int] | None:
 
 
 async def mount_page(agent_loop: Any, preferred_port: int) -> PageMount | None:
-    """Serve the page on ``agent_loop``, on the `raven serve` port policy.
+    """Serve the page on ``agent_loop``, on the `rarus serve` port policy.
 
-    Returns ``None`` when a live standalone `raven serve` already owns
+    Returns ``None`` when a live standalone `rarus serve` already owns
     serve.json: mounting over it would put two engines on one agent home and
-    clobber the file `raven web` finds the running one through. The gateway
+    clobber the file `rarus web` finds the running one through. The gateway
     then runs its IM channels only; the page stays the standalone serve's.
-    (`raven serve` performs the same check in the other direction and yields
+    (`rarus serve` performs the same check in the other direction and yields
     to a page-hosting gateway -- see ``_gateway_hosted_page``.)
 
     Must be called AFTER the gateway's own broker/sink wiring: the stack
@@ -133,7 +133,7 @@ async def mount_page(agent_loop: Any, preferred_port: int) -> PageMount | None:
     if owner is not None:
         owner_pid, owner_port = owner
         logger.warning(
-            "gateway page: a standalone `raven serve` (pid {}) already serves the page on port {}; "
+            "gateway page: a standalone `rarus serve` (pid {}) already serves the page on port {}; "
             "skipping the page mount -- the gateway runs IM channels only",
             owner_pid,
             owner_port,
@@ -145,7 +145,7 @@ async def mount_page(agent_loop: Any, preferred_port: int) -> PageMount | None:
     # Same port policy as standalone serve, strict flag included: a relaunch
     # under an open tab (the web supervisor's retry, `system.upgrade`) has to
     # come back on the port that tab is pointed at, and this mount is now what
-    # `raven web` supervises -- reading the flag in only one of the two places
+    # `rarus web` supervises -- reading the flag in only one of the two places
     # is how a restart would strand the page it was restarting for.
     bound_port = await pick_port(preferred_port, strict=port_strict())
     ws_gateway.port = bound_port

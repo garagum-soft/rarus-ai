@@ -190,7 +190,7 @@ def disabled_playbook_names(live: LiveConfig) -> frozenset[str]:
 
     One spelling, unlike :func:`disabled_tool_names`: nothing writes this list
     from a settings page, so ``playbooks.disabled`` is the only name it has on
-    disk (``config/update.set_playbook_disabled``, ``raven playbook disable``).
+    disk (``config/update.set_playbook_disabled``, ``rarus playbook disable``).
 
     Read here rather than captured at loop start so that switching one off takes
     effect on the next model call instead of the next process. The list is the

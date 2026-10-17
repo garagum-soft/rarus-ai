@@ -255,7 +255,7 @@ async def test_a_missing_login_says_how_to_sign_in(tmp_path: Path) -> None:
     answer = await _provider(runner, tmp_path).chat([{"role": "user", "content": "hi"}])
 
     assert answer.finish_reason == "error"
-    assert "raven provider login claude_subscription" in answer.content
+    assert "rarus provider login claude_subscription" in answer.content
     assert answer.error_classification is not None and answer.error_classification.category == "auth"
 
 
@@ -271,7 +271,7 @@ def test_the_factory_builds_it_from_config_and_the_wire_id_drops_the_prefix(monk
     from raven.config.schema import Config
     from raven.providers.factory import make_provider
 
-    # Signed in: without a login the factory refuses, naming `raven provider login`.
+    # Signed in: without a login the factory refuses, naming `rarus provider login`.
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
     config = Config.model_validate(
         {"agents": {"defaults": {"model": "claude-subscription/opus", "provider": "claude_subscription"}}}
@@ -295,7 +295,7 @@ def test_without_a_login_the_factory_names_the_sign_in(tmp_path: Path, monkeypat
         {"agents": {"defaults": {"model": "claude-subscription/sonnet", "provider": "claude_subscription"}}}
     )
 
-    with pytest.raises(MissingCredentialsError, match="raven provider login claude-subscription"):
+    with pytest.raises(MissingCredentialsError, match="rarus provider login claude-subscription"):
         make_provider(config)
 
 

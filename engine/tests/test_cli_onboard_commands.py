@@ -1,4 +1,4 @@
-"""CLI tests for ``raven onboard`` — the seven-step wizard.
+"""CLI tests for ``rarus onboard`` — the seven-step wizard.
 
 Most tests exercise ``--non-interactive`` so we can drive the wizard
 deterministically without a real TTY. Interactive paths are covered by
@@ -224,7 +224,7 @@ def stub_step3(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_onboard_help_lists_all_flags() -> None:
-    """``raven onboard --help`` exposes the full flag surface."""
+    """``rarus onboard --help`` exposes the full flag surface."""
     r = runner.invoke(app, ["onboard", "--help"])
     assert r.exit_code == 0, r.stdout
     out = r.stdout
@@ -1216,7 +1216,7 @@ def test_the_outro_flag_swaps_the_panel_for_one_line(
 
 
 def test_agent_bare_exits_with_pointer_without_wizard(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`raven agent` no longer hosts an interactive session: bare invocation
+    """`rarus agent` no longer hosts an interactive session: bare invocation
     exits non-zero with the TUI pointer before any config check, so the
     wizard never runs for it (even on missing config)."""
     gate_called: list[bool] = []
@@ -1227,12 +1227,12 @@ def test_agent_bare_exits_with_pointer_without_wizard(tmp_env: Path, monkeypatch
     )
     r = runner.invoke(app, ["agent"])
     assert r.exit_code != 0
-    assert "raven tui" in r.stdout
+    assert "rarus tui" in r.stdout
     assert gate_called == []
 
 
 def test_agent_gate_skips_oneshot_message(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`raven agent -m '...'` (one-shot) must NOT enter the wizard even on a
+    """`rarus agent -m '...'` (one-shot) must NOT enter the wizard even on a
     TTY with missing config — scripted use fails loudly later instead."""
     gate_called: list[bool] = []
     monkeypatch.setattr(
@@ -1249,7 +1249,7 @@ def test_agent_gate_skips_oneshot_message(tmp_env: Path, monkeypatch: pytest.Mon
 
 
 def test_tui_gate_triggers_when_missing(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`raven tui` (TTY, missing config) enters the wizard before launching Node."""
+    """`rarus tui` (TTY, missing config) enters the wizard before launching Node."""
     from raven.cli import tui_commands
 
     monkeypatch.setattr(tui_commands, "_stdout_isatty", lambda: True)
@@ -1266,7 +1266,7 @@ def test_tui_gate_triggers_when_missing(tmp_env: Path, monkeypatch: pytest.Monke
 
 
 def test_tui_gate_skips_check_flag(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`raven tui --check` (no-TTY diagnostic) bypasses the wizard gate."""
+    """`rarus tui --check` (no-TTY diagnostic) bypasses the wizard gate."""
     from raven.cli import tui_commands
 
     monkeypatch.setattr(tui_commands, "_stdout_isatty", lambda: True)
@@ -2812,7 +2812,7 @@ def test_scancode_login_retry_then_success(tmp_env: Path, monkeypatch: pytest.Mo
 
 def test_scancode_login_skip_reverts_enable(tmp_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """'skip' on a failed scan reverts the enable so the channel isn't shown as
-    connected (config section is kept for a later `raven channels login`)."""
+    connected (config section is kept for a later `rarus channels login`)."""
     monkeypatch.setattr(
         "raven.channels.adapters.weixin.channel.WeixinChannel.login",
         _async_return(False),
@@ -6384,7 +6384,7 @@ def test_a_cleared_model_prompt_says_which_one_it_fell_back_to(
     assert "openai-codex/gpt-5.6-sol" in capsys.readouterr().out, "fell back without saying to what"
 
 
-# "agent" dropped from the params: bare `raven agent` exits with the tui
+# "agent" dropped from the params: bare `rarus agent` exits with the tui
 # pointer before any gate, so it has no wizard path to protect anymore.
 @pytest.mark.parametrize("entry", ["tui"])
 def test_a_stale_default_model_does_not_restart_the_wizard(
@@ -6547,13 +6547,13 @@ def test_memory_skip_hints_configure_later(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """The Step 4 skip/non-interactive exit must name the remediation command,
-    matching the give-up exit's 'run raven onboard again' hint."""
+    matching the give-up exit's 'run rarus onboard again' hint."""
     import re
 
     monkeypatch.setattr(onboard_commands.console, "_width", 200)
     onboard_commands._step4_memory(skip=True, non_interactive=False, main_model=None, warnings=[])
     out = " ".join(capsys.readouterr().out.split())
-    assert re.search(r"raven onboard.*again", out)
+    assert re.search(r"rarus onboard.*again", out)
 
 
 def test_sandbox_host_choice_warns_and_confirms(
@@ -7575,7 +7575,7 @@ def test_a_cleared_key_is_gone_from_a_shell_that_inherited_it(tmp_env: Path) -> 
     """The behaviour the file shape exists for, driven through a real shell.
 
     One process sources the configured mirror and then the cleared one, which is
-    what a live shell does across a `raven onboard` that clears the key.
+    what a live shell does across a `rarus onboard` that clears the key.
     """
     import shutil
     import subprocess
@@ -7992,7 +7992,7 @@ def test_yes_answers_the_rc_confirmation_instead_of_stopping_on_it(
 ) -> None:
     """``--yes`` is documented as "Skip all confirm prompts".
 
-    A confirm the flag does not reach turns a scripted `raven onboard --yes`
+    A confirm the flag does not reach turns a scripted `rarus onboard --yes`
     into one that blocks on a prompt nobody is there to answer, which is the
     opposite of the flag's contract. Skipping is answering it, not declining:
     the name says yes.
@@ -8048,7 +8048,7 @@ def test_step5_appends_to_every_target_on_confirmation(tmp_env: Path, monkeypatc
 def test_step5_key_flags_are_written_even_though_the_step_is_skipped(tmp_env: Path) -> None:
     """Non-interactive auto-skips the screen, so a flag is the only way in.
 
-    Without this, ``raven onboard --non-interactive --serper-api-key ...`` would
+    Without this, ``rarus onboard --non-interactive --serper-api-key ...`` would
     accept the flag and silently drop it.
     """
     from raven.cli import onboard_web

@@ -82,7 +82,7 @@ class TestTheConfiguredPinIsTheOnlySource:
     backend's file, which meant a knowledge base stopped working when that
     plugin was not installed -- for a subsystem that never speaks to the memory
     service. Reading it there at all is gone; an install that only ever had it
-    in that file is migrated once, by ``raven doctor --fix``.
+    in that file is migrated once, by ``rarus doctor --fix``.
     """
 
     @staticmethod

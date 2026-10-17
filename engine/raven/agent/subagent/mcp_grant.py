@@ -485,7 +485,7 @@ def _missing_note(item: MissingServer) -> str:
     if item.reason == "credential_missing" and item.scope is not None:
         playbook = item.scope.removeprefix("playbooks/")
         return (
-            note + f"; set it on the Credentials tab of playbook {playbook!r} (or with `raven playbook secret set "
+            note + f"; set it on the Credentials tab of playbook {playbook!r} (or with `rarus playbook secret set "
             f"{playbook} <param>`), then continue this node -- nothing needs to be typed into this conversation"
         )
     if item.reason == "auth_required" and item.scope is not None:
@@ -495,7 +495,7 @@ def _missing_note(item: MissingServer) -> str:
         playbook = item.scope.removeprefix("playbooks/")
         note += (
             f"; this server is carried by playbook {playbook!r} -- authorize it on that playbook's Credentials tab "
-            f"(or `raven playbook auth {playbook} {item.name}`), then continue this node"
+            f"(or `rarus playbook auth {playbook} {item.name}`), then continue this node"
         )
     return note
 

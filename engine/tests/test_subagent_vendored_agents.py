@@ -319,7 +319,7 @@ class TestWhereTheTreeIs:
     ) -> None:
         """Crash residue is not a product, for the chooser and the scanner alike.
 
-        ``raven agents new`` assembles under ``.<name>.partial-*`` and a SIGKILL
+        ``rarus agents new`` assembles under ``.<name>.partial-*`` and a SIGKILL
         can orphan that directory with a finished manifest inside. The scanner
         skips dot-directories, so a chooser that counted one would pick a home
         tree discovery then finds empty -- the shadowing this guard exists to
@@ -1671,7 +1671,7 @@ class TestResolveSubagentCommand:
     def test_windows_spaced_paths_round_trip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cmd = self._as("nt", monkeypatch)
         python = r"C:\Program Files\Python312\python.exe"
-        root = r"C:\raven agents\raven-code"
+        root = r"C:\rarus agents\raven-code"
         out = cmd.resolve_subagent_command(
             r"{PYTHON} {SUBAGENT_DIR}/run.py --acp", python=python, subagent_dir=root, quote=True
         )

@@ -1,6 +1,6 @@
 """Ask the running gateway what a channel is actually doing.
 
-A channel adapter is a live object owned by the ``raven gateway`` process, so
+A channel adapter is a live object owned by the ``rarus gateway`` process, so
 no other process can read it. Every other surface therefore reported the config
 file's ``enabled`` flag as if it were a connection: written true, drawn
 "connected", whether or not a single message could pass.

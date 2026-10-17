@@ -1,7 +1,7 @@
 """Where campaign state lands, and why it has to be resolved per call.
 
 The measured incident (2026-08-05). A run launched with
-``raven tui --config ~/.rarus-r5/config.json`` kept its ledger, its decisions and
+``rarus tui --config ~/.rarus-r5/config.json`` kept its ledger, its decisions and
 its trial events under that config's directory, because every tool call passed an
 explicit ledger path. ``ops_finish`` was the one call that omitted it, so the
 report resolved against a module-level constant bound from ``Path.home()`` at

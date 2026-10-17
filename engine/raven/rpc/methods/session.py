@@ -267,9 +267,9 @@ async def _default_session_info(
         "running": bool(session_key) and turn_module.is_session_answering(session_key),
     }
 
-    # Nudge the status bar to run `raven upgrade` when the cached latest release
+    # Nudge the status bar to run `rarus upgrade` when the cached latest release
     # is newer. Reading the cache is pure/fast; the cache is refreshed once per
-    # launch from the `raven tui` entrypoint (see cli/tui_commands.py), so a
+    # launch from the `rarus tui` entrypoint (see cli/tui_commands.py), so a
     # freshly published release shows up on the next launch.
     notice = update_notice(_RAVEN_VERSION)
     if notice is not None:

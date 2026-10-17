@@ -287,7 +287,7 @@ class PluginScheduler:
         return out
 
     async def fire_now(self, key: str) -> str:
-        """Run ``key`` once now, outside its schedule (``raven plugins hooks run``)."""
+        """Run ``key`` once now, outside its schedule (``rarus plugins hooks run``)."""
         row = self.book.rows().get(key) or {}
         now = self._now()
         fire = ScheduledFire(

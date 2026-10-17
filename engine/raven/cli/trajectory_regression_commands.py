@@ -1,4 +1,4 @@
-"""``raven trajectory regression`` subapp — scaffold and gate regression cases.
+"""``rarus trajectory regression`` subapp — scaffold and gate regression cases.
 
 Regression cases live under ``tests/trajectories/<case>/``: an ``expect.yaml``
 (the assertion DSL), a ``case.yaml`` (the human contract), and a ``cassette/``

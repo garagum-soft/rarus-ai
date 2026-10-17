@@ -1,4 +1,4 @@
-"""``raven voice``: the transcription settings in force, and a clip through the same door the channels use."""
+"""``rarus voice``: the transcription settings in force, and a clip through the same door the channels use."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""``raven attention``: what is waiting on a person, most pressing first."""
+"""``rarus attention``: what is waiting on a person, most pressing first."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""`raven ops connection` -- the front door that replaced hand-editing the file.
+"""`rarus ops connection` -- the front door that replaced hand-editing the file.
 
 What these pin is the one guarantee the command adds over an editor: nothing is
 written until the machine itself has answered. The registry is the input every

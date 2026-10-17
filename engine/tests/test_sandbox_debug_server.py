@@ -1103,7 +1103,7 @@ class TestShellDisconnectKillsExecution:
                 assert first["type"] == "ready"
 
                 # Close the client without ever sending any stdin — simulates the user
-                # opening `raven sandbox shell` and walking away by closing the term.
+                # opening `rarus sandbox shell` and walking away by closing the term.
                 writer.close()
                 try:
                     await writer.wait_closed()

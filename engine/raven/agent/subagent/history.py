@@ -7,7 +7,7 @@ they answered, inside that session's metadata directory:
     |-- mas_dag/<run_id>/         what is run-scoped: graph.json, manifest.json
     `-- nodes/<node_id>.*         one task's files, flat across both surfaces
 
-``<group>`` is the project slug on ``raven tui`` / ``raven agent`` and the
+``<group>`` is the project slug on ``rarus tui`` / ``rarus agent`` and the
 channel name on the gateway. Rather than re-derive it, the roots below take
 the directory from ``SessionManager.session_dir``, so ``<chat_id>.jsonl`` and
 ``<chat_id>/`` sit side by side even where the two derivations would disagree

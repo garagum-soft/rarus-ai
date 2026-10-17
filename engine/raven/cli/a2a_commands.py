@@ -1,4 +1,4 @@
-"""`raven a2a`: the inbound A2A face, and the switch that opens it.
+"""`rarus a2a`: the inbound A2A face, and the switch that opens it.
 
 ``serve`` is the headless hosting. The gateway-mounted one is
 ``gate.mount_gateway_face``, called from the app builder; both refuse in a
@@ -27,7 +27,7 @@ def _a2a_group() -> None:
     # command directly, dropping its name (Typer's `get_command`): `serve` would
     # stop being a subcommand name and become an unexpected positional argument
     # to itself. This no-op callback keeps `a2a` a real group so `serve` stays
-    # addressable by name, both as `raven a2a serve` and under a direct
+    # addressable by name, both as `rarus a2a serve` and under a direct
     # `CliRunner.invoke(a2a_app, ["serve"])`.
     pass
 
@@ -73,8 +73,8 @@ def serve(
     run_turn = make_run_turn(runtime.loop)
 
     async def _serve() -> None:
-        # `raven a2a serve` is a resident host serving many turns over its whole
-        # lifetime, not a one-shot `raven agent -m` invocation: build_runtime only
+        # `rarus a2a serve` is a resident host serving many turns over its whole
+        # lifetime, not a one-shot `rarus agent -m` invocation: build_runtime only
         # builds contributed plugin services inert, so a resident host is the one
         # that must start them, and dispose() is what retires the full generation
         # (services, MCP, backend) together on the way out.
@@ -100,7 +100,7 @@ def enable() -> None:
     typer.echo("A2A inbound face enabled.")
     # The face is mounted while the app is built, so a process already serving
     # was built against the old flag and will not pick this up on its own.
-    typer.echo("Restart `raven gateway` (or `raven web`) for it to take effect.")
+    typer.echo("Restart `rarus gateway` (or `rarus web`) for it to take effect.")
 
 
 @a2a_app.command("disable")
@@ -110,4 +110,4 @@ def disable() -> None:
 
     set_a2a_server_enabled(False)
     typer.echo("A2A inbound face disabled.")
-    typer.echo("Restart `raven gateway` (or `raven web`) for it to take effect.")
+    typer.echo("Restart `rarus gateway` (or `rarus web`) for it to take effect.")

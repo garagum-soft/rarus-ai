@@ -1,4 +1,4 @@
-"""``raven doctor`` — health check (static + optional --probe).
+"""``rarus doctor`` — health check (static + optional --probe).
 
 Default mode is zero-network, millisecond-fast. ``--probe`` sends one
 chat exchange via :func:`raven.core.provider_stack.send_probe`.
@@ -347,14 +347,14 @@ def _inspect_config_health(config: Any, *, fix: bool) -> ConfigHealth:
             health.findings.append(
                 "  (your config says `auto`, which is the retired spelling of unset -- it never detected anything)"
             )
-        health.findings.append(f"  raven provider use {model or '<model>'} --provider <name>")
+        health.findings.append(f"  rarus provider use {model or '<model>'} --provider <name>")
     elif not _routes_anywhere(provider):
         health.findings.append(
             f"agents.defaults.provider is {provider!r}, which nothing routes to. "
             "Every call resolves against a vendor that does not exist, so the credential "
             "it would use is never found."
         )
-        health.findings.append("  raven provider list  # the names this accepts")
+        health.findings.append("  rarus provider list  # the names this accepts")
 
     # The endpoint a knowledge base embeds with is raven's, but an install
     # configured before it moved still has it only in EverOS's file -- where a
@@ -872,7 +872,7 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(
             "  An upgrade was interrupted before it finished writing this environment.\n"
             "  Repair it with:\n"
-            "    [cyan]curl -fsSL https://raven.evermind.ai/install.sh | sh[/cyan]"
+            "    [cyan]run the Rarus AI installer again[/cyan]"
         )
         return
     if install is not None and install.upgrade_in_flight:
@@ -894,18 +894,18 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(f"  Workspace: {paths.workspace_path}  {mark}")
 
     if not paths.config_exists:
-        console.print("\n[yellow]⚠ Raven is not configured.[/yellow] Run [cyan]raven onboard[/cyan] to set it up.")
+        console.print("\n[yellow]⚠ Raven is not configured.[/yellow] Run [cyan]rarus onboard[/cyan] to set it up.")
         return
 
     if not report.config_loaded:
         if paths.config_valid:
             console.print(
-                "\n[red]✗ Config schema invalid.[/red] Run [cyan]raven onboard --reset[/cyan] to recreate it."
+                "\n[red]✗ Config schema invalid.[/red] Run [cyan]rarus onboard --reset[/cyan] to recreate it."
             )
         else:
             reason = paths.config_invalid_reason or "invalid JSON"
             console.print(f"\n[yellow]⚠ Config file is {reason}; the checks above ran on built-in defaults.[/yellow]")
-            console.print(f"Fix [cyan]{paths.config_path}[/cyan] or run [cyan]raven onboard --reset[/cyan].")
+            console.print(f"Fix [cyan]{paths.config_path}[/cyan] or run [cyan]rarus onboard --reset[/cyan].")
         return
 
     routing = report.routing
@@ -1023,7 +1023,7 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(
             f"[red]✗ Model [bold]{routing.model}[/bold] could not be routed to any configured provider.[/red]"
         )
-        console.print("Run [cyan]raven provider list[/cyan] / [cyan]raven provider set[/cyan] to fix routing.")
+        console.print("Run [cyan]rarus provider list[/cyan] / [cyan]rarus provider set[/cyan] to fix routing.")
 
     health = report.config_health
     if health and (health.findings or health.applied):
@@ -1035,7 +1035,7 @@ def _render_human_output(report: DoctorReport) -> None:
         for line in health.applied:
             console.print(f"  [green]fixed[/green] {line}")
         if health.fixes:
-            console.print("  [dim]Run [cyan]raven doctor --fix[/cyan] to apply:[/dim]")
+            console.print("  [dim]Run [cyan]rarus doctor --fix[/cyan] to apply:[/dim]")
             for line in health.fixes:
                 console.print(f"    [dim]- {line}[/dim]")
 

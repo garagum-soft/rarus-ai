@@ -1,7 +1,7 @@
 """Plugins contribute hooks: manifest, registry, stack, and the loop's chain.
 
 The loop fires six phases through one chain; without a plugin contribution
-kind for hooks, product code launched as `raven acp --config` could not reach
+kind for hooks, product code launched as `rarus acp --config` could not reach
 them. Pinned here: the manifest entry, registry activation with cross-plugin
 conflict detection, the lenient stack builder, and the end-to-end boarding --
 a plugin directory's hook ends up in the built loop's chain.

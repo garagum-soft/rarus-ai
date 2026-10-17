@@ -343,7 +343,7 @@ def test_an_oauth_provider_that_was_never_signed_in_is_told_to_sign_in(monkeypat
 
     # Carried on the exception rather than printed: the TUI reaches this same
     # check and a stdout line there goes to a log nobody is reading.
-    assert "raven provider login openai-codex" in excinfo.value.summary
+    assert "rarus provider login openai-codex" in excinfo.value.summary
 
 
 def test_the_credential_check_wants_both_halves_of_an_azure_endpoint(tmp_path: Path) -> None:
@@ -528,7 +528,7 @@ def test_make_provider_rejects_endpoints_on_providers_that_cannot_rotate(
 
 def test_no_api_key_error_mentions_onboard(tmp_path: Path) -> None:
     """Zero-provider config: the credentials gate every LLM-needing command
-    runs through must point at ``raven onboard`` alongside the provider set
+    runs through must point at ``rarus onboard`` alongside the provider set
     command. Carried on the exception so the single outlet renders it."""
     from raven.config.loader import load_config
     from raven.providers.auth import MissingCredentialsError
@@ -539,12 +539,12 @@ def test_no_api_key_error_mentions_onboard(tmp_path: Path) -> None:
     with pytest.raises(MissingCredentialsError) as excinfo:
         _helpers.check_provider_credentials(load_config(p))
 
-    assert "raven onboard" in f"{excinfo.value.summary} {excinfo.value.remedy}"
+    assert "rarus onboard" in f"{excinfo.value.summary} {excinfo.value.remedy}"
 
 
 def test_azure_missing_key_same_onboard_guidance(tmp_path: Path) -> None:
     """The azure branch flows through the same gate and must carry the same
-    ``raven onboard`` guidance as the generic no-key branch, not its own
+    ``rarus onboard`` guidance as the generic no-key branch, not its own
     hand-edit-config wording."""
     from raven.config.loader import load_config
     from raven.providers.auth import MissingCredentialsError
@@ -554,7 +554,7 @@ def test_azure_missing_key_same_onboard_guidance(tmp_path: Path) -> None:
     with pytest.raises(MissingCredentialsError) as excinfo:
         _helpers.check_provider_credentials(load_config(cfg))
 
-    assert "raven onboard" in f"{excinfo.value.summary} {excinfo.value.remedy}"
+    assert "rarus onboard" in f"{excinfo.value.summary} {excinfo.value.remedy}"
 
 
 # ── the first-run verdict vs. a provider Raven carries no field for ──
@@ -600,13 +600,13 @@ def test_nothing_configured_at_all_names_the_wizard(tmp_path: Path) -> None:
         _helpers.check_provider_credentials(load_config(cfg))
 
     assert "no provider is configured yet" in excinfo.value.summary
-    assert "raven onboard" in excinfo.value.summary
+    assert "rarus onboard" in excinfo.value.summary
 
 
 def test_migration_notices_go_to_stderr_not_stdout(tmp_path, capsys, monkeypatch) -> None:
     """stdout is a command's answer; this is not part of it.
 
-    ``raven doctor --json`` and ``raven import --json`` are documented for
+    ``rarus doctor --json`` and ``raven import --json`` are documented for
     automation, so a notice appended to their output is not a cosmetic problem
     but an unparseable document -- and the migration only fires once, which is
     exactly the run a CI job would be unlucky enough to hit.

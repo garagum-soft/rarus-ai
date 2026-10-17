@@ -1,4 +1,4 @@
-"""``raven ci``: a branch's, commit's or pull request's GitHub CI, and why the red checks are red."""
+"""``rarus ci``: a branch's, commit's or pull request's GitHub CI, and why the red checks are red."""
 
 from __future__ import annotations
 

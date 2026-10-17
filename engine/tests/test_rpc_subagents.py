@@ -2864,7 +2864,7 @@ async def test_list_marks_a_config_row_whose_handshake_named_raven_as_ravens_own
 
     raw = json.loads(config_path.read_text())
     raw["subagents"]["agents"] += [
-        {"name": "Raven-Code", "kind": "acp", "command": "raven acp", "description": "d", "enabled": True},
+        {"name": "Raven-Code", "kind": "acp", "command": "rarus acp", "description": "d", "enabled": True},
         {"name": "Raven-PPT", "kind": "acp", "command": "raven-ppt acp", "description": "d", "enabled": True},
         {"name": "Other", "kind": "acp", "command": "other acp", "description": "d", "enabled": True},
         {"name": "Other-Quiet", "kind": "acp", "command": "quiet acp", "description": "d", "enabled": True},

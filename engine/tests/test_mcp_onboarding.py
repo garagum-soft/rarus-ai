@@ -47,7 +47,7 @@ def test_the_instructions_name_the_servers_tools_and_how_to_delegate() -> None:
     assert "create_task(prompt, session_id): Start a task in Raven." in text
     assert "More detail" not in text, "one line per tool"
     assert "list_tasks(session_id)" in text and "check list_agents" in text
-    assert "raven web" in text
+    assert "rarus web" in text
 
 
 def test_a_windows_path_with_spaces_is_quoted_for_cmd() -> None:
@@ -79,7 +79,7 @@ async def test_the_gateway_answers_every_client_in_the_contracts_shape() -> None
     assert all("create_task" in c.instructions for c in parsed.clients)
 
 
-@pytest.mark.slow  # a real `raven mcp serve` subprocess, spoken to over stdio
+@pytest.mark.slow  # a real `rarus mcp serve` subprocess, spoken to over stdio
 async def test_the_written_config_starts_a_server_an_mcp_client_can_talk_to() -> None:
     """End to end: the entry a config client is told to write, spawned the way that client spawns it."""
     from mcp import ClientSession, StdioServerParameters

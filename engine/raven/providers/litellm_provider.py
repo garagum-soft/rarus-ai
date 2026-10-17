@@ -77,12 +77,12 @@ _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
 
 # LiteLLM defaults to X-Title="liteLLM" / HTTP-Referer="https://litellm.ai" for OpenRouter
-# requests, which would credit traffic to liteLLM instead of Raven on openrouter.ai/apps.
+# requests, which would credit traffic to liteLLM instead of Rarus AI on openrouter.ai/apps.
 # Explicit headers here override those defaults; user-supplied extra_headers win over these.
 _OPENROUTER_ATTRIBUTION: dict[str, str] = {
-    "HTTP-Referer": "https://raven.evermind.ai",
-    "X-Title": "Raven Agent",
-    "X-OpenRouter-Title": "Raven Agent",
+    "HTTP-Referer": "https://alembox.com",
+    "X-Title": "Rarus AI",
+    "X-OpenRouter-Title": "Rarus AI",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
 

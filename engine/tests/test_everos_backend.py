@@ -169,7 +169,7 @@ class TestConstruction:
 
 
 class TestMakeBackendIsReadOnly:
-    """``raven doctor`` constructs a backend only to call ``health()``,
+    """``rarus doctor`` constructs a backend only to call ``health()``,
     never ``start()`` -- so ``make_backend`` must touch neither disk nor the
     environment. Creating the EverOS home and pointing it at ``EVEROS_ROOT``
     happens in ``start()`` instead, on every start path including one built
@@ -453,7 +453,7 @@ class TestColdStartSpeaksUp:
 
         err = " ".join(" ".join(NOTICES).split())
         assert "its LLM is not configured" in err
-        assert "raven onboard" in err
+        assert "rarus onboard" in err
 
     async def test_other_failures_name_the_reason(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
         async def _boom(*_a: object, **_kw: object) -> None:
@@ -2453,7 +2453,7 @@ async def test_a_write_failed_by_our_own_stop_does_not_demote_the_service(tmp_pa
 
 
 class TestHealth:
-    """What raven doctor and raven import read off the backend."""
+    """What rarus doctor and raven import read off the backend."""
 
     def _patch(self, monkeypatch, *, owned=True, configured=(), report=None):
         from raven_everos import config as ue

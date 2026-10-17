@@ -1,4 +1,4 @@
-"""CLI integration tests for ``raven channels {enable,disable,set,get,reset,help}``.
+"""CLI integration tests for ``rarus channels {enable,disable,set,get,reset,help}``.
 
 Uses ``typer.testing.CliRunner``; redirects the config to a tmp path via
 ``raven.config.loader.set_config_path`` so the real ``~/.rarus/config.json``
@@ -294,7 +294,7 @@ def test_channels_top_help_mentions_list() -> None:
 
 
 def test_channels_bare_prints_help_not_error() -> None:
-    """``raven channels`` (no subcommand) must print help, not 'Missing command'."""
+    """``rarus channels`` (no subcommand) must print help, not 'Missing command'."""
     r = runner.invoke(app, ["channels"])
     assert r.exit_code == 0
     assert "Missing command" not in r.stdout

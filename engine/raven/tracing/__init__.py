@@ -8,7 +8,7 @@ tracing failure can never alter the host's behavior.
 
 Turn off with ``RAVEN_TRACING=0`` or ``[tracing] enabled = false`` in the raven
 config. Spans land at ``~/.rarus/traces/logs/audit-spans.log`` (override with
-``RAVEN_TRACING_DIR``). Open the dashboard with ``raven tracing`` or ``/tracing``.
+``RAVEN_TRACING_DIR``). Open the dashboard with ``rarus tracing`` or ``/tracing``.
 """
 
 from __future__ import annotations

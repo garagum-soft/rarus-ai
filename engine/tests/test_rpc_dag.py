@@ -357,7 +357,7 @@ def test_the_reader_still_refuses_an_id_that_could_walk_out(bad: str) -> None:
 async def test_the_fallback_reads_the_directory_the_run_was_written_to(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`raven serve` builds its manager with a project slug taken from the launch
+    """`rarus serve` builds its manager with a project slug taken from the launch
     directory, and `session_dir()` puts the run under `sessions/<slug>/`. A
     manager built here without that resolves `sessions/<channel>/` -- a
     directory the run was never written to.

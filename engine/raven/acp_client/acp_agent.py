@@ -1064,7 +1064,7 @@ class AcpAgentBackend:
         same pair, because a row saying its model is managed elsewhere while
         every dispatch moves it is worse than either answer on its own.
 
-        The handshake names raven: a product built on ``raven acp`` says so
+        The handshake names raven: a product built on ``rarus acp`` says so
         whatever its row is called here.
 
         And its folder lends it no chat credential of its own. One that does is

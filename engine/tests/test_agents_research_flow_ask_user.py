@@ -1023,7 +1023,7 @@ def test_the_gate_grants_the_round_trip_instead_of_short_circuiting() -> None:
 
 
 def test_the_gate_falls_back_to_the_handoff_without_a_broker() -> None:
-    """ACP and ``raven agent -m`` wire no broker, so ``delivery="tool"`` there
+    """ACP and ``rarus agent -m`` wire no broker, so ``delivery="tool"`` there
     must not turn the mandated round into a fallback string: the measured
     handoff stays the transport, recorded as what actually happened."""
     tool = DRAskUserTool(delivery="tool")  # no broker, no conversation_id

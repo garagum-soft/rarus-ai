@@ -46,8 +46,8 @@ def test_missing_procfs_falls_back_to_ps(monkeypatch, unavailable) -> None:
 
     monkeypatch.setattr(processes.sys, "platform", "linux")
     monkeypatch.setattr(processes.Path, "read_bytes", read)
-    monkeypatch.setattr(processes, "_command_line_posix", lambda pid: "python -m raven serve" if pid == 1234 else None)
-    assert processes.command_line(1234) == "python -m raven serve"
+    monkeypatch.setattr(processes, "_command_line_posix", lambda pid: "python -m rarus serve" if pid == 1234 else None)
+    assert processes.command_line(1234) == "python -m rarus serve"
 
 
 def test_a_module_invocation_is_recognised_anywhere_in_the_argv(monkeypatch) -> None:
@@ -55,13 +55,13 @@ def test_a_module_invocation_is_recognised_anywhere_in_the_argv(monkeypatch) -> 
     monkeypatch.setattr(
         processes,
         "command_line",
-        lambda _pid: "c:/py/python.exe -P -m raven gateway --page-port 18792",
+        lambda _pid: "c:/py/python.exe -P -m rarus gateway --page-port 18792",
     )
     assert processes.looks_like_raven(1234)
 
 
 def test_a_console_script_serve_is_recognised(monkeypatch) -> None:
-    """The documented entry point: ``raven serve`` runs ``entry:run`` in
+    """The documented entry point: ``rarus serve`` runs ``entry:run`` in
     this process, so its argv is the console script plus the subcommand."""
     monkeypatch.setattr(processes, "command_line", lambda _pid: "C:/raven/Scripts/raven.exe serve --port 18792")
     assert processes.looks_like_raven(1234)
@@ -69,12 +69,12 @@ def test_a_console_script_serve_is_recognised(monkeypatch) -> None:
     monkeypatch.setattr(processes, "command_line", lambda _pid: "/usr/local/bin/raven web --supervise")
     assert processes.looks_like_raven(1234)
 
-    monkeypatch.setattr(processes, "command_line", lambda _pid: "raven gateway --page-port 18792")
+    monkeypatch.setattr(processes, "command_line", lambda _pid: "rarus gateway --page-port 18792")
     assert processes.looks_like_raven(1234)
 
 
 def test_a_console_script_of_another_verb_is_not(monkeypatch) -> None:
-    """``raven tui`` and ``raven --version`` are run-and-done: no state file
+    """``rarus tui`` and ``raven --version`` are run-and-done: no state file
     names them, so a pid that is one of them is not this module's business."""
     monkeypatch.setattr(processes, "command_line", lambda _pid: "C:/raven/Scripts/raven.exe tui")
     assert not processes.looks_like_raven(1234)
@@ -107,7 +107,7 @@ def test_an_unreadable_command_line_has_an_unknown_identity(monkeypatch, line) -
 @pytest.mark.parametrize(
     "line",
     [
-        "python -P -m raven serve --port 18792",
+        "python -P -m rarus serve --port 18792",
         "python -m raven -- gateway --page-port 18792",
         'python -m "raven" web --supervise',
         '"C:/Program Files/Raven/raven.exe" serve --port 18792',
@@ -138,8 +138,8 @@ def test_a_raven_named_directory_does_not_hide_the_resident(monkeypatch, line: s
 @pytest.mark.parametrize(
     "line",
     [
-        "python -m raven acp",
-        "python -m raven tui",
+        "python -m rarus acp",
+        "python -m rarus tui",
         "python -m raven --version serve",
         "python -m raven --help web",
         "python -m raven_tools serve",
@@ -147,7 +147,7 @@ def test_a_raven_named_directory_does_not_hide_the_resident(monkeypatch, line: s
         "python -m raven.other serve",
         "python -m raven-tools serve",
         "python -m raven serve_other",
-        "python -m raven serve-other",
+        "python -m rarus serve-other",
         "python -m raven",
         "python app.py",
     ],

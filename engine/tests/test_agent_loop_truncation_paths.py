@@ -1,7 +1,7 @@
 """Truncation is decided the same way on both response paths.
 
 The agent loop reaches the model two ways: streaming when a caller wired token
-callbacks (the TUI), non-streaming when nobody did (``raven agent`` on the
+callbacks (the TUI), non-streaming when nobody did (``rarus agent`` on the
 CLI, sub-agents, the sentinel). The detection was originally written inside
 the streaming helper, which left every non-streaming caller reporting a
 cut-off tool call as a missing required field -- reproduced live as a

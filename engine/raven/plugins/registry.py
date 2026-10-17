@@ -681,7 +681,7 @@ class PluginRegistry:
 
         Symmetric with :meth:`build_session_observer`: synchronous
         construction, exceptions propagate so the host sees the real cause.
-        ``raven onboard`` runs the returned step with the wizard shell it
+        ``rarus onboard`` runs the returned step with the wizard shell it
         lends (paper: contracts/onboard.py).
         """
         factory = self.get_onboard_factory(name)

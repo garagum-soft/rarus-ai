@@ -569,12 +569,12 @@ class CliAgentBackend:
         reasoning_effort = getattr(getattr(provider, "generation", None), "reasoning_effort", None)
         if reasoning_effort:
             runtime_env["RAVEN_PARENT_REASONING_EFFORT"] = str(reasoning_effort)
-        # Agent mail: who this child is, for its own `raven mail send|inbox`, and
+        # Agent mail: who this child is, for its own `rarus mail send|inbox`, and
         # what was written to it before it started. The process sees nothing
         # mid-run, so its unread mail travels with the task.
         runtime_env.update(mailbox.env_for_current())
         if (mail := await asyncio.to_thread(mailbox.take_for_current)) is not None:
-            task = f'{task}\n\n{mail}\n\n(Reply to another agent with: raven mail send <name> "<text>".)'
+            task = f'{task}\n\n{mail}\n\n(Reply to another agent with: rarus mail send <name> "<text>".)'
         handle = instance or task_id
         # Re-checked rather than trusted: `streams` is what the manager reads to
         # decide whether to offer the hook, and a caller driving this backend

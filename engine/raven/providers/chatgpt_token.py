@@ -62,9 +62,9 @@ def stored_credentials() -> dict[str, Any] | None:
 #: failure, a revoked token and an unreachable network alike, in the same error.
 _EXPIRED = (
     "could not renew the ChatGPT credential -- it may have been revoked, or the network "
-    "may be unreachable; if it was revoked, run `raven provider login openai-codex`"
+    "may be unreachable; if it was revoked, run `rarus provider login openai-codex`"
 )
-_MISSING = "no ChatGPT credentials found -- run `raven provider login openai-codex`"
+_MISSING = "no ChatGPT credentials found -- run `rarus provider login openai-codex`"
 
 
 def clear_abandoned_device_code() -> bool:

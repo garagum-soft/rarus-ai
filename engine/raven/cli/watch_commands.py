@@ -1,4 +1,4 @@
-"""``raven watch``: projects whose failing checks and red CI become tasks by themselves."""
+"""``rarus watch``: projects whose failing checks and red CI become tasks by themselves."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def add(
         f"watching {root}: {', '.join(c.name for c in checks) or 'no local checks'}"
         + (f"; CI of {github}" if github else "")
     )
-    typer.echo("a running gateway starts watching it on its next restart; `raven watch scan` runs a scan now")
+    typer.echo("a running gateway starts watching it on its next restart; `rarus watch scan` runs a scan now")
 
 
 @watch_app.command("list")

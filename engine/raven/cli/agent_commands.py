@@ -1,9 +1,9 @@
 """Top-level ``agent`` command (one-shot ``-m`` mode).
 
-``raven agent -m "..."`` runs a single USER turn through the spine
+``rarus agent -m "..."`` runs a single USER turn through the spine
 (submit -> lane -> run_turn -> hub -> CliOutlet) and exits. The
-interactive REPL was removed — ``raven tui`` is the interactive
-front-end; invoking ``raven agent`` without ``-m`` prints a pointer
+interactive REPL was removed — ``rarus tui`` is the interactive
+front-end; invoking ``rarus agent`` without ``-m`` prints a pointer
 and exits non-zero.
 
 ``commands.py`` registers the command via :func:`register`.
@@ -191,7 +191,7 @@ _NON_AUTH_HINTS = {
     "network": "Hint: network problem; check connectivity and the provider apiBase, then retry.",
     "context_overflow": "Hint: the input exceeds the model's context window; shorten it.",
     "server": "Hint: provider-side error; retry later or switch models.",
-    "model_unavailable": "Hint: model not served; pick another with raven provider use <name>/<model>.",
+    "model_unavailable": "Hint: model not served; pick another with rarus provider use <name>/<model>.",
     "billing": "Hint: billing or quota issue; check your provider account.",
 }
 
@@ -220,7 +220,7 @@ def _print_llm_error(content: str) -> bool:
         where = f" ({escape(provider)})" if provider else ""
         console.print(f"[red]Error: provider rejected the credentials{where}: {escape(detail)}[/red]")
         target = provider or "<name>"
-        console.print(f"Fix: raven provider test {escape(target)}  or  raven onboard")
+        console.print(f"Fix: rarus provider test {escape(target)}  or  rarus onboard")
     else:
         console.print(f"[red]Error: LLM call failed ({escape(category)}): {escape(detail)}[/red]")
         hint = _NON_AUTH_HINTS.get(category)
@@ -298,7 +298,7 @@ def register(app: typer.Typer) -> None:
             ),
         ),
     ):
-        """Run a one-shot agent turn (requires -m); interactive chat lives in `raven tui`."""
+        """Run a one-shot agent turn (requires -m); interactive chat lives in `rarus tui`."""
         if sum((session_id is not None, continue_, resume is not None)) > 1:
             raise typer.BadParameter("--session, --continue and --resume are mutually exclusive")
 
@@ -323,8 +323,8 @@ def register(app: typer.Typer) -> None:
 
         if message is None:
             console.print(
-                "[yellow]The interactive REPL was removed. Use [bold]raven tui[/bold] "
-                'for interactive chat, or [bold]raven agent -m "..."[/bold] for a '
+                "[yellow]The interactive REPL was removed. Use [bold]rarus tui[/bold] "
+                'for interactive chat, or [bold]rarus agent -m "..."[/bold] for a '
                 "one-shot turn.[/yellow]"
             )
             raise typer.Exit(code=2)

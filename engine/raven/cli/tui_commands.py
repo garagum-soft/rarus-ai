@@ -1,4 +1,4 @@
-"""Typer subcommand: `raven tui` — launch the Ink+React TUI subprocess.
+"""Typer subcommand: `rarus tui` — launch the Ink+React TUI subprocess.
 
 Bootstrap stage (L2-α `tui-bootstrap`): pure Node spawn, no IPC.
 IPC stage (`tui-ipc-bridge`): we additionally open two POSIX
@@ -76,7 +76,7 @@ def own_entry_point() -> Optional[Path]:
 def child_env() -> dict[str, str]:
     """Environment for the Node child, naming the raven it must call back into.
 
-    The TUI runs ``raven provider login`` for the user, and that writes a
+    The TUI runs ``rarus provider login`` for the user, and that writes a
     credential. Resolved through PATH it can be a different install than the one
     running -- one whose idea of where credentials live is its own, so the login
     reports success and this process still sees an unauthenticated provider.
@@ -165,7 +165,7 @@ def find_node() -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
 
         # Priority 4: Raven-managed private runtime installed by the one-line
         # installer into ~/.rarus/runtime/. This is the zero-config fallback so
-        # a user who has no system Node still gets a working `raven tui` after
+        # a user who has no system Node still gets a working `rarus tui` after
         # the installer provisioned a private Node here. Glob to tolerate the
         # versioned dir name. The on-disk layout differs by OS: POSIX tarballs
         # nest the binary under bin/ (node-v22.x.y-darwin-arm64/bin/node) while
@@ -367,7 +367,7 @@ async def _run_rpc_server_until_done(
     question_broker = QuestionBroker(send_frame=server.send_frame)
 
     # Wire AgentLoop for turn.send streaming. _build_agent_loop
-    # mirrors the minimal subset of `raven agent` boilerplate needed to
+    # mirrors the minimal subset of `rarus agent` boilerplate needed to
     # serve chat turns from a TUI subprocess (no sentinel/cron — those are
     # the gateway's responsibility). Eager build at server bring-up so a
     # bad provider config surfaces immediately rather than on first chat.
@@ -466,11 +466,11 @@ async def _run_rpc_server_until_done(
     # Keeping production aligned with the umbrella means any future
     # register_*_methods helper added in raven/rpc/methods/__init__.py
     # is picked up automatically — no more registration drift where new
-    # handlers worked in the demo runner but returned -32601 in `raven tui`.
+    # handlers worked in the demo runner but returned -32601 in `rarus tui`.
     dispatcher.register("system.hello", hello_then_signal)
     dispatcher.register("system.ping", system_ping)
     dispatcher.register("system.version", system_version)
-    # Registered here too, though it only acts inside `raven serve`: the handler
+    # Registered here too, though it only acts inside `rarus serve`: the handler
     # answers with a typed "not_serving" refusal the client can show, which is
     # more use than the -32601 an unregistered name would give, and it keeps
     # this path in lock-step with the umbrella (see the drift test).
@@ -845,7 +845,7 @@ def _print_node_help(out=None) -> None:
     msg = t(
         "✗ TUI failed to start: Node.js >= 22 not found.\n"
         "  Install: https://nodejs.org/  or  brew install node@22  or  nvm install 22\n"
-        '  Or ask once:  raven agent -m "..."\n'
+        '  Or ask once:  rarus agent -m "..."\n'
     )
     typer.echo(msg, file=out)
 
@@ -970,7 +970,7 @@ def tui(
 
     # Refresh the cached latest-release version in the background (once per
     # launch, throttled, best-effort) so the status bar can nudge
-    # `raven upgrade`. The gateway reads that cache when it builds the session
+    # `rarus upgrade`. The gateway reads that cache when it builds the session
     # info bundle.
     from raven.updates.update_notice import maybe_refresh_async
 
@@ -1074,7 +1074,7 @@ def tui(
                 t(
                     "✗ TUI bundle missing: {entry} (or the source tree {dev_entry})\n"
                     "  Developers: cd {dir} && npm install && npm run build\n"
-                    "  Users: reinstall with  curl -fsSL https://raven.evermind.ai/install.sh | sh\n",
+                    "  Users: reinstall Rarus AI with its installer\n",
                     entry=_PACKAGED_DIST_ENTRY,
                     dev_entry=_UI_TUI_DIR / "dist" / "entry.js",
                     dir=_UI_TUI_DIR,

@@ -1,4 +1,4 @@
-"""``raven acp``: the ACP agent's process shell.
+"""``rarus acp``: the ACP agent's process shell.
 
 An editor spawns this command and speaks newline-delimited JSON-RPC to its stdin
 and stdout. What lives here is only the process's own business -- claiming fd 1
@@ -41,7 +41,7 @@ speaks the Agent Client Protocol to its stdin and stdout:
 newline-delimited JSON-RPC, one frame per line, protocolVersion 1. It
 is not an interactive command: run bare in a terminal it waits for a
 frame that never arrives. To drive it by hand, feed it a file with
-`raven acp < session.jsonl`.
+`rarus acp < session.jsonl`.
 \b
 Answered:
   session/new, session/load, session/resume, session/list,
@@ -93,7 +93,7 @@ Design notes are in docs/specs, in the files named *-acp-*.
 
 # No subcommands are registered, so Click's default ``COMMAND [ARGS]...`` in the
 # usage line promises a shape that does not exist. The group itself stays -- see
-# the callback's guard, which keeps a future ``raven acp <something>`` from also
+# the callback's guard, which keeps a future ``rarus acp <something>`` from also
 # starting a server.
 acp_app = typer.Typer(name="acp", help=_HELP, subcommand_metavar="")
 
@@ -136,7 +136,7 @@ def acp(
         # traceback is in the log file, where the sink is configured not to
         # annotate it with values.
         logger.exception("acp: exiting on an unhandled failure")
-        typer.echo(f"raven acp failed: {exc}", err=True)
+        typer.echo(f"rarus acp failed: {exc}", err=True)
         raise typer.Exit(code=1) from None
     # ACP owns a short-lived process whose native rendering and memory runtimes
     # can crash during interpreter finalization after async teardown completes.
@@ -155,7 +155,7 @@ def _use_config(path: str) -> None:
     """
     resolved = Path(path).expanduser().resolve()
     if not resolved.is_file():
-        typer.echo(f"raven acp: no config file at {resolved}", err=True)
+        typer.echo(f"rarus acp: no config file at {resolved}", err=True)
         raise typer.Exit(code=2)
     set_config_path(resolved)
 
@@ -215,7 +215,7 @@ async def _open_stdin() -> AsyncIterator[asyncio.StreamReader]:
 
     Two paths, because ``connect_read_pipe`` does not accept every stdin. It
     refuses a regular file outright -- ``ValueError: Pipe transport is for
-    pipes/sockets only`` -- so ``raven acp < script.jsonl``, which is how anyone
+    pipes/sockets only`` -- so ``rarus acp < script.jsonl``, which is how anyone
     first tries this by hand, would die with a traceback before reading a byte.
     The fallback reads the descriptor on a daemon thread and feeds the same
     reader, which costs a thread and gives up the transport's own backpressure

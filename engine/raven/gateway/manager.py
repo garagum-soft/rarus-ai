@@ -46,8 +46,8 @@ def missing_dep_hint() -> str:
     if editable:
         return "Run: uv sync --inexact --extra channels"
     if sys.platform == "win32":
-        return "Re-run the installer to add channels: irm https://raw.githubusercontent.com/EverMind-AI/Raven/refs/heads/main/install.ps1 | iex"
-    return "Re-run the installer to add channels: curl -fsSL https://raven.evermind.ai/install.sh | bash"
+        return "Re-run the Rarus AI installer to add channels"
+    return "Re-run the Rarus AI installer to add channels"
 
 
 def missing_dependency_channels(config: Config) -> list[str]:

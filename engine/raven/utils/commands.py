@@ -214,7 +214,7 @@ def resolve_subagent_command(template: str, *, python: str, subagent_dir: str, q
     quoted spelling, so a spaced value reads as one token to the parser.
     The shipped manifests use ``{SUBAGENT_DIR}/run.py`` -- a forward slash --
     so the quoted root and its launcher stay one token on both hosts.
-    Discovery (``vendored_agents``), ``raven agents new --register`` and each
+    Discovery (``vendored_agents``), ``rarus agents new --register`` and each
     folder's ``install.py`` all write through this, so the three agree.
     """
     directory, interpreter = subagent_dir, python

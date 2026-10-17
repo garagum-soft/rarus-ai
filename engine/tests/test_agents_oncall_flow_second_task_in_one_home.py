@@ -1,6 +1,6 @@
 """A second task in the same instance, which is how anyone actually uses this.
 
-Asked on 2026-08-13: "will a user just run `raven tui` once and then do task A
+Asked on 2026-08-13: "will a user just run `rarus tui` once and then do task A
 and task B in a row?" The answer was no, in two places, and neither had been
 noticed for a month because every experiment passes ``--config`` -- so each
 instance held exactly one campaign and neither path was ever walked. The

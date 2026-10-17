@@ -34,7 +34,7 @@ EXPECTED_REQUIRED: dict[str, set[str]] = {
     # Judgment calls (no hard start() guard) — see the plan for rationale.
     "matrix": {"access_token", "user_id"},  # fed into AsyncClient; effectively required to connect
     "whatsapp": set(),  # local bridge; bridge_token auto-generated when empty
-    "weixin": set(),  # credentials arrive via `raven channels login weixin`
+    "weixin": set(),  # credentials arrive via `rarus channels login weixin`
 }
 
 

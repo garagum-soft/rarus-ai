@@ -1130,7 +1130,7 @@ class PluginsConfig(_Base):
     by role (``builtin``, ``installed``, ``project``), replacing that role's
     default (``raven.plugins.access``). ``{"project": ["tools"]}`` lets a
     repository's own plugins add tools unasked; ``{"installed": []}`` makes
-    every installed plugin wait for ``raven plugins grant``."""
+    every installed plugin wait for ``rarus plugins grant``."""
 
 
 class MemoryConfig(_Base):
@@ -1354,7 +1354,7 @@ class TracingConfig(_Base):
     On by default; every ``raven`` command auto-installs non-invasive
     instrumentation before any AgentLoop is built. ``RAVEN_TRACING=0`` is an
     explicit env kill-switch that overrides this block. View captured traces
-    with ``raven tracing`` (or ``/tracing`` in the TUI).
+    with ``rarus tracing`` (or ``/tracing`` in the TUI).
     """
 
     enabled: bool = True

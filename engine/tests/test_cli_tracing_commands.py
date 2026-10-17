@@ -5,7 +5,7 @@ tracing viewer (answers ``/api/health`` with ``{"ok": true}``); a foreign or
 stale server holding the port must be detected so the launcher can move on.
 
 Also covers the background-viewer lifecycle: pid file written on spawn,
-``raven tracing stop`` (idempotent, never kills an unverified pid), and
+``rarus tracing stop`` (idempotent, never kills an unverified pid), and
 start-time reuse of a live instance recorded in the pid file. Real process
 reaping is left to integration/manual checks — Popen is monkeypatched here.
 """

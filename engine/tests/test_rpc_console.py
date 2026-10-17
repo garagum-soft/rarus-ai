@@ -273,7 +273,7 @@ async def test_ext_list_calls_a_skill_hub_installed_whichever_installer_stamped_
 
 async def test_system_upgrade_refuses_when_no_gateway_is_running() -> None:
     """The helper waits for *this* process to exit and relaunches it, so it is
-    only meaningful inside `raven serve`. On the TUI path the guard is what turns
+    only meaningful inside `rarus serve`. On the TUI path the guard is what turns
     a meaningless call into a typed refusal instead of a half-done upgrade."""
     from raven.cli.serve_commands import SERVE
     from raven.rpc.errors import ConfigValidationError
@@ -292,7 +292,7 @@ async def test_system_upgrade_refuses_when_no_gateway_is_running() -> None:
 
 
 async def test_the_gateway_registers_what_the_umbrella_does() -> None:
-    """`raven serve` builds its dispatcher through ``build_rpc_stack``; the TUI
+    """`rarus serve` builds its dispatcher through ``build_rpc_stack``; the TUI
     builds one through the umbrella. A method registered on one and not the
     other is a client-visible difference nobody would notice until a page called
     it, so the two sets are compared directly rather than against a hand-written

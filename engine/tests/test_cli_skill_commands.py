@@ -1,4 +1,4 @@
-"""CLI tests for ``raven skill``.
+"""CLI tests for ``rarus skill``.
 
 Two subcommands are covered with mocked ``SkillService`` so the tests
 stay self-contained.

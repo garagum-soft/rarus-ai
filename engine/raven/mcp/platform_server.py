@@ -1,12 +1,12 @@
 """Raven's own MCP server: the platform's tasks, sessions, agents and channels as tools.
 
-An MCP client -- another agent, an IDE -- connects over stdio (``raven mcp
+An MCP client -- another agent, an IDE -- connects over stdio (``rarus mcp
 serve``) and drives the Raven that is running on this machine: start a task in a
 conversation, list a conversation's tasks, list conversations, the agent roster
 and the channels. Every tool is one call on the gateway's own JSON-RPC
 (``/rpc``), so the server holds no state of its own and can do nothing the page
 cannot; it finds the gateway and its credential in ``serve.json``, the file
-``raven web`` / ``raven serve`` writes for local tooling.
+``rarus web`` / ``rarus serve`` writes for local tooling.
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ class GatewayClient:
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            raise GatewayUnavailableError("Raven is not running here; start it with `raven web`") from None
+            raise GatewayUnavailableError("Raven is not running here; start it with `rarus web`") from None
         if not state.get("port") or not state.get("token"):
-            raise GatewayUnavailableError(f"{self.state_path} names no port or token; restart `raven web`")
+            raise GatewayUnavailableError(f"{self.state_path} names no port or token; restart `rarus web`")
         return state
 
     async def call(self, method: str, params: dict[str, Any]) -> Any:

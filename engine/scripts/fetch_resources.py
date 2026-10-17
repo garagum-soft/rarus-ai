@@ -5,7 +5,7 @@ A shim. The fetcher moved into the package (:mod:`raven.resources`) so that an
 install with no checkout can still run it; this file stays because the Makefile
 and the Dockerfile call it by path, and a developer's fingers know it.
 
-Run `raven resources` instead where there is no checkout to run this from.
+Run `rarus resources` instead where there is no checkout to run this from.
 """
 
 from __future__ import annotations

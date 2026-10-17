@@ -248,7 +248,7 @@ class TestAnAcpRowCanReplaceTheSeed:
     unnamed ``spawn`` and a dag node with no ``subagent`` must not silently land
     on an external backend -- an acp redeclaration is the user saying exactly
     that out loud: the generic agent is served over this raven's own
-    ``raven acp``, and every default dispatch follows it.
+    ``rarus acp``, and every default dispatch follows it.
     """
 
     def _acp(self, name: str = GENERIC_AGENT) -> Any:

@@ -656,7 +656,7 @@ async def test_an_acp_stack_runs_wakes_on_the_session_and_a_tui_stack_keeps_the_
 async def test_a_second_assembly_keeps_the_subscriptions_the_live_one_holds() -> None:
     """A stack rebuilt under a live socket is handed the emitter it replaces.
 
-    ``raven serve`` can assemble late: a first run comes up with no loop and
+    ``rarus serve`` can assemble late: a first run comes up with no loop and
     builds one when the page writes a model. The socket does not drop for that,
     and the page re-subscribes only when it does -- so a replacement stack with
     an emitter of its own would emit into one nothing is reading, and every

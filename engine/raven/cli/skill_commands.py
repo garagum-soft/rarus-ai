@@ -1,6 +1,6 @@
 """Skill subcommands — owns the ``skill_app`` Typer instance.
 
-Bundles all ``raven skill ...`` subcommands:
+Bundles all ``rarus skill ...`` subcommands:
 
 Read-only inspection (registry-level):
 
@@ -180,7 +180,7 @@ def skill_remove(
     for d in matches:
         shutil.rmtree(d)
     console.print(f"[green]Removed[/green] {len(matches)} bundle(s) of {name!r}.")
-    console.print("[dim]Tip: `raven skill block " + name + "` prevents silent re-install.[/dim]")
+    console.print("[dim]Tip: `rarus skill block " + name + "` prevents silent re-install.[/dim]")
 
 
 __all__ = ["skill_app"]

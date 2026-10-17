@@ -46,8 +46,8 @@ def check_provider_credentials(config: Config, model: str | None = None) -> None
             "no provider configured",
             # A command, not a config path: the CLI exists to hide the layout.
             remedy=(
-                "Run: raven provider set <name> --api-key <key>, then raven provider use <name>/<model>\n"
-                "Or run `raven onboard` for guided setup."
+                "Run: rarus provider set <name> --api-key <key>, then rarus provider use <name>/<model>\n"
+                "Or run `rarus onboard` for guided setup."
             ),
         )
 
@@ -73,14 +73,14 @@ def check_provider_credentials(config: Config, model: str | None = None) -> None
         credential_status(name, config.providers.get(name), include_external=True).ok for name in configured
     ):
         raise MissingCredentialsError(
-            "no provider is configured yet -- run `raven onboard` for guided setup",
-            remedy="Already have a key? raven provider set <name> --api-key <key>",
+            "no provider is configured yet -- run `rarus onboard` for guided setup",
+            remedy="Already have a key? rarus provider set <name> --api-key <key>",
         )
 
     raise MissingCredentialsError(
         status.summary,
         provider=provider_name,
-        remedy="Run `raven onboard` for guided setup.",
+        remedy="Run `rarus onboard` for guided setup.",
     )
 
 

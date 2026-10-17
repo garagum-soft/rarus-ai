@@ -244,7 +244,7 @@ def test_a_cycle_among_instance_sharing_nodes_reports_the_cycle():
     `_forms_chain` finds every pair of a mutual cycle "ordered" (each reaches the
     other), so the head generator ran empty and a bare `next()` raised -- escaping
     the compose and generation repair loops as an exception instead of an error
-    string they could feed back, and tracebacking `raven playbook validate` on a
+    string they could feed back, and tracebacking `rarus playbook validate` on a
     hand-written file.
     """
     nodes = [

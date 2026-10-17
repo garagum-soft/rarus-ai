@@ -2,7 +2,7 @@
 
 :mod:`raven.ops.connections` reads the owner's machines and stays read-only on
 purpose. This module is the one door that adds a row, and it is the same door
-whichever surface knocks: the owner in a terminal (``raven ops connection
+whichever surface knocks: the owner in a terminal (``rarus ops connection
 add``), or an agent that was told about a machine in conversation
 (``ops_connection_add``). Until 2026-09-06 the host ran the command on the
 owner's behalf before dispatching a sub-agent; that step went with the

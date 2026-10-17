@@ -590,7 +590,7 @@ class StintDriver:
         # ones still calling themselves live. A `stop` lands on the file while a
         # round is running, and its own promise is that the round finishes and
         # reports; filtering on `record.live` here let go of a round that was
-        # still going, so `raven playbook run` returned and took the round down
+        # still going, so `rarus playbook run` returned and took the round down
         # with it -- the roles after the stop never ran and were never recorded.
         # `entry.run_id in live` is the real question, and it is already about
         # this process alone.
@@ -723,7 +723,7 @@ class StintDriver:
             record.stint_id,
             f"Stint {record.stint_id} ({record.playbook}) is paused: round {record.round_index} ended with "
             f"no role finished, so nothing was built on and no budget was spent.\n\n{shown}\n\n"
-            f"Fix the cause, then `raven playbook stints resume {record.stint_id}` puts the round up again.",
+            f"Fix the cause, then `rarus playbook stints resume {record.stint_id}` puts the round up again.",
             record.origin or None,
         )
 
@@ -747,7 +747,7 @@ class StintDriver:
             await say(
                 record.stint_id,
                 f"Stint {record.stint_id} ({record.playbook}) is paused before round {index}: {refusal}\n\n"
-                f"Nothing is lost. Take it up with `raven playbook stints resume {record.stint_id}` "
+                f"Nothing is lost. Take it up with `rarus playbook stints resume {record.stint_id}` "
                 f"once the hour's dispatches have aged out.",
                 record.origin or None,
             )
@@ -921,7 +921,7 @@ class StintDriver:
             return (
                 f"Stint {stint_id} may now run {budget} rounds. No round of it is going here, so nothing is "
                 f"about to read that -- if nothing elsewhere is advancing it, take it up with "
-                f"`raven playbook stints resume {stint_id}`."
+                f"`rarus playbook stints resume {stint_id}`."
             )
         # An over stint is not going to be advanced by anything, so raising its
         # budget alone would leave it exactly where it was. Open the round here.
@@ -1022,7 +1022,7 @@ class StintDriver:
                 return (
                     f"Stint {stint_id} finished round {record.round_index} of {_budget(spec)} before it "
                     f"{record.status}, so the round after it is past its budget. Give it more with "
-                    f"`raven playbook stints extend {stint_id} --rounds N`."
+                    f"`rarus playbook stints extend {stint_id} --rounds N`."
                 )
             index, attempt, satisfied = record.round_index + 1, 0, {}
             record.round_index = index
@@ -1258,8 +1258,8 @@ def _what_to_do(record: StintRecord, waiting: Sequence[Mapping[str, Any]]) -> st
     first = str(waiting[0].get("text") or "").strip().splitlines()[0][:160]
     return (
         f"One of these needs a person, and the stint goes on without an answer: {first!r}. Show the user "
-        f"`raven playbook stints get {record.stint_id}` for all of them, and when they say what to answer, "
-        f'record it with `raven playbook stints answer {record.stint_id} -q <number> -t "..."`. It reaches '
+        f"`rarus playbook stints get {record.stint_id}` for all of them, and when they say what to answer, "
+        f'record it with `rarus playbook stints answer {record.stint_id} -q <number> -t "..."`. It reaches '
         "the round after the one now running. Everything else here is news: do not edit the stint's checkout."
     )
 
@@ -1296,7 +1296,7 @@ def _unanswered_checks(project: Path, spec: PlaybookSpec) -> str:
     return (
         f"Error: '{spec.name}' declares {len(missing)} check(s) this project has never answered -- {told}. "
         f"A declared check that does not run is a gate the round reports and nobody measured. Say what they "
-        f'run here: `raven playbook stint check set {spec.name} {first} --run "..."`.'
+        f'run here: `rarus playbook stint check set {spec.name} {first} --run "..."`.'
     )
 
 
@@ -1335,7 +1335,7 @@ def _second_plan_refused(running: StintRecord, playbook: str, project: Path) -> 
         "each working from a base that does not have the other's work. If its host is still running, wait for "
         "it. If you know its host is gone, ask again in a few minutes: once nothing has touched it for "
         f"{int(STALE_AFTER_SEC // 60)}, asking for this playbook takes it up where it stopped. To end it "
-        f"instead: `raven playbook stints stop {running.stint_id}`."
+        f"instead: `rarus playbook stints stop {running.stint_id}`."
     )
 
 
@@ -1369,14 +1369,14 @@ def integrate_finished(spec: PlaybookSpec, record: StintRecord, store: StintStor
     """
     if spec.review is not None and spec.integrate != "merge" and record.branch and record.project:
         # Reviewed but not merged by the stint: the person who merges it is told
-        # where the review is, and `raven review merge` holds the same gate.
+        # where the review is, and `rarus review merge` holds the same gate.
         found = ReviewBook().find(record.project, record.branch)
         if found is not None and found.status != "approved":
             record.questions.append(
                 {
                     "round": record.round_index,
                     "role": "review",
-                    "text": f"{record.branch} waits for an independent review: `raven review show {found.id}`.",
+                    "text": f"{record.branch} waits for an independent review: `rarus review show {found.id}`.",
                     "answered_at": None,
                     "answer": "",
                 }
@@ -1455,7 +1455,7 @@ def _summary(record: StintRecord) -> str:
         # here, and from here there is one way to get another round. Without it
         # the reader's only visible move is to start a second stint, which begins
         # again from before this one's first commit.
-        f"More rounds on this same tree: `raven playbook stints extend {record.stint_id} --rounds N`.",
+        f"More rounds on this same tree: `rarus playbook stints extend {record.stint_id} --rounds N`.",
     ]
     if violations:
         lines.append(

@@ -1,6 +1,6 @@
 """``employees.*``: hiring an employee from the page, and its card afterwards.
 
-The same one step as ``raven agents hire`` (:mod:`raven.agent.subagent.hire`):
+The same one step as ``rarus agents hire`` (:mod:`raven.agent.subagent.hire`):
 a name, a role, a model on the host's keys or on a key of its own, and a system
 prompt. The roster is pushed into the live runtime after each change, so the
 main agent can hand work to a new hire in its next turn. A key is written into

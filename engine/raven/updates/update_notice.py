@@ -8,7 +8,7 @@ is what fills those in.
 The live check reads the release page redirect (not the releases API, whose
 unauthenticated quota is 60 requests per hour per IP -- a daily check from every
 install behind one egress is enough to drain it, and a nudge must not cost the
-budget that ``raven upgrade`` needs). It is too slow for the session-create
+budget that ``rarus upgrade`` needs). It is too slow for the session-create
 hot path, so we keep a small cache in the runtime cache dir and refresh it in a daemon thread at most once a
 day. A launch therefore shows the notice based on the *cached* latest version;
 the first launch after a release lands refreshes the cache and the notice appears
@@ -34,8 +34,9 @@ from typing import NamedTuple
 
 _CACHE_NAME = "update_check.json"
 _REFRESH_TTL_SECONDS = 24 * 60 * 60
-_UPGRADE_COMMAND = "raven upgrade"
+_UPGRADE_COMMAND = "rarus upgrade"
 _OPT_OUT_ENV = "RAVEN_NO_UPDATE_CHECK"
+_SOURCE_ENV = "RARUS_UPDATE_URL"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -48,6 +49,12 @@ def _cache_path() -> Path:
 
 
 def _disabled() -> bool:
+    """No check unless an update source is named: Rarus ships no default one yet (spec 18.5).
+
+    The program must not ask a third party's release page whether it is current.
+    """
+    if not os.environ.get(_SOURCE_ENV, "").strip():
+        return True
     return os.environ.get(_OPT_OUT_ENV, "").strip().lower() in _TRUTHY
 
 
@@ -98,7 +105,7 @@ def read_cache() -> dict | None:
         return None
 
     # A hand-edited cache can be valid JSON and still not an object; without
-    # this guard the .get() below raises and takes `raven tui` down with it.
+    # this guard the .get() below raises and takes `rarus tui` down with it.
     return parsed if isinstance(parsed, dict) else None
 
 
@@ -144,7 +151,7 @@ def maybe_refresh_async() -> None:
 
     Fire-and-forget: spawns a daemon thread only when the cache is missing or
     older than the TTL, so a normal launch touches the network at most once a
-    day and never blocks. Installs that cannot run ``raven upgrade`` skip the
+    day and never blocks. Installs that cannot run ``rarus upgrade`` skip the
     fetch entirely -- they would never be shown the result.
     """
     if _disabled() or not _upgrade_command_works():
@@ -162,7 +169,7 @@ def maybe_refresh_async() -> None:
 
 
 def _upgrade_command_works() -> bool:
-    """Whether ``raven upgrade`` can actually do anything on this install.
+    """Whether ``rarus upgrade`` can actually do anything on this install.
 
     It refuses to run for editable and non-uv-tool installs, so nudging those
     users points them at a command that always exits 1.
@@ -225,7 +232,7 @@ def update_notice(current_version: str) -> tuple[bool, str] | None:
     """Return ``(available, command)`` when the cached latest release is newer.
 
     Returns ``None`` when up to date, when the cache is absent or unreadable,
-    when either version is unparseable, or when ``raven upgrade`` would fail on
+    when either version is unparseable, or when ``rarus upgrade`` would fail on
     this install anyway.
     """
     if _disabled():

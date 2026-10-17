@@ -1,4 +1,4 @@
-"""``raven instructions``: log, show, diff, record and rollback from the command line."""
+"""``rarus instructions``: log, show, diff, record and rollback from the command line."""
 
 from __future__ import annotations
 

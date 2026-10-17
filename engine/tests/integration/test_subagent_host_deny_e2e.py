@@ -3,7 +3,7 @@
 Everything here is the shipped path except the model: this process is the
 host, dispatching through raven's own ACP lane (``AcpAgentBackend``, the pool,
 the approver), and the sub-agent is ``agents/raven-code/run.py --acp`` execing
-``python -m raven acp``. The model is a loopback OpenAI-compatible stub that
+``python -m rarus acp``. The model is a loopback OpenAI-compatible stub that
 has the sub-agent call ``exec`` with a curl aimed at a loopback sink, so a
 sink hit is proof the command ran.
 

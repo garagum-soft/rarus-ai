@@ -1,4 +1,4 @@
-"""An adversarial ACP client that drives a real ``raven acp`` subprocess.
+"""An adversarial ACP client that drives a real ``rarus acp`` subprocess.
 
 The inverse of ``tests/acp_stub_server.py``, and the inversion changes its shape.
 That module is *exec'd*, so its fourteen behaviours are selected by an

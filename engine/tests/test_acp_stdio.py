@@ -178,7 +178,7 @@ class TestClaimStdout:
         """The setup has to be as symmetric as the teardown.
 
         Two real failures live between ``dup(1)`` and the yield: ``dup2`` raises
-        ``EBADF`` when fd 2 is closed, which ``raven acp 2>&-`` does, and
+        ``EBADF`` when fd 2 is closed, which ``rarus acp 2>&-`` does, and
         ``fdopen`` can fail after fd 1 has already been moved. Unhandled, the
         caller would get an exception while the process carried on with its
         stdout pointed at stderr and nobody holding the original descriptor.

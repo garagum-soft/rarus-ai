@@ -64,14 +64,14 @@ def claim_stdout() -> Generator[BinaryIO, None, None]:
     This is not hypothetical here. ``_open_stdin``'s ``connect_read_pipe`` sets
     ``O_NONBLOCK`` on fd 0's open file description, and an interactive shell
     hands a foreground job fd 0, 1 and 2 as dups of one description -- so the
-    flag lands on this descriptor too whenever somebody runs ``raven acp`` in a
+    flag lands on this descriptor too whenever somebody runs ``rarus acp`` in a
     terminal rather than letting an editor spawn it.
     """
     sys.stdout.flush()
     sys.stderr.flush()
     protocol_fd = os.dup(1)
     # Guarded as its own step: ``dup2`` fails when fd 2 is closed, which
-    # ``raven acp 2>&-`` does, and ``fdopen`` can fail after fd 1 has already
+    # ``rarus acp 2>&-`` does, and ``fdopen`` can fail after fd 1 has already
     # been moved. Leaving either failure unhandled would leak the descriptor and,
     # worse, hand the caller an exception while the process kept running with its
     # stdout still pointed at stderr and nobody left holding the original.

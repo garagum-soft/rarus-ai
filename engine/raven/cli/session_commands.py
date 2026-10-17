@@ -133,10 +133,10 @@ def session_create(
 
     if title is not None:
         console.print(f"[green]✓[/green] Created session [cyan]{chat_id}[/cyan] (title: {title!r})")
-        console.print(f"  Use with: raven agent --session {key}")
+        console.print(f"  Use with: rarus agent --session {key}")
     else:
         console.print(chat_id)
-        console.print(f"[dim]  (use: raven agent --session {key})[/dim]")
+        console.print(f"[dim]  (use: rarus agent --session {key})[/dim]")
 
 
 # ── list ──────────────────────────────────────────────────────────────
@@ -198,13 +198,13 @@ def session_resume(
 ) -> None:
     """Resolve a session id or prefix and print the full session key.
 
-    The printed key can be fed directly to ``raven agent --session``.
+    The printed key can be fed directly to ``rarus agent --session``.
     This command is a pure resolver — it does not start an agent loop.
     """
     manager = _open_manager()
     key = resolve_session(manager, id_or_prefix)
     console.print(key)
-    console.print(f"[dim]  Use with: raven agent --session {key}[/dim]")
+    console.print(f"[dim]  Use with: rarus agent --session {key}[/dim]")
 
 
 # ── delete ────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ def session_fork(
 
     Resolves the id/prefix within the cli channel, copies its full history
     into a fresh session, records the source as the child's parent, and prints
-    the new child id (first line) for use with ``raven agent --session``.
+    the new child id (first line) for use with ``rarus agent --session``.
     """
     manager = _open_manager()
     key = resolve_session(manager, id_or_prefix)
@@ -252,7 +252,7 @@ def session_fork(
 
     child_bare = _bare_id(child.key)
     console.print(child_bare)
-    console.print(f"[dim]  (forked from {_bare_id(key)}; use: raven agent --session {child.key})[/dim]")
+    console.print(f"[dim]  (forked from {_bare_id(key)}; use: rarus agent --session {child.key})[/dim]")
 
 
 # ── export ────────────────────────────────────────────────────────────

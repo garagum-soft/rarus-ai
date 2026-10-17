@@ -50,7 +50,7 @@ def model_path(name: str, *, required: bool = False) -> Path:
     path = RES_DIR / f"{name}.onnx"
     if required and not path.is_file():
         raise ModelsMissingError(
-            f"the deepdoc model {name!r} is not installed at {path}; run `raven resources` to download it"
+            f"the deepdoc model {name!r} is not installed at {path}; run `rarus resources` to download it"
         )
     return path
 

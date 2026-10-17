@@ -1,4 +1,4 @@
-"""CLI tests for ``raven provider``.
+"""CLI tests for ``rarus provider``.
 
 The ``provider login <name>`` command dispatches to registered OAuth handlers
 (``openai-codex`` and ``github-copilot``). Real OAuth flow requires browser
@@ -29,14 +29,14 @@ def tmp_config(tmp_path: Path) -> Path:
 
 
 def test_provider_help_works() -> None:
-    """``raven provider --help`` lists the subcommands."""
+    """``rarus provider --help`` lists the subcommands."""
     r = runner.invoke(app, ["provider", "--help"])
     assert r.exit_code == 0
     assert "login" in r.stdout
 
 
 def test_provider_login_help_lists_argument() -> None:
-    """``raven provider login --help`` surfaces the PROVIDER argument."""
+    """``rarus provider login --help`` surfaces the PROVIDER argument."""
     r = runner.invoke(app, ["provider", "login", "--help"])
     assert r.exit_code == 0
     assert "PROVIDER" in r.stdout
@@ -709,12 +709,12 @@ def test_resetting_an_unrelated_provider_stays_quiet(
 @pytest.mark.parametrize(
     ("slug", "expected"),
     [
-        pytest.param("openai-codex", "raven provider login openai-codex", id="oauth-signs-in"),
-        pytest.param("openrouter", "raven provider set openrouter --api-key", id="key-takes-a-key"),
-        pytest.param("hosted-vllm", "raven provider set hosted-vllm --api-base", id="local-takes-an-address"),
+        pytest.param("openai-codex", "rarus provider login openai-codex", id="oauth-signs-in"),
+        pytest.param("openrouter", "rarus provider set openrouter --api-key", id="key-takes-a-key"),
+        pytest.param("hosted-vllm", "rarus provider set hosted-vllm --api-base", id="local-takes-an-address"),
         pytest.param(
             "azure-openai",
-            "raven provider set azure-openai --api-key <KEY> --api-base",
+            "rarus provider set azure-openai --api-key <KEY> --api-base",
             id="endpoint-takes-both",
         ),
     ],
@@ -804,7 +804,7 @@ def test_use_refuses_an_id_that_names_no_provider(tmp_config: Path) -> None:
 def test_use_refuses_a_misspelled_provider_before_it_writes(tmp_config: Path) -> None:
     """A typo used to exit 0 with the config already changed, and the credential
     warning that followed told the user to run
-    `raven provider set antropic --api-key ...` -- which would have created a
+    `rarus provider set antropic --api-key ...` -- which would have created a
     section for a vendor nothing routes to. The name is checked before the write,
     the same test `provider set` already applies.
     """

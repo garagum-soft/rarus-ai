@@ -1,6 +1,6 @@
 """Prompt-mode graph composition (raven/playbook/prompt.py).
 
-The CLI path for a ``mode: prompt`` playbook -- ``raven playbook run`` --
+The CLI path for a ``mode: prompt`` playbook -- ``rarus playbook run`` --
 composes a graph through a forced tool call. What is
 guarded here is that the two things the model is handed agree with each other and
 with the node model: the schema attached to the call, and the prose that tells it

@@ -24,7 +24,7 @@ Each rule is defensible where it sits. What is missing is anywhere to *read*
 them. A deployer cannot ask what this install lacks, and since an unconfigured
 tool is withheld from the model there is no surface at all saying the
 capability exists: the model is not offered it, no document lists it, and
-``raven doctor`` reports on providers and memory but has never mentioned tools.
+``rarus doctor`` reports on providers and memory but has never mentioned tools.
 
 This module is that surface. It describes the rules rather than replacing them
 -- ``is_configured`` mirrors the loop's judgement instead of inventing a second

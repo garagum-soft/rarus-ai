@@ -613,7 +613,7 @@ async def test_options_accepts_session_id(fake_home: Path) -> None:
 async def test_save_key_custom_key_only_accepted(fake_home: Path) -> None:
     """The spec ships a default address, so a bare key is a runnable submission --
     the same answer `credential_status` gives; the picker must not refuse what
-    `raven provider set custom --api-key` accepts."""
+    `rarus provider set custom --api-key` accepts."""
     result = await model_save_key({"slug": "custom", "api_key": "x"})
     assert result["provider"]["authenticated"] is True
 

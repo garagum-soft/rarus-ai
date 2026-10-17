@@ -1,4 +1,4 @@
-"""``raven notify``: try a channel, send an event through the rules, read what was sent."""
+"""``rarus notify``: try a channel, send an event through the rules, read what was sent."""
 
 from __future__ import annotations
 

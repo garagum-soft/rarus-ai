@@ -515,7 +515,7 @@ async def test_d7_gc_invoked_every_n_commits(workspace, monkeypatch):
 
 async def test_d8_one_shot_mode_creates_no_shadow_dir(workspace):
     """S3 end-to-end: ``interactive=False`` + default policy means
-    ``raven agent -m "..."`` leaves no ``.raven/`` artifact on disk —
+    ``rarus agent -m "..."`` leaves no ``.raven/`` artifact on disk —
     one-shot commands don't pay the shadow-git cost."""
     agent = _agent(workspace, policy="interactive", interactive=False)
     _f, _u, _m, outcome = await _run_turn_body(agent, workspace)

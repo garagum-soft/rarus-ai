@@ -75,8 +75,8 @@ if TYPE_CHECKING:
 # (preventing user-facing slash entries that would only get rejected by
 # dispatch later).
 #
-# NOTE on ``agent``: ``raven agent`` (no ``-m``) is REPL mode and MUST
-# be rejected. ``raven agent -m "msg"`` is one-shot mode and IS allowed.
+# NOTE on ``agent``: ``rarus agent`` (no ``-m``) is REPL mode and MUST
+# be rejected. ``rarus agent -m "msg"`` is one-shot mode and IS allowed.
 # Detection: argv[0] == "agent" AND no ``-m`` / ``--message`` flag in argv.
 _DISPATCH_BLACKLIST: set[tuple[str, ...]] = {
     ("gateway",),  # long-running daemon service
@@ -108,9 +108,9 @@ _DISPATCH_BLACKLIST: set[tuple[str, ...]] = {
 def _is_agent_repl(argv: list[str]) -> bool:
     """Return True for ``agent`` invocation without ``-m`` / ``--message`` flag.
 
-    ``raven agent`` (no -m)        → REPL, blacklist hit
-    ``raven agent -m "hello"``     → one-shot, OK
-    ``raven agent --message "x"``  → one-shot, OK
+    ``rarus agent`` (no -m)        → REPL, blacklist hit
+    ``rarus agent -m "hello"``     → one-shot, OK
+    ``rarus agent --message "x"``  → one-shot, OK
     """
     if not argv or argv[0] != "agent":
         return False
@@ -126,9 +126,9 @@ def _is_tracing_compact(argv: list[str]) -> bool:
     prefix match compares fixed positions and therefore only sees the action
     at ``argv[1]``, so it alone would let those forms reach dispatch.
 
-    ``raven tracing compact``          -> blacklist hit
-    ``raven tracing --dry-run compact`` -> blacklist hit (this predicate)
-    ``raven tracing`` / ``tracing stop`` -> OK
+    ``rarus tracing compact``          -> blacklist hit
+    ``rarus tracing --dry-run compact`` -> blacklist hit (this predicate)
+    ``rarus tracing`` / ``tracing stop`` -> OK
     """
     if not argv or argv[0] != "tracing":
         return False

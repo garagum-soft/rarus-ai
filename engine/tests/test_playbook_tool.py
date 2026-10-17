@@ -209,7 +209,7 @@ def _create_tool(tmp_path, generator=None, *, adopt_ok=True):
 def test_switching_one_off_takes_effect_without_a_restart(tmp_path):
     """The deny list is read, not remembered.
 
-    It used to be copied into the runtime at construction, so `raven playbook
+    It used to be copied into the runtime at construction, so `rarus playbook
     disable x` changed a file that nothing would read again until the process
     restarted -- and the user had no way to know that the command they had just
     run was waiting on one.

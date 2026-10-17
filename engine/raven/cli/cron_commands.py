@@ -1,4 +1,4 @@
-"""``raven cron`` subapp — operator-facing CLI for the CronService
+"""``rarus cron`` subapp — operator-facing CLI for the CronService
 state at ``~/.rarus/cron/jobs.json``.
 
 Commands:
@@ -118,7 +118,7 @@ def _print_runner_status(service: CronService) -> None:
         if j.payload.channel and j.payload.channel not in im_channels and j.payload.channel not in _INTERACTIVE_CHANNELS
     ]
     if im_jobs and gateway is None:
-        console.print(f"[yellow]⚠[/yellow] {len(im_jobs)} IM job(s) will not fire until `raven gateway` is running")
+        console.print(f"[yellow]⚠[/yellow] {len(im_jobs)} IM job(s) will not fire until `rarus gateway` is running")
     if dead:
         names = ", ".join(sorted({j.payload.channel for j in dead}))
         console.print(
@@ -291,7 +291,7 @@ def cron_list(
             more = "..." if len(auto_disabled) > 3 else ""
             console.print(
                 f"[yellow]⚠[/yellow] {len(auto_disabled)} reminder(s) auto-disabled after repeated "
-                f"fires with no reply: {names}{more} — re-enable with `raven cron enable <id>`"
+                f"fires with no reply: {names}{more} — re-enable with `rarus cron enable <id>`"
             )
 
     if not jobs:
@@ -692,7 +692,7 @@ def cron_add(
 ):
     """Create a cron job from explicit flags (advanced / scripting path).
 
-    For interactive use, prefer ``raven tui`` — the LLM understands
+    For interactive use, prefer ``rarus tui`` — the LLM understands
     natural language ("remind me to take my meds at 9 every day") and routes through the same
     CronService backend. Use this CLI ``add`` when:
 

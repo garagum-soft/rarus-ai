@@ -93,7 +93,7 @@ A replay run suppresses tracing for its own task tree
 (:func:`raven.tracing.trace.suppress`, a context variable — not an env var or
 process-global flag, so real turns running concurrently in the same process
 keep tracing). A replay is a mock re-run: letting it emit spans would mint
-fake trajectories in the live store (they would surface in ``raven trajectory
+fake trajectories in the live store (they would surface in ``rarus trajectory
 list`` and could be bundled or pinned). The replay's own observability is the
 :class:`ReplayReport`.
 """

@@ -26,7 +26,7 @@ _CALL_TIMEOUT_S = 120.0
 def hosted_page() -> tuple[int, str] | None:
     """(port, token) of a live raven serving the page, whichever binary it is.
 
-    Three facts have to line up, as they do for `raven web`: serve.json names a
+    Three facts have to line up, as they do for `rarus web`: serve.json names a
     pid and a port, the pid is alive, and the port's ``/health`` answers as
     ``raven-serve``. A stale file left by a killed serve reads as None.
     """

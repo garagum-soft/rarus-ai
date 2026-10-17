@@ -3,7 +3,7 @@
 The role was read from where a plugin's path resolved, while its code was
 imported from where it was found: a ``./.raven/plugins/<id>`` that is a
 symlink or a junction to a directory elsewhere played ``installed`` and ran
-without ``raven plugin grant``. And a grant named only an id and a version,
+without ``rarus plugin grant``. And a grant named only an id and a version,
 which any manifest can claim, so a second checkout with the same two words
 inherited the first one's consent.
 """

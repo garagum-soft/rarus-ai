@@ -1,4 +1,4 @@
-"""Auth, path policy, and callback-escaping tests for the `raven serve` transport.
+"""Auth, path policy, and callback-escaping tests for the `rarus serve` transport.
 
 These cover the part of the gateway that decides who gets to talk to the agent
 runtime at all. Everything here runs against a real aiohttp application built by
@@ -38,7 +38,7 @@ async def test_two_gateways_do_not_share_one_cookie_entry(tmp_path: Path) -> Non
     """Two instances on one host must not write the same jar entry.
 
     Cookies are scoped to a host and ignore the port, so a fixed name means the
-    second `raven serve` a browser authenticates to overwrites the first's
+    second `rarus serve` a browser authenticates to overwrites the first's
     session. Nothing announces it: a WebSocket is authorized when it connects,
     so the first page keeps streaming while every new HTTP request it makes is
     refused -- the file viewer answers 401, and a file the agent has just
@@ -711,7 +711,7 @@ def test_the_frame_ceiling_can_carry_the_largest_upload_the_method_accepts() -> 
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
 async def test_a_page_behind_its_sources_says_so_on_the_document_alone(tmp_path: Path, method: str) -> None:
     """The page reads this through its HEAD probe of ``/`` -- the terminal has
-    already been told, but `raven web` detaches it, so the page is where both
+    already been told, but `rarus web` detaches it, so the page is where both
     launch paths can show it. The header is the caller's judgement, asked per
     response so a rebuild takes it away without a restart, and it never lands
     on an asset."""

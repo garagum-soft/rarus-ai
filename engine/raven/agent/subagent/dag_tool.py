@@ -163,7 +163,7 @@ def _with_receipt(result: Any, dirs: "_RunDirs", run_id: str) -> Any:
     """Issue the finished run's verifiable receipt and quote its root in the result.
 
     The receipt is beside the run (``receipt.json``); the quoted root is what a
-    reader later holds the files to with ``raven playbook verify-receipt``. A
+    reader later holds the files to with ``rarus playbook verify-receipt``. A
     receipt that cannot be issued is logged and leaves the result as it was.
     """
     run_dir = Path(dirs.run_root) / run_id

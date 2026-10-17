@@ -1,4 +1,4 @@
-"""``raven playbook stint``: the backlog its roles share, the questions, and the confirm."""
+"""``rarus playbook stint``: the backlog its roles share, the questions, and the confirm."""
 
 from __future__ import annotations
 

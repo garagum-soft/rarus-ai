@@ -1,4 +1,4 @@
-"""Tests for the ``raven trajectory regression`` CLI subapp."""
+"""Tests for the ``rarus trajectory regression`` CLI subapp."""
 
 from __future__ import annotations
 

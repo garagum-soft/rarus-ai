@@ -4,7 +4,7 @@ systemd and container stops deliver SIGTERM. Card N7-F5 (landed at w82)
 rewired the handler from raising KeyboardInterrupt out of a signal frame --
 which the stdlib runner never converts into a main-task cancel, so teardown
 fell to the runner's two-second sweep -- to an in-loop ``main_task.cancel()``.
-This smoke pins the process-level truth of that wire: a real ``raven gateway``
+This smoke pins the process-level truth of that wire: a real ``rarus gateway``
 booted against a throwaway home with a dummy provider key nothing ever calls
 must exit 0 on SIGTERM and print the "Shutting down..." line only the
 graceful chain reaches. Every gateway listener probes forward from its

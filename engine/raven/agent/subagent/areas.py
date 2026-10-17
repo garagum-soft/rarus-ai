@@ -18,7 +18,7 @@ What makes an owner more than an agent called on demand:
   and a line of its report that starts with ``ATTENTION:`` is raised on the
   operator's attention queue.
 
-Nothing runs until an area is assigned (``raven areas assign``); an area
+Nothing runs until an area is assigned (``rarus areas assign``); an area
 without ``every_s`` runs only when asked.
 """
 

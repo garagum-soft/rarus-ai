@@ -49,7 +49,7 @@ from raven.config.env_file import write_env_file
 from raven.i18n import t
 
 #: Trailing comment on the line appended to the rc, and the marker that makes a
-#: second ``raven onboard`` run leave the file alone.
+#: second ``rarus onboard`` run leave the file alone.
 RC_MARKER = "# raven-onboard-env"
 
 #: The rc line itself. Guarded on existence so deleting ``~/.rarus/env`` later
@@ -299,7 +299,7 @@ def _step5_web(
         return None
 
     if skip or non_interactive:
-        oc.console.print(t("  [dim]Skipping the web tool keys (set them up later: raven onboard).[/dim]"))
+        oc.console.print(t("  [dim]Skipping the web tool keys (set them up later: rarus onboard).[/dim]"))
         return None
 
     oc.console.print(

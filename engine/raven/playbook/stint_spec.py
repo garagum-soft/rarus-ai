@@ -231,7 +231,7 @@ class ReviewSpec(CamelBase):
     """An independent review of the stint's branch before it merges (``raven.stint.review``).
 
     The branch's diff is put up for review when the stint finishes, and a merge
-    -- the stint's own ``integrate: merge`` or a person's ``raven review merge``
+    -- the stint's own ``integrate: merge`` or a person's ``rarus review merge``
     -- waits for an approving verdict on that diff from someone who is not one
     of its authors. The authors are the agents that played the roles.
     """
@@ -244,4 +244,4 @@ class ReviewSpec(CamelBase):
 
     reviewer: str = ""
     """A roster agent that reviews as the stint finishes. Empty leaves the
-    verdict to a person (`raven review verdict`)."""
+    verdict to a person (`rarus review verdict`)."""

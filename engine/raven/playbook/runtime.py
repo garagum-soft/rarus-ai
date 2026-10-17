@@ -97,7 +97,7 @@ class PlaybookRuntime:
         #:
         #: The list is config (``playbooks.disabled``), not file content, so a
         #: hand-written directory participates the moment it exists. A disabled
-        #: playbook stays *loaded* because ``raven playbook run`` still resolves
+        #: playbook stays *loaded* because ``rarus playbook run`` still resolves
         #: it -- that is the user's own hand, and nothing about disabling should
         #: stop them naming one outright. What it does mean is that the model
         #: never sees it, which is the whole of what disabling can enforce now
@@ -226,7 +226,7 @@ class PlaybookRuntime:
         the model-facing enum: its own docstring is the rule this follows --
         being on the table is what makes a reference resolvable, whether this
         machine has that agent switched on is a runtime condition with its own
-        error, and the legacy aliases resolve too. ``raven playbook validate``
+        error, and the legacy aliases resolve too. ``rarus playbook validate``
         already asks that view, and two surfaces disagreeing about one file is
         worse than either answer alone.
 
@@ -430,7 +430,7 @@ class PlaybookRuntime:
     ) -> ExecutionPlan | None:
         """Load one playbook and act on it; ``None`` if the name is unknown.
 
-        The single entry, for the model's tool and for ``raven playbook run``
+        The single entry, for the model's tool and for ``rarus playbook run``
         alike. What "act on it" means is the playbook's own business rather than
         the caller's -- a ``dag`` playbook dispatches (after any gaps are filled
         and the graph-level confirm passes: ``PlaybookSpec.confirm``, dispatched

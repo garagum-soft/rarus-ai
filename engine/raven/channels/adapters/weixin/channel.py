@@ -550,7 +550,7 @@ class WeixinChannel(ChannelBase):
         flow gave up on is expired, and left published the page keeps drawing it
         as one to scan.
         """
-        logger.error("login failed. Run 'raven channels login weixin' to authenticate.")
+        logger.error("login failed. Run 'rarus channels login weixin' to authenticate.")
         self._running = False
         self.pending_qr = None
 

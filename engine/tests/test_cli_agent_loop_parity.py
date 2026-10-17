@@ -63,7 +63,7 @@ LEDGER: dict[str, Difference] = {
             "cron runner and wiring a CronService would create jobs nothing "
             "fires (the agent entrance passes no cron_service to "
             "build_runtime). Scripted reminder creation is "
-            "`raven cron add` with an explicit --channel."
+            "`rarus cron add` with an explicit --channel."
         ),
     ),
     "now_fn": Difference(

@@ -1,4 +1,4 @@
-"""Tests for the ``raven cron`` CLI subapp."""
+"""Tests for the ``rarus cron`` CLI subapp."""
 
 from __future__ import annotations
 
@@ -764,7 +764,7 @@ def test_list_warns_im_jobs_without_gateway(runner, populated_cron, feishu_enabl
     r = runner.invoke(cron_app, ["list"])
     assert r.exit_code == 0
     assert "Runners: none" in r.stdout
-    assert "raven gateway" in r.stdout  # the IM-jobs warning names the fix
+    assert "rarus gateway" in r.stdout  # the IM-jobs warning names the fix
 
 
 def test_list_shows_gateway_and_warns_disabled_channel(runner, populated_cron, monkeypatch):

@@ -150,7 +150,7 @@ def test_a_file_with_no_frontmatter_is_refused() -> None:
 def test_a_missing_guard_file_says_how_to_get_one(tmp_path: Path) -> None:
     with pytest.raises(RosterError) as caught:
         roster_mod.load(tmp_path / "game")
-    assert "raven playbook stint init" in str(caught.value)
+    assert "rarus playbook stint init" in str(caught.value)
 
 
 def test_the_prose_half_is_kept_for_the_prompt(tmp_path: Path) -> None:

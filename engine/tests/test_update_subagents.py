@@ -142,7 +142,7 @@ class TestTheBuiltinNamesAreReserved:
     @pytest.mark.parametrize("name", ["Raven", "raven"])
     def test_an_acp_redeclaration_of_a_builtin_name_is_allowed(self, tmp_path: Path, name: str) -> None:
         """An acp row of a seed's name is the supported transport switch: the
-        generic agent is then served over this raven's own `raven acp`. An empty
+        generic agent is then served over this raven's own `rarus acp`. An empty
         command is kept as written -- merge_builtin_seeds fills the host command
         at materialization, so a config file stays machine-portable."""
         p = tmp_path / "config.json"

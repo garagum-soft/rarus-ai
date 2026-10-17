@@ -519,7 +519,7 @@ class RoundContext:
             for name in sorted(self._unmeasured):
                 entry.violations.append(
                     f"nothing says what the {name!r} check runs here, so this round passed through it unmeasured; "
-                    f'answer it with `raven playbook stint check set {self.spec.name} {name} --run "..."`'
+                    f'answer it with `rarus playbook stint check set {self.spec.name} {name} --run "..."`'
                 )
             if failures:
                 entry.violations.append(

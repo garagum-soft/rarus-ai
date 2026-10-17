@@ -575,7 +575,7 @@ class TestRunning:
         assert driver.holding() is False and driver._beats == {}
 
     async def test_a_terminal_keeps_holding_the_round_a_stop_landed_on(self, tmp_path: Path) -> None:
-        """`stop` ends the stint after this round, and `raven playbook run` holds
+        """`stop` ends the stint after this round, and `rarus playbook run` holds
         the terminal for exactly as long as a round of it is running here.
 
         `holding` asked only the records that still called themselves live, so a
@@ -3050,7 +3050,7 @@ class TestMoreRounds:
         text = _summary(record)
 
         assert "stint/stint-x" in text
-        assert "raven playbook stints extend stint-x --rounds N" in text
+        assert "rarus playbook stints extend stint-x --rounds N" in text
 
 
 class TestPreCallRefusals:

@@ -172,7 +172,7 @@ def test_terminal_sink_does_not_dump_local_variable_values(tmp_logs: Path, capsy
     Measured before the fix: a token bound in the failing frame appeared six times
     across twenty-seven lines of stderr.
 
-    stderr matters more here rather than less. ``raven acp`` runs as an editor's
+    stderr matters more here rather than less. ``rarus acp`` runs as an editor's
     subprocess and the editor displays that stream, so a traceback annotated with
     every local's value is rendered into somebody's UI rather than into a file
     only they can read.

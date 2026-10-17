@@ -1,4 +1,4 @@
-"""The real ``raven acp`` binary: nothing but frames on stdout.
+"""The real ``rarus acp`` binary: nothing but frames on stdout.
 
 The unit tests prove the descriptor is moved. This proves it holds for the
 process an editor actually spawns, with the whole import graph loaded and loguru
@@ -37,7 +37,7 @@ def _raven_bin() -> Path:
 def _run(stdin_bytes: bytes, *, home: Path | None = None) -> subprocess.CompletedProcess[bytes]:
     """Run the binary against a throwaway agent home.
 
-    The home matters. ``raven acp`` builds a full engine, which starts the cron
+    The home matters. ``rarus acp`` builds a full engine, which starts the cron
     service and the memory backend against whatever ``RARUS_HOME`` names -- so a
     test that inherited the developer's would run their schedules and write into
     their sessions. Pointed at a temporary directory instead, which also makes the

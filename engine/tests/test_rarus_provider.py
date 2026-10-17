@@ -46,7 +46,7 @@ class TestWhenItIsUsable:
     def test_it_is_unusable_until_a_sign_in_exists(self):
         status = credential_status("rarus", Config().providers.rarus, include_external=True)
         assert not status.ok
-        assert "raven provider login rarus" in str(
+        assert "rarus provider login rarus" in str(
             status.missing[0].remedy if hasattr(status.missing[0], "remedy") else status
         )
 

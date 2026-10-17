@@ -757,7 +757,7 @@ def render_case_template(created_from: str, reviewed: list[ReviewedResidual]) ->
     as JSON string literals (valid YAML scalars, safely quoted)."""
     lines = [
         "# Case metadata (see raven/trajectory/regression.py). Required by",
-        "# `raven trajectory regression validate`; fill every TODO before commit.",
+        "# `rarus trajectory regression validate`; fill every TODO before commit.",
         'issue: ""  # TODO: bug/issue/PR link this case guards',
         'owner: ""  # TODO: who answers for this case',
         'why: ""  # TODO: the contract the assertions protect',

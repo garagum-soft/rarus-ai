@@ -1,7 +1,7 @@
-"""CLI tests for ``raven agent``.
+"""CLI tests for ``rarus agent``.
 
 The ``agent`` command is a one-shot ``-m`` single-turn runner (the
-interactive REPL was removed; ``raven tui`` is the interactive front-end).
+interactive REPL was removed; ``rarus tui`` is the interactive front-end).
 Smoke-level coverage: ``--help`` works, options are surfaced, the
 ``no-API-key`` path exits cleanly, bare invocation points at the TUI.
 """
@@ -31,7 +31,7 @@ def tmp_config(tmp_path: Path) -> Path:
 
 
 def test_agent_help_works() -> None:
-    """``raven agent --help`` lists the key options."""
+    """``rarus agent --help`` lists the key options."""
     r = runner.invoke(app, ["agent", "--help"])
     assert r.exit_code == 0
     assert "one-shot agent turn" in r.stdout
@@ -68,12 +68,12 @@ def test_agent_help_omits_removed_skill_extract_flags() -> None:
 
 
 def test_agent_without_message_prints_pointer_and_exits_nonzero(tmp_config: Path) -> None:
-    """Bare ``raven agent`` no longer enters an interactive loop: it points
-    at ``raven tui`` / ``agent -m`` and exits non-zero."""
+    """Bare ``rarus agent`` no longer enters an interactive loop: it points
+    at ``rarus tui`` / ``agent -m`` and exits non-zero."""
     r = runner.invoke(app, ["agent"])
     assert r.exit_code != 0
     assert "REPL was removed" in r.stdout
-    assert "raven tui" in r.stdout
+    assert "rarus tui" in r.stdout
     assert "-m" in r.stdout
 
 
@@ -578,7 +578,7 @@ def test_agent_auth_error_exit_nonzero_with_guidance(
 
     assert result.exit_code != 0
     assert result.output.count("AuthenticationError") <= 1
-    assert "raven provider" in result.output
+    assert "rarus provider" in result.output
     assert '{"error"' not in result.output
 
 
@@ -634,7 +634,7 @@ def test_print_llm_error_renders_diagnosis_and_marks_exit(capsys: pytest.Capture
         assert "provider rejected the credentials" in out
         assert "openrouter" in out
         assert "User not found." in out
-        assert "raven provider test openrouter" in out
+        assert "rarus provider test openrouter" in out
         assert '{"error"' not in out
         assert agent_commands._ONE_SHOT_EXIT["code"] == 1
 
@@ -667,7 +667,7 @@ def test_print_llm_error_auth_does_not_fabricate_a_status_code(capsys: pytest.Ca
         assert "401" not in out
         assert "provider rejected the credentials (openrouter)" in out
         assert "no access to anthropic/claude-opus-4-5" in out
-        assert "raven provider test openrouter" in out
+        assert "rarus provider test openrouter" in out
         assert agent_commands._ONE_SHOT_EXIT["code"] == 1
     finally:
         agent_commands._ONE_SHOT_EXIT["code"] = 0
@@ -696,15 +696,15 @@ def test_print_llm_error_non_auth_categories_get_apt_hint_not_key_guidance(
             content = f"Error calling LLM ({category}@openrouter): something went wrong"
             assert agent_commands._print_llm_error(content) is True, category
             out = capsys.readouterr().out
-            assert "raven provider test" not in out, category
-            assert "raven onboard" not in out, category
+            assert "rarus provider test" not in out, category
+            assert "rarus onboard" not in out, category
             assert expected in out, f"{category}: missing apt hint in {out!r}"
             assert agent_commands._ONE_SHOT_EXIT["code"] == 1, category
 
         agent_commands._ONE_SHOT_EXIT["code"] = 0
         assert agent_commands._print_llm_error("Error calling LLM (unknown): boom") is True
         out = capsys.readouterr().out
-        assert "raven provider test" not in out
+        assert "rarus provider test" not in out
         assert "Fix:" not in out
         assert "Hint:" not in out
         assert agent_commands._ONE_SHOT_EXIT["code"] == 1

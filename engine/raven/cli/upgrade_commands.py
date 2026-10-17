@@ -1,4 +1,4 @@
-"""``raven upgrade``: the typer shell over the upgrade engine.
+"""``rarus upgrade``: the typer shell over the upgrade engine.
 
 The engine (release lookup, version keys, the plan, the detached handoff)
 lives in ``raven.updates.upgrade``; what stays on the surface is exactly the
@@ -76,18 +76,18 @@ def register(app: typer.Typer) -> None:
                     return
                 console.print(f"Raven {current_version} is up to date, but this install lacks {', '.join(missing)}.")
                 if check:
-                    console.print("Run [cyan]raven upgrade[/cyan] to reinstall them.")
+                    console.print("Run [cyan]rarus upgrade[/cyan] to reinstall them.")
                     return
                 console.print(f"Reinstalling Raven {release.version} with its plugins.")
             elif check:
                 console.print(f"Raven upgrade available: {current_version} -> {release.version}")
-                console.print("Run [cyan]raven upgrade[/cyan] to install it.")
+                console.print("Run [cyan]rarus upgrade[/cyan] to install it.")
                 return
             target = _upgrade._uv_tool_target()
             if target is None:
                 raise _upgrade.UpgradeError(
                     "This Raven installation is not managed by uv. "
-                    "Reinstall Raven with the official installer, then run raven upgrade."
+                    "Reinstall Raven with the official installer, then run rarus upgrade."
                 )
 
             _upgrade._handoff_upgrade(release, current_version, target)

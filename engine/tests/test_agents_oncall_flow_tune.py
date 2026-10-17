@@ -1,4 +1,4 @@
-"""The tune entry: the D5 landing of the fork's ``raven ops tune`` command.
+"""The tune entry: the D5 landing of the fork's ``rarus ops tune`` command.
 
 The fork mounted a typer app on the host CLI; the plugin's full-auto tuner is
 a module entry instead (``python -m oncall_flow.tune``), so the same pins

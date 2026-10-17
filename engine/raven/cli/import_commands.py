@@ -143,12 +143,12 @@ async def _build_and_run(
     if backend is None:
         # Two ways to get no backend, and they need different instructions:
         # nobody configured one, or the configured one ships separately and is
-        # not installed here. `raven onboard` only fixes the first.
+        # not installed here. `rarus onboard` only fixes the first.
         if ec_config.memory.backend == SHIPPED_DEFAULT_BACKEND and not everos_plugin_installed():
             console.print(f"[red]Nothing was imported: {everos_plugin_missing_note()}[/red]")
         else:
             console.print(
-                "[red]No memory backend configured. Run `raven onboard` first.[/red]",
+                "[red]No memory backend configured. Run `rarus onboard` first.[/red]",
             )
         raise typer.Exit(1)
 

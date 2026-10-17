@@ -1,6 +1,6 @@
 """The sentinel state directory's filenames, named once.
 
-core/proactive_stack builds the stores from these and the ``raven sentinel``
+core/proactive_stack builds the stores from these and the ``rarus sentinel``
 CLI introspects the same files; a filename written by hand on both sides is
 how an introspection command ends up silently reading a file nothing writes.
 """

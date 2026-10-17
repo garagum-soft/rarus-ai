@@ -125,7 +125,7 @@ def locations(arguments: dict[str, Any] | None, cwd: str | Path | None) -> list[
     """The absolute paths this call touches, as ``ToolCallLocation`` objects.
 
     Relative paths are resolved against ``cwd``, which is the session's working
-    directory rather than the process's: ``raven acp`` is started by an editor
+    directory rather than the process's: ``rarus acp`` is started by an editor
     from wherever that editor happens to run, and resolving against that would
     aim every location at the wrong tree.
 

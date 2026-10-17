@@ -599,7 +599,7 @@ def test_a_replayed_assistant_message_carries_its_annotations() -> None:
         0.ResponseOutputTextParam.annotations
           Field required [type=missing, input_value={'type': 'output_text', …
 
-    Measured on a live `raven serve` against a local vLLM. The loop spends its
+    Measured on a live `rarus serve` against a local vLLM. The loop spends its
     three retries on it and then hands the reader the validation error as the
     answer.
     """

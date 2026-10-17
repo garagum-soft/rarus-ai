@@ -58,7 +58,7 @@ usage -- is not recorded: nothing was spent, and a row of zeros would read as a
 cheap call. A call that raised has no response to record.
 
 With no sink installed and none bound, nothing is recorded, which is what an
-entry point that assembles no runtime (``raven doctor``, a unit test) wants.
+entry point that assembles no runtime (``rarus doctor``, a unit test) wants.
 """
 
 from __future__ import annotations

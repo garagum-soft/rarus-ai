@@ -2,7 +2,7 @@
 
 A product under ``agents/`` is a folder, not a fork: a published
 ``config.json``, a ``.env`` for secrets, and a launcher that renders the two
-into a private copy and execs ``python -m raven acp``. What every such
+into a private copy and execs ``python -m rarus acp``. What every such
 launcher repeats is here -- reading a setting from the process environment
 with a ``.env`` fallback, merging declared secret slots, inheriting the
 host's LLM block when the product has no key of its own, pinning a state
@@ -638,7 +638,7 @@ def sweep_stale_renders(root: Path) -> None:
 
 
 def exec_raven_acp(rendered: Path) -> None:
-    """Hand this launcher's process over to ``raven acp`` serving ``rendered``; never returns.
+    """Hand this launcher's process over to ``rarus acp`` serving ``rendered``; never returns.
 
     On POSIX the image is replaced (``os.execv``): the process the client
     launched *is* the server, on the same stdio. Windows has no exec --

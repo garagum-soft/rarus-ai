@@ -1,8 +1,8 @@
 """The served page mounted inside the gateway process (``_gateway_page``).
 
-What `raven serve` assembles around an engine it builds, ``mount_page``
+What `rarus serve` assembles around an engine it builds, ``mount_page``
 assembles around the engine the gateway already has: the same auth model, the
-same routes, the same serve.json ``raven web`` reads -- and the same answers
+same routes, the same serve.json ``rarus web`` reads -- and the same answers
 over the wire, asserted here against a real socket.
 """
 
@@ -66,8 +66,8 @@ async def test_the_mounted_page_answers_like_raven_serve(home: Path) -> None:
         # page's lane for that session rather than beside it.
         assert mount.submit is not None
 
-        # serve.json carries this process, so `raven web` and the GUI shell
-        # find the page, and `raven serve` can match the pid to the lock's.
+        # serve.json carries this process, so `rarus web` and the GUI shell
+        # find the page, and `rarus serve` can match the pid to the lock's.
         state = json.loads((home / "serve.json").read_text(encoding="utf-8"))
         assert state["port"] == mount.port
         assert state["pid"] == os.getpid()
@@ -102,7 +102,7 @@ def _write_foreign_state(home: Path, *, pid: int, port: int) -> Path:
 
 
 async def test_mount_yields_to_a_live_standalone_serve(home: Path) -> None:
-    """A live standalone `raven serve` owning serve.json must not be clobbered:
+    """A live standalone `rarus serve` owning serve.json must not be clobbered:
     the mount is skipped and the file is left exactly as it was."""
     from aiohttp import web
 
@@ -170,7 +170,7 @@ async def test_teardown_keeps_a_state_file_another_process_rewrote(home: Path) -
 
 async def test_a_question_opens_only_on_the_socket_that_sent_the_turn(home: Path) -> None:
     """Two surfaces on one page: with G2 the socket set on ``/rpc`` includes a
-    relayed ``raven tui``, so a broadcast ``clarify.request`` would open the
+    relayed ``rarus tui``, so a broadcast ``clarify.request`` would open the
     sheet in a browser tab for a conversation it is not in. The question follows
     the socket that sent the turn."""
     import asyncio
@@ -242,7 +242,7 @@ async def test_a_relaunch_reclaims_the_exact_port_the_tab_is_on(home: Path, monk
     A relaunch under an open browser tab -- the web supervisor's retry, or
     ``system.upgrade`` -- sets RAVEN_SERVE_PORT_STRICT because the tab is pointed
     at a port, and probing forward to the next free one strands it. Now that
-    `raven web` supervises this mount rather than standalone serve, reading that
+    `rarus web` supervises this mount rather than standalone serve, reading that
     flag in only one of the two places would strand the very page the restart was
     for.
     """

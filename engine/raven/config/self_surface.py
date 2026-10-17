@@ -262,7 +262,7 @@ SECTIONS: tuple[Section, ...] = (
                 writer="model.fields",
                 nullable=True,
                 sensitive="sends this provider's API key, and every conversation on it, to the address given",
-                note="a raven serve or TUI process keeps its startup default binding until restarted",
+                note="a rarus serve or TUI process keeps its startup default binding until restarted",
             ),
             Setting(
                 "providers.*.models",
@@ -455,7 +455,7 @@ SECTIONS: tuple[Section, ...] = (
                 "bool",
                 _E.INERT,
                 writer="inert",
-                note="the gateway does not read it; only `raven agent -m` does",
+                note="the gateway does not read it; only `rarus agent -m` does",
             ),
             Setting(
                 "channels.sendToolHints",
@@ -463,7 +463,7 @@ SECTIONS: tuple[Section, ...] = (
                 "bool",
                 _E.INERT,
                 writer="inert",
-                note="the gateway does not read it; only `raven agent -m` does",
+                note="the gateway does not read it; only `rarus agent -m` does",
             ),
         ),
     ),

@@ -16,7 +16,7 @@ directories the readers look in.
 In the package rather than under ``scripts/``, because the wheel carries
 ``raven/**`` and nothing else: a one-line install has no checkout, so a fetcher
 that lived beside the Makefile was reachable only by developers. Here it is
-reachable three ways that all run the same code -- ``raven resources``,
+reachable three ways that all run the same code -- ``rarus resources``,
 ``python -m raven.resources``, and ``scripts/fetch_resources.py``, which is now
 a shim the Makefile and the Dockerfile still call.
 

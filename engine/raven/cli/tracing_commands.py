@@ -1,4 +1,4 @@
-"""``raven tracing`` — open the tracing dashboard.
+"""``rarus tracing`` — open the tracing dashboard.
 
 The dashboard is a dependency-free Node viewer bundled under
 ``raven/cli/tracing_viewer/`` -- a surface the CLI launches, kept out of the
@@ -6,13 +6,13 @@ The dashboard is a dependency-free Node viewer bundled under
 CLI startup, see :mod:`raven.tracing`); this command only launches the viewer
 that reads the captured spans from ``~/.rarus/traces``.
 
-``raven tracing`` (bare) lazily starts the viewer if it is not already running,
+``rarus tracing`` (bare) lazily starts the viewer if it is not already running,
 then opens the browser. It reuses raven's own Node discovery (:func:`find_node`),
-so it needs the same Node >= 22 that ``raven tui`` already requires.
+so it needs the same Node >= 22 that ``rarus tui`` already requires.
 
 The background viewer's pid + port are recorded in ``<state_dir>/viewer.pid``
-so a later ``raven tracing`` reuses the live instance instead of stacking
-orphans, and ``raven tracing stop`` can shut it down. The stop path only
+so a later ``rarus tracing`` reuses the live instance instead of stacking
+orphans, and ``rarus tracing stop`` can shut it down. The stop path only
 signals a pid whose command line still matches the node viewer — a recycled
 pid is never killed.
 

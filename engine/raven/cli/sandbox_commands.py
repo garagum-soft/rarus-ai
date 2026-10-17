@@ -193,7 +193,7 @@ def sandbox_exec(
     cmd_args = ctx.args
     if not cmd_args:
         console.print("[red]Error: a command to execute is required.[/red]")
-        console.print("Usage: raven sandbox exec [--vm VM_REF] CMD [ARG ...]")
+        console.print("Usage: rarus sandbox exec [--vm VM_REF] CMD [ARG ...]")
         raise typer.Exit(1)
 
     program, *args = cmd_args

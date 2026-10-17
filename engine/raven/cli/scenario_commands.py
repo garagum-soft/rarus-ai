@@ -1,4 +1,4 @@
-"""``raven scenario``: list, write and run scripts that drive agents, and read what their runs did."""
+"""``rarus scenario``: list, write and run scripts that drive agents, and read what their runs did."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ scenario_app = typer.Typer(
 
 _TEMPLATE = '''"""{summary}
 
-Run with: raven scenario run {name} --arg task="..."
+Run with: rarus scenario run {name} --arg task="..."
 """
 
 # Parameters the run takes: name -> default, None for one that must be given.
@@ -212,7 +212,7 @@ def runs_cmd(limit: int = typer.Option(20, "--limit", help="At most this many"))
 
 
 @scenario_app.command("log")
-def log_cmd(run_id: str = typer.Argument(..., help="A run id from `raven scenario runs`")) -> None:
+def log_cmd(run_id: str = typer.Argument(..., help="A run id from `rarus scenario runs`")) -> None:
     """What one run did, event by event, and its result."""
     import time
 

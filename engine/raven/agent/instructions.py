@@ -55,7 +55,7 @@ class InstructionHistory:
 
     ``tracked`` widens or narrows which workspace files keep revisions; the
     default is the instruction files, which is what the agent's own file tools
-    and ``raven instructions`` keep. The web editor passes its larger set
+    and ``rarus instructions`` keep. The web editor passes its larger set
     (``raven.agent.editable_files``) so a memory file saved there is
     revisioned in the same store.
     """

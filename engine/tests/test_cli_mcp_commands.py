@@ -1,4 +1,4 @@
-"""raven mcp bridge: the process shell around the frame pump."""
+"""rarus mcp bridge: the process shell around the frame pump."""
 
 import asyncio
 import json

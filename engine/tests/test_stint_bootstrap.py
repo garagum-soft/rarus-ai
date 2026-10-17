@@ -134,7 +134,7 @@ def test_a_freshly_initialised_project_is_one_step_from_ready(tmp_path: Path) ->
     bootstrap.init(project)
     reasons = roster_mod.preflight(project)
     assert len(reasons) == 1
-    assert "raven playbook stint task add" in reasons[0]
+    assert "rarus playbook stint task add" in reasons[0]
 
 
 # ------------------------------------------------------------------------- plan

@@ -765,7 +765,7 @@ class TestTheCronTimezoneControl:
         # Landing in the file is half of it: the writer spells the key one way
         # and the loader has to read that same spelling back. Deliberately not a
         # claim about scheduling -- ``CronConfig.default_timezone`` has exactly
-        # one consumer today, the ``raven cron config get`` display path, and
+        # one consumer today, the ``rarus cron config get`` display path, and
         # ``_compute_next_run`` falls back to the machine's local zone rather
         # than to this field.
         assert load_config(cfg).cron.default_timezone == "Asia/Tokyo"

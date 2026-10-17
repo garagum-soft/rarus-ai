@@ -307,7 +307,7 @@ def make_on_cron_job(
                                 text=(
                                     f"Recurring reminder '{job.name}' was auto-disabled after "
                                     f"{job.silent_fire_limit} fires with no reply from you. "
-                                    f"Re-enable it with: raven cron enable {job.id}"
+                                    f"Re-enable it with: rarus cron enable {job.id}"
                                 ),
                                 source="cron",
                                 context_key=f"cron:{job.id}:autodisabled",

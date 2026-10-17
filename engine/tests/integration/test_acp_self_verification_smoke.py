@@ -4,7 +4,7 @@
 agent is usable: it launches the executable, does two round trips
 (``initialize``, then ``session/new`` in a throwaway directory), classifies the
 result into one of four states, and never raises. It is duck-typed on the config
-object, so pointing it at ``raven acp`` costs a five-field namespace -- and what
+object, so pointing it at ``rarus acp`` costs a five-field namespace -- and what
 comes back is a conformance assertion written by the side that had to work with
 real third-party agents rather than by the side being tested.
 

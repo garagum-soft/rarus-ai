@@ -91,18 +91,18 @@ async def test_roster_sessions_and_channels_come_from_the_gateway() -> None:
 
 async def test_a_failure_reaches_the_client_as_a_tool_error() -> None:
     async def down(method: str, params: dict[str, Any]) -> Any:
-        raise GatewayUnavailableError("Raven is not running here; start it with `raven web`")
+        raise GatewayUnavailableError("Raven is not running here; start it with `rarus web`")
 
     async with create_connected_server_and_client_session(build_server(down)._mcp_server) as client:
         result = await client.call_tool("list_agents", {})
         empty = await client.call_tool("create_task", {"prompt": "  "})
 
-    assert result.isError and "raven web" in result.content[0].text
+    assert result.isError and "rarus web" in result.content[0].text
     assert empty.isError
 
 
 async def test_without_a_running_raven_the_client_is_told_how_to_start_one(tmp_path: Path) -> None:
-    with pytest.raises(GatewayUnavailableError, match="raven web"):
+    with pytest.raises(GatewayUnavailableError, match="rarus web"):
         await GatewayClient(tmp_path / "serve.json").call("session.list", {})
     (tmp_path / "serve.json").write_text("{}", encoding="utf-8")
     with pytest.raises(GatewayUnavailableError, match="no port or token"):

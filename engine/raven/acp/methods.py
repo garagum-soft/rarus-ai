@@ -327,7 +327,7 @@ class AcpMethods:
         logger.info("acp: session {} created at {}", session_key, cwd)
         self._announce_commands(session_key)
         # The ACP sessionId *is* the raven session key. One identity rather than
-        # two: session/load and session/list both address raven sessions, and a
+        # two: session/load and session/list both address rarus sessions, and a
         # second id space would need a map that survives a restart to be worth
         # anything.
         result: dict[str, Any] = {"sessionId": session.session_id}

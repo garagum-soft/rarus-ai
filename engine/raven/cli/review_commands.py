@@ -1,4 +1,4 @@
-"""``raven review``: independent review of a branch's diff, and the merge that waits for it."""
+"""``rarus review``: independent review of a branch's diff, and the merge that waits for it."""
 
 from __future__ import annotations
 

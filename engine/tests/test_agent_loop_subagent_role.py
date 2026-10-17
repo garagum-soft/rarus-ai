@@ -2,7 +2,7 @@
 
 ``RavenLoopBackend`` builds a sub-agent's registry from an empty ``ToolRegistry``
 and never adds ``spawn`` or ``run_subagent_dag``, so an in-process sub-agent
-cannot delegate. A ``kind: acp`` agent whose command is ``raven acp`` gets none of
+cannot delegate. A ``kind: acp`` agent whose command is ``rarus acp`` gets none of
 that: the child is a separate process building its own full registry, and it
 delegated a DAG node's whole task to a background ``spawn`` whose receipt returns
 before any work is done -- twice, ending both turns with a promise instead of the

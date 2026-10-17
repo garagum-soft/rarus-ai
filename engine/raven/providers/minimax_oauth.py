@@ -224,7 +224,7 @@ def get_token(
 ) -> MiniMaxOAuthToken:
     token = load_token(region)
     if token is None:
-        raise RuntimeError(f"MiniMax {region} credentials not found. Run raven provider login first.")
+        raise RuntimeError(f"MiniMax {region} credentials not found. Run rarus provider login first.")
     if token.expires > int(time.time() * 1000) + min_ttl_ms:
         return token
 

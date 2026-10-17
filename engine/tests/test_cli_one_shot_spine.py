@@ -432,7 +432,7 @@ async def test_build_one_shot_spine_hands_unanswered_questions_to_the_caller():
 
 async def test_a_one_shot_ask_user_call_with_no_broker_is_what_gets_reported():
     """The runner binds the turn, and the tool's no-broker return is the path
-    ``raven agent -m`` actually takes. Noting the question by hand does not."""
+    ``rarus agent -m`` actually takes. Noting the question by hand does not."""
     from raven.agent.tools.ask_user import AskUserTool
 
     class _Asking:

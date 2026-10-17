@@ -20,7 +20,7 @@ no connection registry, and no multi-tenant bookkeeping. What there is instead:
   resolves as -- and only then are the handler tasks awaited. They therefore
   return through their own code, releasing their turn slots and writing their
   answers, rather than being cancelled mid-flight. It also means a finite input
-  (``echo '...' | raven acp``, a scripted client, a smoke test) gets its replies:
+  (``echo '...' | rarus acp``, a scripted client, a smoke test) gets its replies:
   cancelling on EOF would answer a batch of three requests with nothing at all.
   Cancellation stays as the backstop for a handler that is stuck somewhere else.
 """

@@ -1,6 +1,6 @@
-"""Mock-channel end-to-end: real raven agent -> everos -> markdown.
+"""Mock-channel end-to-end: real rarus agent -> everos -> markdown.
 
-Drives the **production** agent path (the ``raven agent`` CLI, same
+Drives the **production** agent path (the ``rarus agent`` CLI, same
 wiring a real channel uses) with channel-style session keys, then checks
 that everos actually wrote its markdown memory to disk:
 

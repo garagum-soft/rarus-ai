@@ -986,7 +986,7 @@ async def test_loop_survives_checkpoint_failure(workspace, monkeypatch):
 # ---------------------------------------------------------------------------
 # Scope of what gets snapshotted
 #
-# The working directory is the launch directory now, so `cd ~ && raven tui`
+# The working directory is the launch directory now, so `cd ~ && rarus tui`
 # would aim the shadow repo at a whole home. These pin both halves of the
 # answer: refuse that root outright, and keep private keys out of the roots
 # that are accepted.
@@ -1033,7 +1033,7 @@ async def test_checkpoint_excludes_private_keys(tmp_path, monkeypatch):
 async def test_loop_runs_the_turn_when_the_root_is_refused(tmp_path, monkeypatch):
     """A refused root disables the safety net, it does not break the turn.
 
-    `raven tui` from a home directory is an ordinary thing to do, so the guard
+    `rarus tui` from a home directory is an ordinary thing to do, so the guard
     has to degrade the way a bad `shadow_dir` already does -- one warning, and
     the work still happens.
     """

@@ -1268,7 +1268,7 @@ EXTERNAL_EFFECT_MATCHERS: tuple[tuple[str, ApprovalMatcher], ...] = (
 Not registered by default. The built-in policy asks about exactly one family --
 deletion -- which is right for a terminal the reader is already looking at, and
 wrong for an agent running behind an editor where nothing is on screen. A surface
-that wants to ask registers these; ``raven acp`` does.
+that wants to ask registers these; ``rarus acp`` does.
 
 The line drawn here is "hard to undo from outside this directory", not "dangerous":
 a build, a test run, a formatter, a file edit and a plain ``curl`` of a

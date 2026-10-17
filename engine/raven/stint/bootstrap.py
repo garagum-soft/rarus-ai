@@ -340,7 +340,7 @@ def machine_facts() -> list[str]:
     ]
 
 
-#: What the guard's how-it-runs section says when `raven playbook stint init` found nothing
+#: What the guard's how-it-runs section says when `rarus playbook stint init` found nothing
 #: to run. A new project never has a runnable check -- the checks are what its first
 #: rounds build -- so this sentence outlives its truth, and a project that grows one
 #: is expected to write it in here.
@@ -474,7 +474,7 @@ def init(
         "The one file no agent writes. What a person has settled, and what is still\n"
         "waiting on one.\n\n"
         "## Facts about this project\n\n"
-        "Drafted by `raven playbook stint init`. Check each line: a run plans around these for\n"
+        "Drafted by `rarus playbook stint init`. Check each line: a run plans around these for\n"
         "the whole of its life.\n\n" + "\n".join(machine_facts()) + "\n\n"
         "## Settled\n\n"
         "_What has been decided, and may not be reopened by an agent._\n\n"
@@ -581,7 +581,7 @@ Read every one of them, and move what they hold by kind:
 
 - a rule or decision that is settled -> `{decisions}`, under `## Settled`, one
   line each, ending in `(source: <the document>)`;
-- a question nobody has answered -> `raven playbook stint ask "<the question>" --project
+- a question nobody has answered -> `rarus playbook stint ask "<the question>" --project
   {project}`, one call each; carry the leaning the document records as `--decide "..."`
   when it has one;
 - a lesson, a pitfall, a convention, how the thing is run and proved -> the body

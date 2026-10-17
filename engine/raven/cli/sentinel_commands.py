@@ -1,6 +1,6 @@
 """Sentinel subcommands — owns the ``sentinel_app`` Typer instance.
 
-Bundles all ``raven sentinel ...`` subcommands for inspecting and driving
+Bundles all ``rarus sentinel ...`` subcommands for inspecting and driving
 the proactivity subsystem:
 
 - ``sentinel status``           — show config + current NudgePolicy state
@@ -107,7 +107,7 @@ def sentinel_enable():
     """Enable the Sentinel proactivity engine (persists sentinel.enabled=true).
 
     Master switch is read once at process start, so this takes effect on the
-    next ``raven agent`` / ``raven gateway`` start, not on a running one.
+    next ``rarus agent`` / ``rarus gateway`` start, not on a running one.
     """
     from raven.config.update import set_sentinel_enabled
 
@@ -124,7 +124,7 @@ def sentinel_enable():
 def sentinel_disable():
     """Disable the Sentinel proactivity engine (persists sentinel.enabled=false).
 
-    Takes effect on the next ``raven agent`` / ``raven gateway`` start;
+    Takes effect on the next ``rarus agent`` / ``rarus gateway`` start;
     a process already running keeps ticking until it restarts.
     """
     from raven.config.update import set_sentinel_enabled
@@ -669,7 +669,7 @@ def sentinel_discover_now(
     - "Gateway was down at 8am, manually fire today's missed menu."
 
     Inspect after queuing (default mode):
-    - ``raven sentinel decisions`` — see the resulting PendingDecision
+    - ``rarus sentinel decisions`` — see the resulting PendingDecision
     - gateway --logs — look for ``Sentinel: consuming N discover trigger(s)``
     - your target channel (feishu / slack / …) for the actual menu
     """
@@ -736,7 +736,7 @@ def sentinel_discover_now(
         f"{ec_config.sentinel.tick_interval_seconds}s. Watch:\n"
         f"  • gateway --logs for [cyan]Sentinel: consuming N discover "
         f"trigger(s)[/cyan]\n"
-        f"  • [cyan]raven sentinel decisions[/cyan] for the resulting menu\n"
+        f"  • [cyan]rarus sentinel decisions[/cyan] for the resulting menu\n"
         f"  • {watch_channel} for the actual menu push"
     )
 
@@ -800,7 +800,7 @@ def _sentinel_discover_now_inproc(
     _asyncio.run(_run())
 
     console.print(
-        "[green]✓[/green] discover_now invoked (inproc). Inspect with:\n  [cyan]raven sentinel decisions[/cyan]"
+        "[green]✓[/green] discover_now invoked (inproc). Inspect with:\n  [cyan]rarus sentinel decisions[/cyan]"
     )
 
 

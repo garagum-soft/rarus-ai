@@ -1,4 +1,4 @@
-"""CLI tests for ``raven resources``.
+"""CLI tests for ``rarus resources``.
 
 The command is a seat on the CLI for :mod:`raven.resources`, and the reason it
 exists is reach: the wheel carries ``raven/**`` and nothing else, so the
@@ -92,7 +92,7 @@ def test_the_dictionary_error_names_a_command_a_wheel_install_can_run(
     with pytest.raises(tokenizer.DictionaryMissingError) as caught:
         tokenizer.dictionary_path(required=True)
 
-    assert "raven resources" in str(caught.value)
+    assert "rarus resources" in str(caught.value)
     assert "scripts/" not in str(caught.value)
 
 
@@ -104,5 +104,5 @@ def test_the_model_error_names_the_same_command(monkeypatch: pytest.MonkeyPatch,
     with pytest.raises(_onnx.ModelsMissingError) as caught:
         _onnx.model_path("layout", required=True)
 
-    assert "raven resources" in str(caught.value)
+    assert "rarus resources" in str(caught.value)
     assert "scripts/" not in str(caught.value)

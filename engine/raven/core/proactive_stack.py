@@ -703,10 +703,10 @@ def build_table_sync(config: Any) -> Any:
 
 
 def build_project_watch(config: Any) -> Any:
-    """The project watch, or ``None`` when nobody registered a project (``raven watch add``).
+    """The project watch, or ``None`` when nobody registered a project (``rarus watch add``).
 
     Read at generation wiring: a project added while the gateway runs is
-    watched from its next restart or reload, which ``raven watch add`` says.
+    watched from its next restart or reload, which ``rarus watch add`` says.
     """
     del config
     from raven.stint.project_watch import ProjectWatch, WatchStore
@@ -718,7 +718,7 @@ def build_project_watch(config: Any) -> Any:
 
 
 def build_area_watch(config: Any, subagents: Any) -> Any:
-    """The standing duties of the areas, or ``None`` when no area asked for one (``raven areas assign --every``).
+    """The standing duties of the areas, or ``None`` when no area asked for one (``rarus areas assign --every``).
 
     ``subagents`` is read on every pass, so a generation swap's new manager is
     the one that runs the owners. Read at generation wiring, like the project

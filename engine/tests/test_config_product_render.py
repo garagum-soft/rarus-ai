@@ -303,8 +303,8 @@ def test_launchers_own_keys_do_not_require_host_oauth(oauth_host, oauth_launcher
     "variant, reason",
     [
         ("signed-in", ""),
-        ("signed-out", "raven provider login openai-codex"),
-        ("signed-out with an OpenRouter key", "raven provider login openai-codex"),
+        ("signed-out", "rarus provider login openai-codex"),
+        ("signed-out with an OpenRouter key", "rarus provider login openai-codex"),
         ("API key", ""),
     ],
 )
@@ -360,7 +360,7 @@ def test_inherit_refusal_explains_the_riders_binding_not_the_host_default(oauth_
     monkeypatch.setenv("RAVEN_PARENT_PROVIDER", "openrouter")
 
     assert render.inherit_llm({}, copy.deepcopy(host)) == ""
-    assert "raven provider set openrouter" in render.inherit_refusal({}, host)
+    assert "rarus provider set openrouter" in render.inherit_refusal({}, host)
 
 
 def test_inherit_refusal_reads_the_config_when_the_host_names_no_provider(oauth_host):
@@ -370,7 +370,7 @@ def test_inherit_refusal_reads_the_config_when_the_host_names_no_provider(oauth_
 
     assert render.inherit_refusal({}, copy.deepcopy(host)) == ""
     assert render.inherit_llm(copy.deepcopy(configured), copy.deepcopy(host)) == ""
-    assert "raven provider set openrouter" in render.inherit_refusal(configured, host)
+    assert "rarus provider set openrouter" in render.inherit_refusal(configured, host)
 
 
 def test_an_empty_credential_summary_still_refuses_with_a_reason(oauth_host, monkeypatch):
@@ -395,7 +395,7 @@ def test_a_host_with_no_providers_gets_a_one_line_reason(tmp_path, monkeypatch):
     reason = render.inherit_refusal({}, {})
 
     assert reason
-    assert "\n" not in reason, "raven agents new reads a launcher's refusal one line at a time"
+    assert "\n" not in reason, "rarus agents new reads a launcher's refusal one line at a time"
 
 
 def test_inherit_llm_refuses_a_non_string_model_through_config_validation(tmp_path, monkeypatch):
@@ -418,7 +418,7 @@ def test_launchers_name_why_they_cannot_inherit(oauth_host, oauth_launcher, prod
             oauth_launcher.render_config(oauth_launcher.DEFAULT_CONFIG)
 
     message = str(refused.value)
-    assert "raven provider login openai-codex" in message
+    assert "rarus provider login openai-codex" in message
     if product == "raven-design":
         assert re.search(r"before starting Design \(.+\)$", message), message
     else:

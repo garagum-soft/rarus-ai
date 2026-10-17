@@ -217,8 +217,8 @@ def test_an_editable_install_gets_no_copy_of_the_web_assets(repo: Path) -> None:
 def test_an_editable_build_does_not_advise_building_a_release_wheel(repo: Path) -> None:
     """With neither artifact present, a wheel build says what to run before
     building a release wheel. An editable build is not one, and the command that
-    needs the artifact already says so accurately -- ``raven tui`` names both
-    candidate paths and the npm command, ``raven web`` names ``ui-web/build.py``.
+    needs the artifact already says so accurately -- ``rarus tui`` names both
+    candidate paths and the npm command, ``rarus web`` names ``ui-web/build.py``.
     """
     _, wheel_app = _run_hook(repo, version="standard")
     assert sum("before building a release wheel" in w for w in wheel_app.warnings) == 2

@@ -1,4 +1,4 @@
-"""``raven doctor``'s Context win line says where the number came from.
+"""``rarus doctor``'s Context win line says where the number came from.
 
 Separate from ``test_cli_doctor_commands.py`` because that module's autouse
 fixture needs the everos distribution; this line needs nothing but the

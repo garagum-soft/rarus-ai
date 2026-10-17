@@ -206,7 +206,7 @@ class CheckpointService:
     def __init__(self, workspace: Path, shadow_dir: str = ".raven/shadow.git") -> None:
         self._workspace = Path(workspace).expanduser().resolve()
         # The working directory is the launch directory now, so a user can
-        # aim this at their home directory just by running `raven tui` from
+        # aim this at their home directory just by running `rarus tui` from
         # it. Snapshotting a whole home is both an every-turn `add -A` over
         # everything the user owns and a copy of their secrets into a repo
         # that keeps history; the excludes above cannot be made complete

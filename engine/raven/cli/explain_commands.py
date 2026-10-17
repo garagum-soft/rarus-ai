@@ -1,4 +1,4 @@
-"""``raven explain``: why a refusal happened and which config value lifts it."""
+"""``rarus explain``: why a refusal happened and which config value lifts it."""
 
 from __future__ import annotations
 

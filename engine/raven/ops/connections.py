@@ -27,7 +27,7 @@ one means a keychain or a master password, and neither is worth building before
 something asks for it.
 
 Read-only here: the file is written by hand or through
-:mod:`raven.ops.connection_add`, the one door behind both ``raven ops
+:mod:`raven.ops.connection_add`, the one door behind both ``rarus ops
 connection add`` and the ``ops_connection_add`` tool. What an agent is *shown*
 beyond :func:`shown`, and how a campaign is given a way onto the machine it
 names, belong to that agent's own installation; what this module offers a

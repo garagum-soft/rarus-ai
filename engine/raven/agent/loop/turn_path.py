@@ -1865,7 +1865,7 @@ class TurnPathMixin:
                     # the same kind of outcome: the turn produced nothing and the
                     # caller has to be able to act on that. What it buys is the
                     # label every surface puts on the turn -- the web page, the
-                    # terminal, ``raven agent -p``'s exit code and a channel's
+                    # terminal, ``rarus agent -p``'s exit code and a channel's
                     # reply -- plus the marker filed in the session and the
                     # failure a cron record and a trajectory reader keep. It is
                     # not about ACP's stop reason: that answers ``end_turn`` with

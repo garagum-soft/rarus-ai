@@ -319,7 +319,7 @@ def _kebab_name(raw: Any) -> str:
     *outside* the library and is classified as a user playbook -- which made
     every name-taking handler here read, and one of them delete, a path the
     caller chose. ``NAME_RE`` is the boundary the library already defines and
-    ``raven playbook create`` already enforces; this is the same rule on the way
+    ``rarus playbook create`` already enforces; this is the same rule on the way
     in rather than only on the way out.
 
     Separate from the existence check because the two callers want opposite
@@ -495,7 +495,7 @@ async def playbooks_oauth_clear(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # The library as a thing a person changes and runs, not only reads.
 #
-# Everything below is reachable from `raven playbook`, and the rule these
+# Everything below is reachable from `rarus playbook`, and the rule these
 # handlers keep is that they reach it through the same door rather than around
 # it: enabling writes the deny list the CLI writes, running goes through the
 # runtime the model's own tool goes through, and creation binds the composer
@@ -512,7 +512,7 @@ async def playbooks_set_enabled(params: dict) -> dict:
 
     Disabling takes a playbook out of what the model is offered and nothing
     else. It stays runnable by name from the CLI, which is the user's own hand
-    rather than the model's -- the same rule ``raven playbook disable`` states.
+    rather than the model's -- the same rule ``rarus playbook disable`` states.
 
     Answers with the state now in force and whether this call is what changed
     it, so a caller can tell "you did that" from "it was already so" without a
@@ -535,7 +535,7 @@ def _known_agent_names(agent_loop_factory: "AgentLoopFactory | None") -> list[st
     The live registry first, and the config file only when there is no loop to
     ask. The two are not always the same table: the agents list is deliberately
     kept off a watcher and moved only by an explicit apply, so a row written by
-    another process -- ``raven agents new --register`` is the documented one --
+    another process -- ``rarus agents new --register`` is the documented one --
     is on disk and not yet in this process. Read from the file here, a step
     naming that agent would validate clean and then be refused at dispatch,
     which is the reverse of what a check is for: this answers "would it run",
@@ -685,7 +685,7 @@ async def playbooks_delete(params: dict) -> dict:
 
     # One resolution, and it is the one that gets removed. Asking which layer
     # serves the name and then asking which directory to remove are two reads of
-    # a disk a second process also writes -- `raven playbook delete` is that
+    # a disk a second process also writes -- `rarus playbook delete` is that
     # process -- and the second read is the one `rmtree` acts on. Answering both
     # from a single lookup means the path removed is one that was in the user
     # layer when it was resolved, whatever happened in between.
@@ -1162,7 +1162,7 @@ async def playbooks_stints_stop(params: dict, *, agent_loop_factory: "AgentLoopF
 
     ``now`` is that ask. It reaches the round only where this process is the one
     running it -- a stint dispatched from a conversation on this gateway. A stint
-    held by somebody's `raven playbook run` terminal is not addressable from
+    held by somebody's `rarus playbook run` terminal is not addressable from
     here, and Ctrl-C there is what stops it; the record is still written either
     way, so the stint ends after the round however it was reached.
     """

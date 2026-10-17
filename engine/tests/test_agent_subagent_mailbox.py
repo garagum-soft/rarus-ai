@@ -240,7 +240,7 @@ async def test_read_messages_reads_the_inbox_and_the_history_with_one_peer(tmp_p
     assert "m1" in thread and "from alice" in thread and "m2" in thread and "to alice" in thread
 
 
-# -- an external CLI agent: identity in its environment, mail in its task, `raven mail` to answer --
+# -- an external CLI agent: identity in its environment, mail in its task, `rarus mail` to answer --
 
 CAROL = r"""
 import os, subprocess, sys

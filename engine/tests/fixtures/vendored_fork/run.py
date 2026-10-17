@@ -15,7 +15,7 @@ transcripts, cache and logs follow the rendered file out of this folder. The
 workspace is pinned under the same root too - the schema's default is
 `~/.rarus/workspace`, the host raven's own, which this agent must not share.
 
-After rendering, this process *execs* the checkout's own `raven acp`: the
+After rendering, this process *execs* the checkout's own `rarus acp`: the
 server inherits this pid, process group and stdio, so the host's
 process-group kill reaches it and nothing sits between the client and the
 frames. The host tears the group down with SIGKILL, so no cleanup here could

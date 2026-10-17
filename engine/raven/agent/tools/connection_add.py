@@ -1,7 +1,7 @@
 """Add one machine to the owner's registry, from what the owner answered.
 
 The counterpart of an empty listing: the listing asks the owner what only they
-know, and this face takes the answer. Until 2026-09-06 the host ran ``raven ops
+know, and this face takes the answer. Until 2026-09-06 the host ran ``rarus ops
 connection add --non-interactive`` on the owner's behalf before dispatching a
 sub-agent; that step went with the pre-dispatch registry gate, and the write
 moved into the on-call product. It is trunk's now because the coding agent

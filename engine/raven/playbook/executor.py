@@ -145,7 +145,7 @@ def _credential_reminders(spec: PlaybookSpec, values: Mapping[str, str]) -> str:
 
     lines = [
         f"secret param {name!r} is not set on this machine; servers filled from it run without it until it is "
-        f"set on the playbook's Credentials tab (or `raven playbook secret set {spec.name} {name}`)."
+        f"set on the playbook's Credentials tab (or `rarus playbook secret set {spec.name} {name}`)."
         for name in sorted(secret_param_names(spec))
         if not values.get(name)
     ]
@@ -154,7 +154,7 @@ def _credential_reminders(spec: PlaybookSpec, values: Mapping[str, str]) -> str:
             lines.append(
                 f"MCP server {name!r} (carried by this playbook) is not authorized on this machine; nodes "
                 f"naming it run without its tools until it is authorized on the playbook's Credentials tab "
-                f"(or `raven playbook auth {spec.name} {name}`)."
+                f"(or `rarus playbook auth {spec.name} {name}`)."
             )
     return ("\n" + "\n".join(lines)) if lines else ""
 
@@ -460,7 +460,7 @@ class PlaybookExecutor:
         and ignore it.
         """
         # A stored credential stands in for a secret the caller did not supply:
-        # the playbook page (or `raven playbook secret set`) wrote it under this
+        # the playbook page (or `rarus playbook secret set`) wrote it under this
         # playbook's scope, and it never travels through the conversation. Only
         # names the spec declares as ``secret`` are read back, and a value the
         # caller did supply still wins over the stored one.
@@ -609,7 +609,7 @@ class PlaybookExecutor:
         rather than being merged into the host's configuration -- see
         ``raven.agent.subagent.dag_mcp_scope``. Without this hand-off a
         conversation running the same playbook resolved every server it shipped
-        to ``not_configured``, while ``raven playbook run`` resolved them fine,
+        to ``not_configured``, while ``rarus playbook run`` resolved them fine,
         because only the CLI wired a source that had heard of them.
 
         **The hand-off is only reachable from here**, which is why a prompt-mode

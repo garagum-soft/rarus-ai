@@ -7,7 +7,7 @@ carrying only one of them would sign somebody out), and a way to end the
 serve loop *after* its reply has been flushed.
 
 The class lives on the READING side on purpose: rpc owns the shape of what it
-needs, and the hosting entrance (`raven serve`, the gateway's page) arms and
+needs, and the hosting entrance (`rarus serve`, the gateway's page) arms and
 disarms the singleton at boot -- an entrance may import this layer, never the
 other way around.
 """
@@ -54,13 +54,13 @@ class ServeControl:
         Not the page mount's stop event: that one ends the announcer and
         nothing else, and the process has to exit for anything to replace it.
         ``stop`` is the path `gateway.shutdown` takes -- the whole teardown
-        chain, IM channels included, ending in a zero exit that the `raven web`
+        chain, IM channels included, ending in a zero exit that the `rarus web`
         supervisor reads as "stand down" rather than as a crash to undo.
         ``busy`` is the check the gateway already refuses a config swap on.
 
-        ``supervisor_pid`` is the `raven web` supervisor that will stand down
+        ``supervisor_pid`` is the `rarus web` supervisor that will stand down
         with this process, or None when nothing would bring it back (started by
-        hand, or under `raven web --foreground`). The gateway answers it because
+        hand, or under `rarus web --foreground`). The gateway answers it because
         only the entrance layer can read the supervisor's state file.
         """
         self._gateway_stop, self._gateway_busy = stop, busy

@@ -73,7 +73,7 @@ import threading
 import time
 
 # How long to wait for the process being replaced to exit. Sized for a real
-# `raven serve` shutdown, which cancels detached sub-agents, closes every MCP
+# `rarus serve` shutdown, which cancels detached sub-agents, closes every MCP
 # server, flushes the memory backend and closes the browser driver first, and so
 # takes tens of seconds routinely and minutes at worst. A tight bound is not a
 # safety margin here: the parent is going away either way, and giving up early
@@ -425,7 +425,7 @@ def run(argv=None):
 
     uv_path, wheel_url, current_version, latest_version = args[:4]
     # A 6th argument is a JSON argv the helper runs after a successful install:
-    # `raven serve` uses it to bring the gateway back up on the same port, so an
+    # `rarus serve` uses it to bring the gateway back up on the same port, so an
     # open GUI can reconnect instead of dying with the process it asked to
     # replace. The CLI passes 4 args and keeps the old exec-in-place behaviour.
     relaunch = None
@@ -719,14 +719,14 @@ def run(argv=None):
     #   1 channels + all plugins      4 base + memory plugin
     #   2 base + all plugins          5 channels, no plugins
     #   3 channels + memory plugin    6 base, no plugins
-    lost_channels = "Channel dependencies failed to install; some channels stay unavailable (see: raven channels list)."
-    lost_engines = "A product engine failed to install; Raven-Design and Raven-PPT stay disabled (raven doctor explains)."
+    lost_channels = "Channel dependencies failed to install; some channels stay unavailable (see: rarus channels list)."
+    lost_engines = "A product engine failed to install; Raven-Design and Raven-PPT stay disabled (rarus doctor explains)."
     lost_plugins = (
-        "No plugin could be installed; long-term memory, Raven-Design and Raven-PPT stay off (raven doctor explains)."
+        "No plugin could be installed; long-term memory, Raven-Design and Raven-PPT stay off (rarus doctor explains)."
     )
     lost_sandbox = (
         "The sandbox runtime (boxlite) could not be reinstalled; a configured boxlite backend "
-        "will fail to start (raven doctor explains)."
+        "will fail to start (rarus doctor explains)."
     )
     full = write_list(plugin_lines, "raven-plugins-") if plugin_lines else None
     memory = write_list(memory_lines, "raven-plugins-memory-") if memory_lines and memory_lines != plugin_lines else None
@@ -940,7 +940,7 @@ def _fetch_latest_version_via_redirect(client: httpx.Client, *, timeout: float =
     """Read the latest stable version off the release page, which no API quota applies to.
 
     The timeout belongs to the caller: this is one of three sequential requests when
-    `raven upgrade` falls back, but the only request the update notice makes.
+    `rarus upgrade` falls back, but the only request the update notice makes.
     """
     response = client.get(
         LATEST_RELEASE_WEB,

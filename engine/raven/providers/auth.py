@@ -207,16 +207,16 @@ def credential_files(provider: str) -> list[Path]:
 
 def _SIGN_IN(provider: str) -> Requirement:  # noqa: N802 - a constructor, named for the constant it stands in for
     public = provider.replace("_", "-")
-    return Requirement((), "a sign-in", f"a sign-in -- run `raven provider login {public}`")
+    return Requirement((), "a sign-in", f"a sign-in -- run `rarus provider login {public}`")
 
 
-_KEY = Requirement(("api_key",), "an API key", "an API key -- run `raven provider set {public} --api-key <key>`")
+_KEY = Requirement(("api_key",), "an API key", "an API key -- run `rarus provider set {public} --api-key <key>`")
 _KEY_OR_LIST = Requirement(
     ("api_key", "api_key_list"),
     "an API key",
-    "an API key -- run `raven provider set {public} --api-key <key>` (or --api-key-list k1,k2)",
+    "an API key -- run `rarus provider set {public} --api-key <key>` (or --api-key-list k1,k2)",
 )
-_ADDRESS = Requirement(("api_base",), "an address", "an address -- run `raven provider set {public} --api-base <url>`")
+_ADDRESS = Requirement(("api_base",), "an address", "an address -- run `rarus provider set {public} --api-base <url>`")
 #: Same requirement, plus the spec's own working default -- read through
 #: `usable_default_api_base`, the same property `Config.get_api_base` serves
 #: from, so the gate can never accept a default the reader then refuses to
@@ -229,7 +229,7 @@ _ADDRESS = Requirement(("api_base",), "an address", "an address -- run `raven pr
 _ADDRESS_OR_SPEC_DEFAULT = Requirement(
     ("api_base",),
     "an address",
-    "an address -- run `raven provider set {public} --api-base <url>`",
+    "an address -- run `rarus provider set {public} --api-base <url>`",
     spec_fallback="usable_default_api_base",
 )
 
@@ -322,7 +322,7 @@ _KEY_CANNOT_CONFIGURE: dict[str, str] = {
         "ChatGPT is reached through its own OAuth device flow -- LiteLLM's "
         "chatgpt transformation ignores any api_key and authenticates through a "
         "stored browser session instead. Raven already has this path: run "
-        '`raven provider login openai-codex` (or pick "OpenAI Codex (OAuth)" '
+        '`rarus provider login openai-codex` (or pick "OpenAI Codex (OAuth)" '
         "from this menu)."
     ),
     "bedrock": (
@@ -387,7 +387,7 @@ def _localize(req: Requirement, name: str, section: Any = None) -> Requirement:
     hint = req.hint
     endpoints = section.get("endpoints") if isinstance(section, dict) else getattr(section, "endpoints", None)
     if "api_key" in req.fields and isinstance(endpoints, (list, tuple)) and endpoints:
-        hint = "an API key on an endpoint -- run `raven provider endpoint add {public} --label <label> --api-key <key>`"
+        hint = "an API key on an endpoint -- run `rarus provider endpoint add {public} --label <label> --api-key <key>`"
     if "{public}" not in hint:
         return req
     return Requirement(req.fields, req.label, hint.replace("{public}", name.replace("_", "-")), req.spec_fallback)

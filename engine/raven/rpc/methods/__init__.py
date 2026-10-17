@@ -2,7 +2,7 @@
 
 Each module exposes a ``register_<domain>_methods()`` helper; the umbrella
 :func:`register_aligned_methods` calls every one of them, so a dispatcher
-built by any spawn path (the TUI wrapper, ``raven serve``, ``raven acp``)
+built by any spawn path (the TUI wrapper, ``rarus serve``, ``rarus acp``)
 answers the same method set. The wire schema ``rpc-schema/openrpc.json`` is
 the list of record for that set; ``tests/test_rpc_registration.py`` pins the
 registered names against it, including the stub names that answer -32012 and
@@ -84,7 +84,7 @@ def register_aligned_methods(
 ) -> None:
     """Register every aligned RPC handler on a dispatcher.
 
-    Used by every spawn path (the TUI wrapper, ``raven serve``, ``raven acp``),
+    Used by every spawn path (the TUI wrapper, ``rarus serve``, ``rarus acp``),
     so one registration point keeps them from drifting.
 
     ``emitter`` and the build_rpc_spine bundle (``scheduler`` / ``turn_ids`` /
@@ -142,7 +142,7 @@ def register_aligned_methods_except_system(
     in lock-step with the umbrella — any future ``register_*_methods``
     helper added to this module is picked up automatically by production,
     eliminating the registration-drift bug where new handlers worked in
-    the demo runner but not in ``raven tui`` subprocess.
+    the demo runner but not in ``rarus tui`` subprocess.
     """
     register_cli_methods(dispatcher, confirm_broker=confirm_broker)
     register_setup_methods(dispatcher)

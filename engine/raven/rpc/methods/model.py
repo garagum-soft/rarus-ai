@@ -18,7 +18,7 @@ All write helpers live in ``raven.config.update_providers`` (the single
 write path for provider config); the handlers wrap the synchronous calls in
 ``asyncio.to_thread`` so the event loop is not blocked on disk IO. OAuth
 providers cannot have keys written from the picker — that is gated to
-``raven provider login`` and surfaced as -32012.
+``rarus provider login`` and surfaced as -32012.
 """
 
 from __future__ import annotations
@@ -353,7 +353,7 @@ def _build_provider_entry(
     authenticated = configured
     warning = ""
     if is_oauth and not configured:
-        warning = f"run `raven provider login {slug.replace('_', '-')}` to authenticate"
+        warning = f"run `rarus provider login {slug.replace('_', '-')}` to authenticate"
 
     models = _provider_models(slug, configured=configured, section=section)
     from raven.providers.protocol import effective_protocol, native_api_base
@@ -597,7 +597,7 @@ async def model_save_key(params: dict, *, agent_loop_factory: "AgentLoopFactory 
     label = spec.label if spec else parsed.slug
     if spec and spec.is_oauth:
         raise NotSupportedError(
-            f"{label} uses OAuth; run `raven provider login {parsed.slug.replace('_', '-')}`",
+            f"{label} uses OAuth; run `rarus provider login {parsed.slug.replace('_', '-')}`",
             data={"slug": parsed.slug},
         )
     kind = auth_shape(parsed.slug)
@@ -984,7 +984,7 @@ async def model_add_endpoint(params: dict, *, agent_loop_factory: "AgentLoopFact
     parsed = _parse(ModelAddEndpointParams, params)
     try:
         # extra_headers is deliberately not a parameter: the picker has no screen
-        # that could collect one, and a field only `raven provider` can write is
+        # that could collect one, and a field only `rarus provider` can write is
         # not made reachable by declaring it here.
         await asyncio.to_thread(
             add_provider_endpoint,

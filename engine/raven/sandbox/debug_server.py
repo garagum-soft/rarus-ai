@@ -251,7 +251,7 @@ class SandboxDebugServer:
             # Auto-select: owned + running
             candidates = [b for b in boxes if b.id in self._owned_ids and b.state.status == "running"]
             if len(candidates) == 0:
-                await _send(writer, {"type": "error", "message": "No running VMs. Start raven agent/gateway first."})
+                await _send(writer, {"type": "error", "message": "No running VMs. Start rarus agent/gateway first."})
                 return None
             if len(candidates) > 1:
                 await _send(writer, {"type": "error", "message": "Multiple running VMs; use --vm to specify one."})

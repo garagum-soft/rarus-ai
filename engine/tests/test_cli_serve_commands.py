@@ -1,4 +1,4 @@
-"""`raven serve` -- locating the page it serves.
+"""`rarus serve` -- locating the page it serves.
 
 Two independent pieces of the repo have to agree on one path for a released
 raven to answer with the real page: the wheel build hook copies ``ui-web/dist`` to
@@ -115,7 +115,7 @@ def test_the_build_hook_copies_the_page_where_serve_looks_for_it() -> None:
 
 
 # ---------------------------------------------------------------------------
-# `raven web` -- open the page, and attach rather than start a second engine.
+# `rarus web` -- open the page, and attach rather than start a second engine.
 #
 # Split by layer because the layers can only be reached separately: `_attach`
 # does real HTTP against a real gateway, and `_web` owns the loop that probe
@@ -131,11 +131,11 @@ def home(tmp_path: Path, monkeypatch) -> Path:
 
 
 class TestTheStateFileFollowsTheAgentHome:
-    """`raven web` finds the engine through this file, so where it lands has to
+    """`rarus web` finds the engine through this file, so where it lands has to
     be the one answer the rest of raven gives. Read inline, `RARUS_HOME` was
     resolved a second way that disagreed with the canonical one in three cases,
     and in each of them the state file became cwd-relative while the engine ran
-    somewhere else -- which is a second engine on the next `raven web`."""
+    somewhere else -- which is a second engine on the next `rarus web`."""
 
     @pytest.mark.parametrize("value", ["", "   "])
     def test_a_blank_setting_is_not_a_home(self, monkeypatch, value: str) -> None:
@@ -175,7 +175,7 @@ def opened(monkeypatch) -> list[str]:
 def started(monkeypatch) -> list[int]:
     """Every in-process serve stack these commands built.
 
-    Right for `raven serve`, which IS that stack, and wrong for `raven web`: that
+    Right for `rarus serve`, which IS that stack, and wrong for `rarus web`: that
     engine is the one with no ChannelManager, so a `web` that reaches for it is a
     page whose entrances cannot start an adapter. Kept apart from the foreground
     launch below for exactly that reason -- one shared spy would let that
@@ -421,7 +421,7 @@ class TestTheCommand:
         assert exit_info.value.exit_code == 1
         assert supervised == [] and opened == []
         said = capsys.readouterr().out
-        assert "pid 4321" in said and "raven web --stop" in said
+        assert "pid 4321" in said and "rarus web --stop" in said
 
     def test_a_token_mismatch_stops_rather_than_doubling_up(
         self, home: Path, a_built_page, opened: list[str], started: list[int], supervised: list[int], monkeypatch
@@ -857,7 +857,7 @@ class TestTheSupervisor:
         """The two mistakes are not equal. Guessing "free" when it is held opens
         no page at all; guessing "held" when it is free opens the page on an
         engine without channels, which is where this surface already was and is
-        one `raven gateway` away from right.
+        one `rarus gateway` away from right.
         """
         from raven.gateway import lock as _gateway_lock
 
@@ -935,7 +935,7 @@ class TestStopping:
 
     def test_it_waits_for_each_signalled_process_to_actually_be_gone(self, home: Path, monkeypatch) -> None:
         """A signal delivered is not a process gone, and the gateway's flock
-        outlives the signal by exactly that gap. ``raven web --stop && raven web``
+        outlives the signal by exactly that gap. ``rarus web --stop && rarus web``
         would otherwise read the lock of the process it just killed and come up on
         ``serve``, serving the page from an engine with no ChannelManager."""
         import os
@@ -1290,7 +1290,7 @@ def test_web_stop_reports_a_refused_or_partial_stop(home: Path, monkeypatch, unr
     stopped: list[int] = []
     monkeypatch.setattr(serve_commands, "_pid_alive", lambda pid: pid in alive)
     monkeypatch.setattr(serve_commands, "_live_gateway_pid", lambda: None)
-    monkeypatch.setattr(processes, "command_line", lambda pid: None if pid in unreadable else "python -m raven serve")
+    monkeypatch.setattr(processes, "command_line", lambda pid: None if pid in unreadable else "python -m rarus serve")
 
     def stop(_label, pid, _unresponsive):
         stopped.append(pid)
@@ -1328,7 +1328,7 @@ def test_a_resident_below_a_raven_named_directory_keeps_its_record(home: Path, m
 class TestTheSessionSurvivesARestart:
     """A restart must not sign out the tabs that are open.
 
-    `raven web` runs a supervisor whose whole job is restarting the gateway, and
+    `rarus web` runs a supervisor whose whole job is restarting the gateway, and
     the gateway used to mint a fresh session cookie on every start -- so the
     supervisor doing its job logged the user out. The tab showed "not
     authenticated" against a gateway that was up and healthy, which is the one
@@ -1624,7 +1624,7 @@ class TestThePollBacksOffWhenTheSourceDoesNotAnswer:
 
 
 class TestTheSupervisorCleansUpOnTheSignalThatStopsIt:
-    """`raven web --stop` sends SIGTERM. Python's default disposition kills the
+    """`rarus web --stop` sends SIGTERM. Python's default disposition kills the
     process where it stands, so the `finally` that removes `web.json` never ran
     and the file was left behind pointing at a dead pid."""
 
@@ -1715,7 +1715,7 @@ class TestTheSupervisorCleansUpOnTheSignalThatStopsIt:
 
 
 # ---------------------------------------------------------------------------
-# `raven serve` -- attach to a gateway that already hosts the page, instead of
+# `rarus serve` -- attach to a gateway that already hosts the page, instead of
 # starting a second engine on the same agent home.
 # ---------------------------------------------------------------------------
 
@@ -2690,7 +2690,7 @@ class TestTheDevFlag:
                 serve_commands._web(port=18999, dev=dev)
             assert excinfo.value.exit_code == 1
             assert opened == [] and supervised == [] and stopped == []
-            assert "raven web --stop" in capsys.readouterr().out
+            assert "rarus web --stop" in capsys.readouterr().out
         else:
             serve_commands._web(port=18999, dev=dev)
             assert opened == ["http://127.0.0.1:31337/auth#abc"] and stopped == []
@@ -2715,7 +2715,7 @@ class TestTheDevFlag:
             serve_commands._web(port=18999, dev=True)
         assert excinfo.value.exit_code == 1
         assert opened == [] and supervised == [] and stopped == []
-        assert "raven web --stop" in capsys.readouterr().out
+        assert "rarus web --stop" in capsys.readouterr().out
 
     def test_a_fresh_launch_with_the_flag_supervises_with_the_flag(
         self, home: Path, a_built_page, opened: list[str], monkeypatch
@@ -2761,7 +2761,7 @@ class TestTheDevFlag:
         with pytest.raises(typer.Exit):
             serve_commands._run_foreground(18999, dev=True)
         assert opened == [] and waited == [True]
-        assert "raven web --stop" in capsys.readouterr().out
+        assert "rarus web --stop" in capsys.readouterr().out
 
     def test_serve_arms_the_policy_before_serving(self, monkeypatch) -> None:
         from raven.trajectory import policy

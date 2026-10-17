@@ -152,7 +152,7 @@ def reject_builtin_transport_changes(entries: list[dict], *, existing: list[dict
     A built-in agent is an in-process raven loop; its row exists whether or not
     config mentions one, and an override may retune what it can reach (``skills``,
     ``tools``, ``model``). One redeclaration is supported: an ``acp`` entry
-    spells "serve the generic agent over this raven's own ``raven acp``", which
+    spells "serve the generic agent over this raven's own ``rarus acp``", which
     is the transport switch a user makes deliberately and ``merge_builtin_seeds``
     honours. Every other transport is refused: a cli / openai entry spelled that
     way would shadow the row that an unnamed ``spawn`` and a dag node with no

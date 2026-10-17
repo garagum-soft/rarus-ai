@@ -258,7 +258,7 @@ def _check_tty_or_die(non_interactive: bool) -> None:
         console.print(
             "[red]Non-interactive terminal detected.[/red]\n"
             "Re-run with: "
-            "[accent]raven onboard --non-interactive --provider <name> --api-key <key>[/accent]"
+            "[accent]rarus onboard --non-interactive --provider <name> --api-key <key>[/accent]"
         )
         raise typer.Exit(2)
 
@@ -281,7 +281,7 @@ def _is_config_populated() -> bool:
     it -- honoring an explicit ``agents.defaults.provider``, then prefix over
     keyword, and declining to fall back to an OAuth provider -- and a second
     derivation from the model-id prefix is how this gate came to disagree with
-    ``raven status`` about a signed-in provider. What is left to ask is whether
+    ``rarus status`` about a signed-in provider. What is left to ask is whether
     that provider's credentials are actually on disk, which is the one thing the
     resolver takes on trust for the OAuth families.
     """
@@ -325,7 +325,7 @@ def _handle_existing_config(*, reset: bool, yes: bool, non_interactive: bool) ->
         console.print(
             "[red]Existing config detected.[/red] Pass [accent]--reset[/accent] (or "
             "[accent]--yes[/accent]) to overwrite, or edit in place with "
-            "[accent]raven provider set[/accent] / [accent]raven channels enable[/accent]."
+            "[accent]rarus provider set[/accent] / [accent]rarus channels enable[/accent]."
         )
         raise typer.Exit(2)
     # Interactive: fall through to the wizard (per-step "Keep current" handles
@@ -373,7 +373,7 @@ def _initialize_a2a_face() -> None:
     install that predates the A2A face picks one up, and it never rotates a
     token that is already there.
 
-    Provisioning only. Opening the face is ``raven a2a enable``, so an operator
+    Provisioning only. Opening the face is ``rarus a2a enable``, so an operator
     who never asked for a second network surface does not get one.
     """
     from raven.config.update import initialize_a2a_server
@@ -759,7 +759,7 @@ def _verify_provider(provider: str, *, skip_test: bool = False) -> tuple[bool, s
             "and Windows may still refuse the certificate by their own rules; RAVEN_NO_SYSTEM_CA=1 turns "
             "those off. An expired certificate, or one for another host, is the server's to fix."
         ),
-        "oauth_token_missing": t("Run: raven provider login {a0}", a0=provider.replace("_", "-")),
+        "oauth_token_missing": t("Run: rarus provider login {a0}", a0=provider.replace("_", "-")),
     }
     msg = hint_map.get(status, t("Verification failed: {status}", status=status))
     console.print(f"  [yellow]✗ {msg}[/yellow]" + (f"  [dim]{result['error']}[/dim]" if result.get("error") else ""))
@@ -980,7 +980,7 @@ def _persist_default_model(model: Optional[str], provider: str) -> None:
     id is sent on, so writing the model alone leaves the wizard's own choice
     routed to whoever was named before -- with that vendor's key. The wizard
     asks for the provider before the model, so it always has one; nothing is
-    derived here, which is the same rule ``/model`` and ``raven provider use``
+    derived here, which is the same rule ``/model`` and ``rarus provider use``
     enforce.
     """
     if not model:
@@ -1020,7 +1020,7 @@ def _run_test_probe(
     except Exception as exc:
         console.print(t("  [red]✗ Test failed:[/red] {exc}", exc=exc))
         console.print(
-            t("  [dim]Run 'raven provider test' to re-check, or confirm the model is served by this provider.[/dim]")
+            t("  [dim]Run 'rarus provider test' to re-check, or confirm the model is served by this provider.[/dim]")
         )
         print_probe_troubleshooting(provider)
         options = [(t("Retry"), "retry")]
@@ -1218,7 +1218,7 @@ def _collect_credentials(
         if non_interactive:
             console.print(
                 "[red]OAuth providers require an interactive browser flow.[/red]\n"
-                "Run [accent]raven provider login "
+                "Run [accent]rarus provider login "
                 f"{provider.replace('_', '-')}[/accent] separately, then re-run "
                 "onboard."
             )
@@ -1557,7 +1557,7 @@ def _manage_existing_providers(*, non_interactive: bool) -> None:
                 # key prompt ended the wizard instead of editing anything.
                 console.print(
                     t(
-                        "  [dim]{a0} signs in through OAuth. Run: raven provider login {a1}[/dim]",
+                        "  [dim]{a0} signs in through OAuth. Run: rarus provider login {a1}[/dim]",
                         a0=_provider_label(target),
                         a1=target.replace("_", "-"),
                     )
@@ -2012,7 +2012,7 @@ def _step4_memory(
         console.print(
             t(
                 "  [dim]Long-term memory stays off.[/dim]\n"
-                "  [dim]Run `raven onboard` again whenever you want to configure it.[/dim]"
+                "  [dim]Run `rarus onboard` again whenever you want to configure it.[/dim]"
             )
         )
         return None
@@ -2054,7 +2054,7 @@ def _print_next_steps(*, warnings: list[str], show_next_steps: bool = True) -> N
                 + f"{', '.join(warnings)}\n"
                 + t(
                     "[dim]Fix them before relying on the related features "
-                    "(re-run [/dim][accent]raven onboard[/accent][dim] to reconfigure).[/dim]"
+                    "(re-run [/dim][accent]rarus onboard[/accent][dim] to reconfigure).[/dim]"
                 ),
                 border_style="yellow",
                 padding=(1, 2),
@@ -2079,7 +2079,7 @@ def _print_next_steps(*, warnings: list[str], show_next_steps: bool = True) -> N
     a2a = (
         t("on  [dim](token in a2a.server.token)[/dim]")
         if _a2a_enabled()
-        else t("[yellow]off[/yellow]  [dim](raven a2a enable)[/dim]")
+        else t("[yellow]off[/yellow]  [dim](rarus a2a enable)[/dim]")
     )
     recap = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
     recap.add_column(style="dim", no_wrap=True)
@@ -2110,10 +2110,10 @@ def _print_next_steps(*, warnings: list[str], show_next_steps: bool = True) -> N
     table.add_column(style="accent", no_wrap=True)
     table.add_column(style="dim")
     table.add_row("raven", t("launch the native TUI (default)"))
-    table.add_row("raven gateway", t("run the gateway (serve channels)"))
-    table.add_row('raven agent -m "hello, world"', t("ask a one-shot question"))
-    table.add_row("raven channels list", t("see connected chat channels"))
-    table.add_row("raven provider list", t("check your provider config"))
+    table.add_row("rarus gateway", t("run the gateway (serve channels)"))
+    table.add_row('rarus agent -m "hello, world"', t("ask a one-shot question"))
+    table.add_row("rarus channels list", t("see connected chat channels"))
+    table.add_row("rarus provider list", t("check your provider config"))
     table.add_row("raven import run", t("import AI tool history into Raven"))
     table.add_row("raven --help", t("see all available commands"))
     console.print(
@@ -2654,7 +2654,7 @@ def _step6_subagents(*, skip: bool, non_interactive: bool, warnings: list[str]) 
     """
     _step_header(6, t("Sub-agents"))
     if skip or non_interactive:
-        console.print(t("  [dim]Skipping the sub-agents (set them up later: raven onboard).[/dim]"))
+        console.print(t("  [dim]Skipping the sub-agents (set them up later: rarus onboard).[/dim]"))
         return None
     from raven.cli.subagent_setup import configure_subagents
 
@@ -2787,8 +2787,8 @@ def _run_wizard_body(
 
 
 # ---------------------------------------------------------------------------
-# Startup gate — invoked by bare `raven` and `raven tui` (the same callback).
-# One-shot `raven agent` deliberately stays out: launching a seven-step wizard
+# Startup gate — invoked by bare `raven` and `rarus tui` (the same callback).
+# One-shot `rarus agent` deliberately stays out: launching a seven-step wizard
 # from a scriptable command would be a surprise, so it reports the missing
 # credentials through `check_provider_credentials` instead.
 # ---------------------------------------------------------------------------
@@ -2821,7 +2821,7 @@ def ensure_ready_to_start(*, non_interactive: bool = False) -> None:
     # we have not established sends the user to fix the wrong thing.
     console.print(t("  [yellow]No usable provider resolves the default model ({model}).[/yellow]", model=model))
     console.print(
-        t("  [dim]Choose one that works: `raven tui` then /model. Or `raven onboard` to set this up again.[/dim]")
+        t("  [dim]Choose one that works: `rarus tui` then /model. Or `rarus onboard` to set this up again.[/dim]")
     )
 
 

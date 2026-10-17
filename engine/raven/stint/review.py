@@ -401,7 +401,7 @@ class ReviewBook:
         rid = request_id(project, branch)
         req = self.find(project, branch)
         if req is None:
-            return False, f"{branch} has no review; nothing merges without one (`raven review request`).", rid
+            return False, f"{branch} has no review; nothing merges without one (`rarus review request`).", rid
         on = ProjectGit(Path(project)).branch()
         if on != req.into:
             return (
@@ -416,7 +416,7 @@ class ReviewBook:
             return (
                 False,
                 f"{branch} changed after it was put up for review; the verdict, if any, is of other code "
-                f"(`raven review request` again, then a new verdict).",
+                f"(`rarus review request` again, then a new verdict).",
                 rid,
             )
         if verdict is None:
@@ -500,7 +500,7 @@ async def review_by_agent(book: ReviewBook, rid: str, agent: str, runner: Runner
             "diff_too_large",
             f"The diff is {len(patch)} characters and an agent reviewer is shown at most {MAX_DIFF_FOR_AGENT}, "
             "so an agent cannot judge all of it.",
-            "Have a person review it (`raven review show`, then `raven review verdict`).",
+            "Have a person review it (`rarus review show`, then `rarus review verdict`).",
         )
         book._log("refused", review=rid, by=str(who), decision="", code=exc.code, reason=str(exc))
         raise exc

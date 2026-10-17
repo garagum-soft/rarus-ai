@@ -155,7 +155,7 @@ def test_a_plugin_without_the_right_to_activate_is_not_enabled(sources, tmp_path
 
     assert denied.activated_ids() == ["plain-tool"]
     assert "needs tools" in failures["repo-tool"] and "role 'project'" in failures["repo-tool"]
-    assert "needs schedule" in failures["nightly"] and "raven plugin grant nightly" in failures["nightly"]
+    assert "needs schedule" in failures["nightly"] and "rarus plugin grant nightly" in failures["nightly"]
     assert denied.scheduled_keys() == [] and "repo-tool-tool" not in denied.tool_names()
     assert "repo_tool_mod" not in sys.modules, "nothing of a denied plugin is imported"
 

@@ -75,7 +75,7 @@ async def run_bridge(socket_path: str, stdout: BinaryIO) -> int:
     try:
         sock_reader, sock_writer = await asyncio.open_unix_connection(socket_path)
     except OSError as exc:
-        print(f"raven mcp bridge: cannot reach {socket_path}: {exc}", file=sys.stderr, flush=True)
+        print(f"rarus mcp bridge: cannot reach {socket_path}: {exc}", file=sys.stderr, flush=True)
         return 1
 
     stdin_reader = asyncio.StreamReader()
@@ -90,6 +90,6 @@ async def run_bridge(socket_path: str, stdout: BinaryIO) -> int:
         task.cancel()
     for task in done:
         if (exc := task.exception()) is not None:
-            print(f"raven mcp bridge: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            print(f"rarus mcp bridge: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
             return 1
     return 0

@@ -81,7 +81,7 @@ def test_minimax_cn_api_uses_its_regional_endpoint_and_minimax_wire_prefix() -> 
 
 
 def test_writing_under_the_old_provider_name_lands_on_the_current_key(tmp_path) -> None:
-    # `raven provider set zhipu ...` is muscle memory and lives in every guide
+    # `rarus provider set zhipu ...` is muscle memory and lives in every guide
     # written before the rename. Taking the name at face value would split the
     # file into two sections, and the runtime only reads one of them.
     import json

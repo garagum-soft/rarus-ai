@@ -1,6 +1,6 @@
 """Onboarding an outside agent: for a chosen client, the line that connects it and the text that briefs it.
 
-Raven's own MCP server (``raven mcp serve``, :mod:`raven.mcp.platform_server`)
+Raven's own MCP server (``rarus mcp serve``, :mod:`raven.mcp.platform_server`)
 is how another agent -- Claude Code, Codex, Gemini CLI, Cursor, an IDE -- drives
 the Raven running here. Each client is wired up differently: some take one
 command (``claude mcp add …``), some read a JSON file at a path of their own.
@@ -121,7 +121,7 @@ def instructions_text(tools: Sequence[ToolInfo]) -> str:
     if "list_agents" in names:
         lines.append("Before naming an agent in a prompt, check list_agents for the ones that are enabled.")
     lines.append(
-        "Raven has to be running (`raven web` or `raven serve`); if a tool says it is not, ask the user to start it."
+        "Raven has to be running (`rarus web` or `rarus serve`); if a tool says it is not, ask the user to start it."
     )
     return "\n".join(lines)
 

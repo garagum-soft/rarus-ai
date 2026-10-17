@@ -255,8 +255,8 @@ def _first_run_factory():
     call being made is about to end.
     """
     raise InternalError(
-        "no provider is configured yet -- run `raven onboard` for guided setup",
-        data={"reason": "missing_credentials", "provider": "", "remedy": "raven provider set <name> --api-key <key>"},
+        "no provider is configured yet -- run `rarus onboard` for guided setup",
+        data={"reason": "missing_credentials", "provider": "", "remedy": "rarus provider set <name> --api-key <key>"},
     )
 
 

@@ -284,7 +284,7 @@ async def _run_one_shot_turn(
     the Scheduler/hub/dispatcher entirely -- mirrors `RpcTurnRunner`'s
     `Origin.CRON` branch in `raven/rpc/spine.py`, the precedent for a
     non-interactive, system-origin turn that wants one reply back rather than a
-    token stream. `raven agent -m`'s own path (`raven/cli/agent_commands.py`)
+    token stream. `rarus agent -m`'s own path (`raven/cli/agent_commands.py`)
     goes through `build_one_shot_spine` / `Scheduler.submit` / a `DeliveryHub`
     instead, but that path is for an interactive `Origin.USER` turn a person is
     watching; an inbound A2A call has no such watcher, so it does not need that
@@ -358,7 +358,7 @@ async def _run_one_shot_turn(
 
 def make_run_turn(agent_loop: Any) -> RunTurn:
     """`run_turn` bound to one already-built, process-lifetime `AgentLoop` --
-    what the standalone CLI (`raven a2a serve`) uses, since it owns exactly one
+    what the standalone CLI (`rarus a2a serve`) uses, since it owns exactly one
     loop for its whole run."""
 
     async def run_turn(prompt: str, *, conversation_id: str, broker: QuestionResponder | None) -> str:

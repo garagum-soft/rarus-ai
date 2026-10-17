@@ -263,7 +263,7 @@ async def test_resolve_download_drops_stale_entry(tmp_path) -> None:
 async def test_a_store_that_arrives_after_the_app_is_built_still_serves(tmp_path) -> None:
     """The routes read the store per request when handed a callable.
 
-    ``raven serve`` assembles its stack late on a first run: the app is built
+    ``rarus serve`` assembles its stack late on a first run: the app is built
     before there is an engine, so the store is None at that moment and only
     exists once the page writes a model. Read once at build time, that process
     would answer 410 for every deliverable it ever produced.

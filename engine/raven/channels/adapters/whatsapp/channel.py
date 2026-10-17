@@ -234,7 +234,7 @@ class WhatsAppChannel(ChannelBase):
                 self._running = False
                 logger.warning(
                     "Nobody scanned the WhatsApp pairing codes; stopped the channel. "
-                    "Pair from the Connections page, or run `raven channels login whatsapp`."
+                    "Pair from the Connections page, or run `rarus channels login whatsapp`."
                 )
         elif msg_type == "qr":
             self.pending_qr = data.get("qr") or data.get("code")

@@ -1,6 +1,6 @@
 """The project watch: problems found and filed as tasks, with nobody asking.
 
-A person registers a project once (``raven watch add``) with the checks that
+A person registers a project once (``rarus watch add``) with the checks that
 say it is healthy -- its tests, its linter, its build -- and, optionally, the
 GitHub repository whose CI runs on it. From then on a resident host scans it on
 its own: when the checked-out commit moved or the interval passed, every check

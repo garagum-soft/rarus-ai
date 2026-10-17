@@ -7,7 +7,7 @@ silicon Mac neither looks where Homebrew puts it: brew installs into
 /lib:/usr/lib`. So `import cairosvg` raised `OSError` on a machine that had
 `brew install cairo` done, and worked only when the process was started with
 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` -- which a user launching
-`raven web` from their own terminal never sets.
+`rarus web` from their own terminal never sets.
 
 Preloading the dylib by absolute path does not help: dyld does not match a bare
 leaf name against an image already loaded. What does is the variable itself,
@@ -16,7 +16,7 @@ hands `cairocffi` an absolute path. It is set only around the import and put
 back afterwards, so nothing the process spawns later inherits it.
 
 Two callers: the ppt engine rasterises fetched SVG logos and imports `cairosvg`
-inside `libcairo_reachable`, and `raven doctor` reports whether that can happen.
+inside `libcairo_reachable`, and `rarus doctor` reports whether that can happen.
 The import itself stays with the engine, the only thing that depends on
 `cairosvg`.
 """

@@ -866,7 +866,7 @@ def test_a_turn_that_declares_its_own_surface_wins_over_the_process_global(trace
 
 
 def test_a_turn_without_its_own_surface_falls_back_to_the_process_global(trace_dir):
-    """`raven serve` standalone and `raven agent` declare nothing per turn;
+    """`rarus serve` standalone and `rarus agent` declare nothing per turn;
     their spans must look exactly as they did before the field existed."""
     _spans.set_surface("page")
     with trace.span("session.turn", channel="tui", surface=None):

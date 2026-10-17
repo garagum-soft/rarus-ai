@@ -186,7 +186,7 @@ def _filter_for_catalog(entries: list[_CatalogEntry]) -> list[_CatalogEntry]:
     The catalog filter shares ``_DISPATCH_BLACKLIST`` with ``cli.dispatch`` so
     a slash that shows up in the catalog is also dispatch-compatible (modulo
     reflection-based dispatch checking). ``agent`` is special-cased
-    via ``_is_agent_repl`` because ``raven agent -m "msg"`` IS dispatch-OK
+    via ``_is_agent_repl`` because ``rarus agent -m "msg"`` IS dispatch-OK
     but the catalog only knows the static argv head ``("agent",)`` — v0.1
     chooses to omit ``/agent`` entirely; a future change that exposes
     ``/agent <message>`` would add a custom alias mapping instead.

@@ -1,6 +1,6 @@
-"""Attach ``raven tui`` to a gateway that already hosts the page.
+"""Attach ``rarus tui`` to a gateway that already hosts the page.
 
-When ``~/.rarus/serve.json`` names a live ``raven gateway`` (the recorded pid
+When ``~/.rarus/serve.json`` names a live ``rarus gateway`` (the recorded pid
 holds the gateway lock) and its ``/health`` answers as ``raven-serve``, the TUI
 parent does not build a second AgentLoop. It becomes a relay: the Node client
 keeps its existing transport (newline-JSON over the loopback TCP socket the
@@ -89,7 +89,7 @@ def plan_attach(workspace: str | None = None) -> AttachPlan | None:
 
     1. ``tui.attach_gateway`` not switched off in config;
     2. a page-hosting gateway on record (serve.json pid == gateway lock pid,
-       the same match ``raven serve`` uses before it declines to start);
+       the same match ``rarus serve`` uses before it declines to start);
     3. a launch directory the contract can express — ``validate_override``
        must accept it as a session workdir, or the attached engine could not
        honor where this terminal was started;

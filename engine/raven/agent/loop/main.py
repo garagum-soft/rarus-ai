@@ -768,7 +768,7 @@ class AgentLoop(TurnPathMixin, WiringMixin, McpGlueMixin, OrganGlueMixin):
             self._debug_server = server
         except Exception as exc:
             # The user explicitly opted in to debug mode; failing silently here
-            # leaves them puzzled when `raven sandbox` later says "socket not
+            # leaves them puzzled when `rarus sandbox` later says "socket not
             # found". Log loud so the reason is visible.
             logger.error("Failed to start sandbox debug server: %s", exc)
 

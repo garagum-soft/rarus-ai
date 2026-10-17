@@ -1,6 +1,6 @@
 """Pairing a remote device with this Raven: a one-time ticket traded for a device token.
 
-The owner asks for a ticket on the machine Raven runs on (``raven remote pair``).
+The owner asks for a ticket on the machine Raven runs on (``rarus remote pair``).
 The ticket is short-lived and good once: a device that presents it in time gets
 a token of its own, and from then on reaches the gateway with that token in
 ``X-Raven-Device-Token`` -- through whatever tunnel or LAN route carries it.
@@ -76,7 +76,7 @@ class PairingStore:
         if expires is None:
             raise PairingError("this ticket is wrong or was already used")
         if expires <= self._clock():
-            raise PairingError("this ticket expired; ask for a new one with `raven remote pair`")
+            raise PairingError("this ticket expired; ask for a new one with `rarus remote pair`")
         if any(d["name"] == device for d in data["devices"]):
             raise PairingError(f"a device named {device!r} is already paired; revoke it first or pick another name")
         token = secrets.token_urlsafe(32)

@@ -1,4 +1,4 @@
-"""``raven plugins`` — inspect installed memory / context plugins.
+"""``rarus plugins`` — inspect installed memory / context plugins.
 
 Reads ``RavenConfig.plugins`` + the live :class:`PluginRegistry`
 and prints a table of activated plugins, what each contributes, and
@@ -142,7 +142,7 @@ def plugin_grant(
     if not permission:
         flags = " ".join(f"-p {p}" for p in needed)
         console.print(f"{plugin_id} {d.manifest.version} needs: {', '.join(needed) or 'nothing'}")
-        console.print(f"To consent: raven plugin grant {plugin_id} {flags}")
+        console.print(f"To consent: rarus plugin grant {plugin_id} {flags}")
         return
     try:
         grant = GrantStore().grant(d.manifest, permission, location=d.location)

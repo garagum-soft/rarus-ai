@@ -1,6 +1,6 @@
 """Deliverable download routes for the page transport.
 
-The served page (``raven serve`` standalone or the gateway's page mount)
+The served page (``rarus serve`` standalone or the gateway's page mount)
 lets a user fetch a deliverable the agent produced. The routes hand a file
 out by opaque token and answer 410 for a token whose deliverable is gone
 versus 404 for one that never existed, so the client can tell "expired"
@@ -96,7 +96,7 @@ def add_files_routes(
     so the gateway's control port exposes no download surface at all.
 
     A callable is resolved per request instead, for a host whose store arrives
-    after the app is built: ``raven serve`` assembles its stack late on a first
+    after the app is built: ``rarus serve`` assembles its stack late on a first
     run, and a store read once here would leave that process with no download
     surface at all."""
     if store is None:

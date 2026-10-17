@@ -208,7 +208,7 @@ async def test_a_popup_link_lands_the_owner_on_the_new_tab(browser: Browser, sit
 async def test_a_model_fills_the_form_through_the_loop_and_the_panel_reads_the_same_page(
     browser: Browser, site: str, tmp_path: Path
 ) -> None:
-    """The whole chain in one process, as ``raven serve`` runs it: a scripted
+    """The whole chain in one process, as ``rarus serve`` runs it: a scripted
     model calls the default-registered tools, the permission gate asks once for
     the site and the grant covers the click that follows, the screenshot goes
     out as an image block, and the panel's ``browser.frame`` returns the page

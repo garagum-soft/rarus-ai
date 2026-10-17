@@ -1,4 +1,4 @@
-"""Reading CI for agents (raven/stint/ci.py), the ``ci_status`` tool, ``raven ci`` and the ``ci-fix`` scenario.
+"""Reading CI for agents (raven/stint/ci.py), the ``ci_status`` tool, ``rarus ci`` and the ``ci-fix`` scenario.
 
 GitHub is replaced by a fake that answers the same REST shapes; nothing here
 reaches the network.

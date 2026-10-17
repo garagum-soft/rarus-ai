@@ -1,4 +1,4 @@
-"""The seam through which a plugin contributes a screen to ``raven onboard``.
+"""The seam through which a plugin contributes a screen to ``rarus onboard``.
 
 The host owns the wizard shell (console, translation, prompt helpers, the
 back sentinel) and what only the host knows about providers (the lender of an

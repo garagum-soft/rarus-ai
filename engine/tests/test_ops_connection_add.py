@@ -1,6 +1,6 @@
 """An agent writes the machine the owner described, after reaching it.
 
-Until 2026-09-06 the host ran `raven ops connection add` on the owner's behalf
+Until 2026-09-06 the host ran `rarus ops connection add` on the owner's behalf
 before a spawn; that step went with the pre-dispatch registry gate, and the
 write moved into the on-call plugin. It is trunk's since 2026-09-23: the
 coding agent builds and smoke-tests where the solver is, and runs BEFORE the

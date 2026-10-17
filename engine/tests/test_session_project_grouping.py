@@ -111,7 +111,7 @@ def test_gateway_groups_by_channel(tmp_path: Path) -> None:
 
 
 def test_terminal_entrypoints_group_by_launch_directory(tmp_path: Path) -> None:
-    """Two runs of ``raven agent`` in different checkouts must not interleave."""
+    """Two runs of ``rarus agent`` in different checkouts must not interleave."""
     here = SessionManager(tmp_path, project_slug="-srv-alpha")
     there = SessionManager(tmp_path, project_slug="-srv-beta")
     here.save(here.get_or_create("cli:one"))

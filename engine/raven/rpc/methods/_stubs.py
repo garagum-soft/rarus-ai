@@ -135,11 +135,11 @@ _STUB_DEFINITIONS: tuple[tuple[str, str, str | None], ...] = (
         "Raven SkillForge auto-detects and evolves skills; no manual reload.",
     ),
     # reload.env — env-file hot reload. Raven reads env once on process
-    # start; relaunch `raven tui` to pick up changes.
+    # start; relaunch `rarus tui` to pick up changes.
     (
         "reload.env",
         "reload.env not supported in Raven v0.1",
-        "Restart `raven tui` to pick up environment changes.",
+        "Restart `rarus tui` to pick up environment changes.",
     ),
     # sudo / secret response — hermes interactive credential flows.
     (

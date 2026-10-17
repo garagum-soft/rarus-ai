@@ -3586,7 +3586,7 @@ class SessionStatusParams(_Strict):
 
 
 class SessionStatusResult(_Strict):
-    output: str = Field(..., description="Rich-rendered `raven status` output with ANSI SGR sequences.")
+    output: str = Field(..., description="Rich-rendered `rarus status` output with ANSI SGR sequences.")
 
 
 # ---------------------------------------------------------------------------
@@ -4577,7 +4577,7 @@ class SystemUpgradeResult(_Strict):
     status: str
     from_version: str
     to_version: str
-    relaunch: bool = Field(..., description="Whether the helper will start `raven serve` again on the same port.")
+    relaunch: bool = Field(..., description="Whether the helper will start `rarus serve` again on the same port.")
 
 
 # ---------------------------------------------------------------------------

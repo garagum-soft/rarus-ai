@@ -1,4 +1,4 @@
-"""CLI tests for ``raven status``.
+"""CLI tests for ``rarus status``.
 
 The command reads the active config + prints provider status. Tests use a
 sandboxed tmp config via ``set_config_path``.
@@ -27,7 +27,7 @@ def tmp_config(tmp_path: Path) -> Path:
 
 
 def test_status_help_works() -> None:
-    """``raven status --help`` lists the command without error."""
+    """``rarus status --help`` lists the command without error."""
     r = runner.invoke(app, ["status", "--help"])
     assert r.exit_code == 0
     assert "Show Raven status" in r.stdout

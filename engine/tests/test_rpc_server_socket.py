@@ -1,6 +1,6 @@
 """Regression: RpcServer must speak proper JSON-RPC over a unix domain socket.
 
-P0 dogfood blocker (2026-05-15) — typing ``/cha`` in ``raven tui`` produced
+P0 dogfood blocker (2026-05-15) — typing ``/cha`` in ``rarus tui`` produced
 repeating ``pipe closed by peer or os.write(pipe, data) raised exception.``
 warnings (asyncio.unix_events) that bled into the Ink render. Root cause:
 ``connect_write_pipe`` builds a ``_UnixWritePipeTransport`` that registers a

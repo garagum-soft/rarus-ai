@@ -1,6 +1,6 @@
-"""Typer subcommands: `raven serve` and `raven web` — the gateway, and the page.
+"""Typer subcommands: `rarus serve` and `rarus web` — the gateway, and the page.
 
-`serve` runs the shared RPC stack (the same engine assembly `raven tui` builds,
+`serve` runs the shared RPC stack (the same engine assembly `rarus tui` builds,
 see ``raven/rpc/bootstrap.py``) behind an aiohttp WebSocket at ``/rpc``, so a
 browser-based front end reaches the same runtime the terminal does. It holds the
 terminal, which is what a service manager or a second machine's client wants.
@@ -15,7 +15,7 @@ by the running process, so the token never reaches the page.
 A page in a browser tab outlives the terminal that opened it, so the engine
 behind it has to as well: `web` leaves a resident gateway (detached, its own
 session, logging to ``web.log``) under a supervisor that brings it back if it
-dies. That child is `raven gateway` wherever it can be: it serves this same page
+dies. That child is `rarus gateway` wherever it can be: it serves this same page
 on its own loop (``_gateway_page.mount_page``) and, unlike standalone `serve`,
 also runs the IM channel adapters -- so what the entrances page offers is
 reachable from the page instead of being a switch nothing acts on. Where a
@@ -23,7 +23,7 @@ gateway already holds the instance lock (channels there, page separate --
 ``gateway.page.enabled = false``), the child is `serve` instead, since a second
 gateway cannot start at all; the page then reaches those adapters over
 ``gateway.live_probe``. A page whose engine is gone is worse than one that never opened -- the tab
-is still there, still looks live, and every send fails. `raven web --stop` is how
+is still there, still looks live, and every send fails. `rarus web --stop` is how
 you end it, and `--foreground` is the old behaviour for someone debugging.
 
 A page is served from ``<repo>/ui-web/dist`` or the wheel's packaged copy when one is
@@ -84,7 +84,7 @@ def port_strict() -> bool:
     supervisor's second attempt onwards, and ``system.upgrade`` -- because a tab
     is pointed at a port and coming back on another one strands it as surely as
     not coming back at all. Read here rather than at each site so the page mount
-    inside the gateway and standalone `raven serve` cannot disagree about it.
+    inside the gateway and standalone `rarus serve` cannot disagree about it.
     """
     import os
 
@@ -96,7 +96,7 @@ def resolve_ui_dist() -> Optional[Path]:
 
     A source-tree page older than what it is built from is reported here on
     every resolve, because every path that serves or opens the page resolves
-    it once -- `raven serve`, the gateway's page mount and `raven web` alike --
+    it once -- `rarus serve`, the gateway's page mount and `rarus web` alike --
     and the terminal is where the rebuild happens.
     """
     for candidate in (_PACKAGED_UI_DIST, _UI_DIR / "dist"):
@@ -150,7 +150,7 @@ def _state_path() -> Path:
     """Where the running gateway leaves its port and token.
 
     Through the one resolver rather than reading the variable again: this file
-    is how ``raven web`` finds the engine, so the two disagreeing is the exact
+    is how ``rarus web`` finds the engine, so the two disagreeing is the exact
     failure it exists to prevent -- a state file written cwd-relative while the
     agent home is elsewhere, and a second engine started on top of the first.
     """
@@ -203,7 +203,7 @@ def adopt_stored_cookie(gateway: object) -> None:
 def _write_serve_state(port: int, token: str, cookie: str = "") -> Optional[Path]:
     """Persist {port, token, cookie, pid} to ~/.rarus/serve.json, 0600 from creation.
 
-    ``raven web`` reads it to mint a fresh auth nonce against the running serve
+    ``rarus web`` reads it to mint a fresh auth nonce against the running serve
     (POST /auth/nonce with the token) instead of starting a second engine
     instance. ``cookie`` is what keeps an open tab signed in across a restart;
     see :func:`adopt_stored_cookie`.
@@ -441,7 +441,7 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     SERVE.arm(bound_port, gateway.session_token, gateway.session_cookie, stop)
 
     # Refresh the cached latest release once per launch, in the background. Only
-    # `raven tui` did this before, so someone who only ever runs the gateway
+    # `rarus tui` did this before, so someone who only ever runs the gateway
     # never learned a newer version existed (see cli/update_notice.py).
     try:
         from raven.updates.update_notice import maybe_refresh_async
@@ -457,7 +457,7 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     deck_templates.warm_covers_in_background()  # pragma: no cover
 
     base_url = f"http://127.0.0.1:{bound_port}"
-    typer.echo(f"raven serve listening on {base_url} (rpc: {base_url}/rpc)")
+    typer.echo(f"rarus serve listening on {base_url} (rpc: {base_url}/rpc)")
     state_path = _write_serve_state(bound_port, gateway.session_token, gateway.session_cookie)
     if stack.build_error is not None:
         typer.echo(f"warning: agent loop failed to build ({stack.build_error.message}); chat turns will error")
@@ -511,12 +511,12 @@ Sized like ``PARENT_EXIT_TIMEOUT_S``: the same install is at the other end."""
 _UPGRADE_POLL_S = 1.0
 
 
-def _refuse_incomplete_install(label: str = "raven serve") -> None:
+def _refuse_incomplete_install(label: str = "rarus serve") -> None:
     """Stop before binding a port if this environment is not whole.
 
     ``label`` names the caller in the refusal, because both surfaces that serve
-    the page reach this: `raven serve` standalone, and `raven gateway`, which is
-    the one `raven web` actually supervises.
+    the page reach this: `rarus serve` standalone, and `rarus gateway`, which is
+    the one `rarus web` actually supervises.
 
     ``build_app`` chooses the page route once, so a serve that starts while uv
     is still writing the environment does not merely start slowly -- it answers
@@ -557,7 +557,7 @@ def _refuse_incomplete_install(label: str = "raven serve") -> None:
     else:
         typer.echo(f"{label}: {fault.detail}; not starting.", err=True)
         typer.echo(
-            "Repair it by rerunning the installer: curl -fsSL https://raven.evermind.ai/install.sh | sh",
+            "Repair it by rerunning the Rarus AI installer",
             err=True,
         )
     raise typer.Exit(INCOMPLETE_INSTALL_EXIT)
@@ -571,7 +571,7 @@ def _run(port: int, open_browser: bool, dev: bool = False) -> None:
     try:
         bounded_asyncio.run(_serve_main(port, open_browser))
     except KeyboardInterrupt:
-        typer.echo("raven serve stopped")
+        typer.echo("rarus serve stopped")
 
 
 def _read_serve_state() -> Optional[tuple[int, str]]:
@@ -666,7 +666,7 @@ def _check_attached(url: str, dev: bool) -> None:
     on, the one a foreground child bound -- because a page opened against a
     service without the trajectory view would present a working UI with the
     feature the user asked for silently missing. The service is left running:
-    stopping it is the user's call (``raven web --stop``). A health answer
+    stopping it is the user's call (``rarus web --stop``). A health answer
     that could not be read says nothing either way, so the page is opened
     with a warning rather than refused.
     """
@@ -676,13 +676,13 @@ def _check_attached(url: str, dev: bool) -> None:
         if dev:
             typer.echo(
                 f"warning: could not read {base}/health, so whether this service has the trajectory view is "
-                "unknown; if the page shows no trajectory toggle, run `raven web --stop`, then `raven --dev`"
+                "unknown; if the page shows no trajectory toggle, run `rarus web --stop`, then `raven --dev`"
             )
         return
     view = facts.get("trajectory_view")
     if dev and view is not True:
         typer.echo(
-            f"error: the web service at {base} has no trajectory view; run `raven web --stop`, then `raven --dev`"
+            f"error: the web service at {base} has no trajectory view; run `rarus web --stop`, then `raven --dev`"
         )
         raise typer.Exit(1)
     if not dev and view is True:
@@ -690,7 +690,7 @@ def _check_attached(url: str, dev: bool) -> None:
 
 
 def _gateway_hosted_page() -> Optional[tuple[int, str]]:
-    """The (port, token) of a page a live `raven gateway` hosts, or None.
+    """The (port, token) of a page a live `rarus gateway` hosts, or None.
 
     Three facts have to line up: the gateway lock says a gateway is running,
     serve.json says a page is served, and the two pids match. The pid match is
@@ -727,9 +727,9 @@ def _gateway_hosted_page() -> Optional[tuple[int, str]]:
 # rather than merely absent for the third. `web` therefore leaves a supervisor
 # behind instead of holding the terminal itself:
 #
-#     raven web  ->  detached `raven web --supervise`  ->  `raven gateway` (child)
+#     rarus web  ->  detached `rarus web --supervise`  ->  `rarus gateway` (child)
 #
-# ...or `raven serve` as the child where a gateway already holds the lock; see
+# ...or `rarus serve` as the child where a gateway already holds the lock; see
 # `_gateway_argv`, which decides that per launch.
 #
 # The supervisor exists for one reason a plain detached gateway cannot cover: a
@@ -859,13 +859,13 @@ def _recorded_is_ours(recorded: int) -> Optional[bool]:
 
 
 def _gateway_holds_the_lock() -> bool:
-    """Whether a `raven gateway` is already running for this instance.
+    """Whether a `rarus gateway` is already running for this instance.
 
     Unreadable reads as yes, which is the safer way round: taken for no when the
     answer is yes, the page child tries for a lock it cannot have and never opens
     a page at all, while taken for yes when the answer is no the page opens on an
     engine without channels -- which is exactly where this surface was before,
-    and something a person can put right with one `raven gateway`.
+    and something a person can put right with one `rarus gateway`.
     """
     import time
 
@@ -882,7 +882,7 @@ def _gateway_argv(port: int, dev: bool = False) -> list[str]:
 
     ``gateway`` rather than ``serve`` where it can be. Both serve the page -- the
     gateway hosts it on its own loop (see ``_gateway_page.mount_page``) -- but
-    only the gateway runs the IM channel adapters, and standalone `raven serve`
+    only the gateway runs the IM channel adapters, and standalone `rarus serve`
     builds no ``ChannelManager`` at all. Left on ``serve``, everything the
     entrances page offers was unreachable from the page: no adapter to start, so
     no sign-in code could ever be minted, and every enabled entrance read "state
@@ -1002,7 +1002,7 @@ def _supervise(port: int, dev: bool = False) -> None:
 
     # Python installs no SIGTERM handler, so the default disposition kills the
     # process where it stands and no `finally` unwinds -- which is how
-    # `raven web --stop` left `web.json` behind pointing at a dead pid. Raising
+    # `rarus web --stop` left `web.json` behind pointing at a dead pid. Raising
     # KeyboardInterrupt turns the signal into the exit path the loop already
     # handles, so the state file is removed by the same code Ctrl-C uses.
     def _on_term(_signum: int, _frame: object) -> None:
@@ -1021,10 +1021,10 @@ def _supervise(port: int, dev: bool = False) -> None:
         # armed the moment it is installed, so a SIGTERM arriving between the
         # write and this `try` raised KeyboardInterrupt where no `finally` could
         # see it -- leaving behind the very stale `web.json` this function
-        # exists to prevent. `raven web` followed straight away by `--stop` is
+        # exists to prevent. `rarus web` followed straight away by `--stop` is
         # exactly that timing.
         _write_web_state(port)
-        print(f"raven web: supervising the gateway on port {port} (pid {os.getpid()})", flush=True)
+        print(f"rarus web: supervising the gateway on port {port} (pid {os.getpid()})", flush=True)
         while True:
             started = time.monotonic()
             try:
@@ -1039,7 +1039,7 @@ def _supervise(port: int, dev: bool = False) -> None:
                     start_new_session=(sys.platform != "win32"),
                 )
             except OSError as exc:
-                print(f"raven web: could not start the gateway: {exc}", flush=True)
+                print(f"rarus web: could not start the gateway: {exc}", flush=True)
                 return
             group = _owned_group(proc)
             # The port it asked for is not always the port it got: the first
@@ -1048,7 +1048,7 @@ def _supervise(port: int, dev: bool = False) -> None:
             # tab's, so the port it actually bound is what the restart aims at.
             bound = _bound_port_of(proc)
             if bound is not None and bound != target:
-                print(f"raven web: the gateway bound port {bound}", flush=True)
+                print(f"rarus web: the gateway bound port {bound}", flush=True)
                 target = bound
             try:
                 code = proc.wait()
@@ -1056,7 +1056,7 @@ def _supervise(port: int, dev: bool = False) -> None:
                 return
             ran = time.monotonic() - started
             if code == 0:
-                print("raven web: the gateway exited cleanly; not restarting it", flush=True)
+                print("rarus web: the gateway exited cleanly; not restarting it", flush=True)
                 return
             if ran >= _HEALTHY_RUN_S:
                 delay, fast_failures = 1.0, 0
@@ -1065,8 +1065,8 @@ def _supervise(port: int, dev: bool = False) -> None:
                 delay = min(delay * 2, _RESTART_CEILING_S)
             if fast_failures >= _CRASH_LOOP_GIVE_UP:
                 print(
-                    f"raven web: the gateway failed {fast_failures} times without staying up "
-                    f"(last exit {code}); giving up. Run `raven gateway` to see why.",
+                    f"rarus web: the gateway failed {fast_failures} times without staying up "
+                    f"(last exit {code}); giving up. Run `rarus gateway` to see why.",
                     flush=True,
                 )
                 return
@@ -1074,7 +1074,7 @@ def _supervise(port: int, dev: bool = False) -> None:
             # port, and coming back on a different one strands the open tab just
             # as surely as not coming back at all.
             os.environ["RAVEN_SERVE_PORT_STRICT"] = "1"
-            print(f"raven web: the gateway exited {code} after {ran:.1f}s; restarting in {delay:.0f}s", flush=True)
+            print(f"rarus web: the gateway exited {code} after {ran:.1f}s; restarting in {delay:.0f}s", flush=True)
             try:
                 time.sleep(delay)
             except KeyboardInterrupt:
@@ -1082,16 +1082,16 @@ def _supervise(port: int, dev: bool = False) -> None:
     except KeyboardInterrupt:
         # The stop can land anywhere in the loop, not only in the two waits
         # above: learning the bound port polls for up to fifteen seconds after
-        # every launch, and `raven web` followed by `--stop` lands right there.
+        # every launch, and `rarus web` followed by `--stop` lands right there.
         return
     finally:
         # A second SIGTERM would raise out of this block half done, and the
-        # `raven web --stop` that sent the first one also signals the gateway;
+        # `rarus web --stop` that sent the first one also signals the gateway;
         # from here on the only signal that ends this process is SIGKILL.
         with suppress(ValueError):
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _stop_child(proc, group)
-        # Only now: `web.json` is how the next `raven web` knows a supervisor is
+        # Only now: `web.json` is how the next `rarus web` knows a supervisor is
         # up, so removing it while the gateway still held the lock is what let a
         # second supervisor start beside it -- one whose gateway could only come
         # up on `serve`, with no channels.
@@ -1167,7 +1167,7 @@ def _stop_child(proc: object, group: Optional[int] = None) -> None:
         try:
             proc.wait(timeout=_CHILD_STOP_S)  # type: ignore[attr-defined]
         except subprocess.TimeoutExpired:
-            print(f"raven web: the gateway ignored SIGTERM for {_CHILD_STOP_S:.0f}s; killing it", flush=True)
+            print(f"rarus web: the gateway ignored SIGTERM for {_CHILD_STOP_S:.0f}s; killing it", flush=True)
             if group is not None:
                 with suppress(OSError):
                     os.killpg(group, signal.SIGKILL)
@@ -1190,7 +1190,7 @@ def _stop_child(proc: object, group: Optional[int] = None) -> None:
         return
     if _group_gone(group, deadline):
         return
-    print("raven web: the gateway's own processes ignored SIGTERM; killing them", flush=True)
+    print("rarus web: the gateway's own processes ignored SIGTERM; killing them", flush=True)
     with suppress(OSError):
         os.killpg(group, signal.SIGKILL)
     _group_gone(group, time.monotonic() + _KILL_WAIT_S)
@@ -1307,7 +1307,7 @@ def _stop_resident() -> bool:
     very next command. The gateway's lock is an ``flock`` the kernel holds until
     that process exits, and ``_gateway_argv`` reads that lock to choose between
     ``gateway`` and ``serve``. A caller that stops and relaunches back to back --
-    ``raven web --stop && raven web --foreground``, which is what install.sh
+    ``rarus web --stop && rarus web --foreground``, which is what install.sh
     runs -- would otherwise read the lock of the process it just signalled, come
     up on ``serve``, and serve the page from an engine with no ``ChannelManager``
     for the whole session: no adapter to start, no sign-in code mintable, every
@@ -1321,7 +1321,7 @@ def _stop_resident() -> bool:
     A process that outlives its grace is killed with its process group
     (``_stop_one``) rather than reported and left: the gateway ignores a second
     SIGTERM once its teardown has begun, so a stop that only reports leaves the
-    wedged gateway holding the lock, and the next ``raven web`` starts a second
+    wedged gateway holding the lock, and the next ``rarus web`` starts a second
     supervisor whose gateway can only come up on ``serve``, without channels.
     A ``web.json`` the killed supervisor could not remove is removed here, once
     its pid is gone.
@@ -1375,7 +1375,7 @@ def _stop_resident() -> bool:
         # page comes up without channels, which is worse than refusing to start.
         typer.echo(f"error: still running after SIGKILL: {', '.join(unresponsive)}")
     if failed:
-        typer.echo(f"error: raven web not fully stopped: {', '.join(failed)}; resolve the warnings before restarting")
+        typer.echo(f"error: rarus web not fully stopped: {', '.join(failed)}; resolve the warnings before restarting")
     if unresponsive or failed:
         raise typer.Exit(1)
     return stopped
@@ -1410,7 +1410,7 @@ def _read_serve_pid() -> Optional[int]:
 
     Alive was never the question -- a pid the kernel has since handed to
     somebody else answers that exactly as a live gateway does, and reading
-    either as "our gateway" is what refused every ``raven web`` and signed the
+    either as "our gateway" is what refused every ``rarus web`` and signed the
     stop of an unrelated process. What makes the record ours is decidable:
     the instance lock for a page-hosting gateway, the command line for
     anything that keeps the module shape. A record proven to name a foreign
@@ -1499,10 +1499,10 @@ def _await_attach(
 def _web(
     port: int, *, foreground: bool = False, stop: bool = False, supervise: bool = False, dev: bool = False
 ) -> None:
-    """``raven web`` -- open the page against a gateway that stays up."""
+    """``rarus web`` -- open the page against a gateway that stays up."""
     if stop:
         if _stop_resident():
-            typer.echo("raven web stopped")
+            typer.echo("rarus web stopped")
         else:
             typer.echo("nothing to stop; no resident gateway is recorded as running")
         return
@@ -1518,7 +1518,7 @@ def _web(
     try:
         url = _attached_url()
     except PermissionError as exc:
-        typer.echo(f"error: {exc}; stop it and run `raven web` again")
+        typer.echo(f"error: {exc}; stop it and run `rarus web` again")
         raise typer.Exit(1) from None
 
     if url is not None:
@@ -1559,14 +1559,14 @@ def _web(
                 raise typer.Exit(1)
             typer.echo(
                 f"error: a gateway (pid {lingering}) is still running but not answering; "
-                "run `raven web --stop`, then `raven web`"
+                "run `rarus web --stop`, then `rarus web`"
             )
             raise typer.Exit(1)
         _spawn_supervisor(port, dev)
     try:
         url = _await_attach()
     except PermissionError as exc:
-        typer.echo(f"error: {exc}; run `raven web --stop`, then `raven web`")
+        typer.echo(f"error: {exc}; run `rarus web --stop`, then `rarus web`")
         raise typer.Exit(1) from None
     if url is None:
         typer.echo(f"the gateway did not come up; see {_web_log_path()}")
@@ -1574,7 +1574,7 @@ def _web(
     # Checked here as well: a supervisor that was already running came back
     # with whatever flags it was started with, not the ones asked for now.
     _check_attached(url, dev)
-    typer.echo(f"raven is running at {url.split('/auth#')[0]} (stop it with `raven web --stop`)")
+    typer.echo(f"raven is running at {url.split('/auth#')[0]} (stop it with `rarus web --stop`)")
     _open(url)
 
 
@@ -1585,7 +1585,7 @@ def _run_foreground(port: int, dev: bool = False) -> None:
     output is this terminal's (stdio is inherited, not piped), and Ctrl-C reaches
     it because it shares this process group. What this function adds is the
     browser, opened once the child has bound a port and written it down -- the
-    same wait `raven web` does for a supervised one.
+    same wait `rarus web` does for a supervised one.
     """
     import subprocess
 
@@ -1618,7 +1618,7 @@ def _run_foreground(port: int, dev: bool = False) -> None:
         # outlives it long enough to not orphan it.
         with suppress(KeyboardInterrupt):
             proc.wait()
-        typer.echo("raven web stopped")
+        typer.echo("rarus web stopped")
     if proc.returncode:
         raise typer.Exit(proc.returncode)
 
@@ -1641,7 +1641,7 @@ def register(app: typer.Typer) -> None:
         dev: bool = typer.Option(False, "--dev", help="Developer launch: serve the trajectory view in the page."),
     ) -> None:
         """Run the headless Raven gateway (WebSocket RPC, plus a page when one is built)."""
-        # A `raven gateway` with the page mounted is already this engine, and
+        # A `rarus gateway` with the page mounted is already this engine, and
         # a second engine on the same agent home would race it over the same
         # sessions and the same store. Attach instead of starting; anything
         # short of a live, ours, pid-matched page falls through to a normal
@@ -1656,7 +1656,7 @@ def register(app: typer.Typer) -> None:
             if url is not None:
                 _check_attached(url, dev)
                 base = url.split("/auth#")[0]
-                typer.echo(f"the running raven gateway already hosts the page at {base}; not starting a second engine")
+                typer.echo(f"the running rarus gateway already hosts the page at {base}; not starting a second engine")
                 if open_browser:
                     _open(url)
                 return
@@ -1679,7 +1679,7 @@ def register(app: typer.Typer) -> None:
             False,
             "--supervise",
             hidden=True,
-            help="Internal: be the supervisor. `raven web` starts this for you, detached.",
+            help="Internal: be the supervisor. `rarus web` starts this for you, detached.",
         ),
         dev: bool = typer.Option(False, "--dev", help="Developer launch: enable the trajectory view in the page."),
     ) -> None:

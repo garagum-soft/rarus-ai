@@ -808,14 +808,14 @@ class GatewayLogConfig(Base):
 
 
 class GatewayPageConfig(Base):
-    """The served page (`raven serve`'s browser front end) hosted inside the
+    """The served page (`rarus serve`'s browser front end) hosted inside the
     gateway process, on the gateway's own agent loop.
 
     On by default: one engine then serves the page and the IM channels, so
     what the browser sees is what the channels talk to. The page follows the
-    `raven serve` port policy (``port``, probing forward when taken), writes
-    ``~/.rarus/serve.json``, and `raven web` attaches to it. Disable to keep
-    the gateway channel-only and run `raven serve` standalone instead.
+    `rarus serve` port policy (``port``, probing forward when taken), writes
+    ``~/.rarus/serve.json``, and `rarus web` attaches to it. Disable to keep
+    the gateway channel-only and run `rarus serve` standalone instead.
     """
 
     enabled: bool = True
@@ -999,7 +999,7 @@ class A2aServerConfig(Base):
     Declared off, with an empty token that refuses every caller: a config nobody
     onboarded, or one assembled in-process, serves nothing by accident.
     Onboarding mints the token but writes nothing here, so a finished install is
-    provisioned and still closed. ``raven a2a enable`` is what opens it -- a
+    provisioned and still closed. ``rarus a2a enable`` is what opens it -- a
     second network surface is never something an unrelated install turned on."""
 
     enabled: bool = False
@@ -1018,8 +1018,8 @@ class A2aConfig(Base):
 class TuiConfig(Base):
     """Terminal UI launcher behavior.
 
-    ``attach_gateway``: when a live ``raven gateway`` already hosts the page,
-    ``raven tui`` relays to that engine instead of building a second one, so
+    ``attach_gateway``: when a live ``rarus gateway`` already hosts the page,
+    ``rarus tui`` relays to that engine instead of building a second one, so
     the terminal and the channels share one loop. Set false — or pass
     ``--standalone`` for one launch — to always run the embedded engine.
     """
@@ -1100,7 +1100,7 @@ class GatewayConfig(Base):
     port: int = 18790
     user_pool: int = Field(default=4, ge=0)
     """Concurrent user turns per process; 0 is unbounded. Read by the channel
-    gateway, ``raven serve``, the page and every ACP worker alike."""
+    gateway, ``rarus serve``, the page and every ACP worker alike."""
     system_pool: int = Field(default=2, ge=0)
     """Concurrent proactive turns (cron, sentinel, sub-agent results); 0 is unbounded."""
     send_max_retries: int = 3
@@ -1479,13 +1479,13 @@ class ToolsConfig(Base):
     """Serve ``code_map``: a ranked outline of a large code base and where a name
     is defined, from an index kept under ``<RARUS_HOME>/codemap/``. It reads only
     what ``read_file`` may. Off by default because it is one more tool in every
-    request the model sees; ``raven codemap`` serves the same map from the shell
+    request the model sees; ``rarus codemap`` serves the same map from the shell
     either way."""
     ci_status: bool = False
     """Serve ``ci_status``: a branch's, commit's or pull request's GitHub CI checks,
     with the annotations and job-log error lines of the red ones, optionally
     waiting for running checks to finish. Read-only; uses ``GITHUB_TOKEN`` when
-    set. Off by default for the same reason as ``code_map``; ``raven ci status``
+    set. Off by default for the same reason as ``code_map``; ``rarus ci status``
     reads the same from the shell either way."""
     disabled_tools: list[str] = Field(default_factory=list)
     """Tool names to withhold from the assembled tool array and refuse at dispatch.
@@ -1585,7 +1585,7 @@ class SubagentEngineConfig(Base):
     """The engine wheel a folder-discovered agent declares, as
     ``{"package": "<import name>", "wheel": "<distribution name>"}``.
 
-    Declared by the folder's ``subagent.json`` (the ``raven agents new
+    Declared by the folder's ``subagent.json`` (the ``rarus agents new
     --engine-wheel`` scaffold writes it); readiness probes the package where
     raven runs and lists the row disabled, naming the wheel, until it imports.
     Carried on the config row so a pinned copy of the manifest round-trips the
@@ -2257,7 +2257,7 @@ class ThirdPartyAcpSubagentConfig(Base):
 
 
 class BuiltinAgentConfig(Base):
-    """An in-process raven agent loop, callable as a named sub-agent.
+    """An in-process rarus agent loop, callable as a named sub-agent.
 
     The same backend the main loop dispatches an unnamed spawn to
     (:class:`RavenLoopBackend`), differing only in which skills and tools it may
@@ -2373,7 +2373,7 @@ class PlaybookConfig(Base):
 
     Disabled means *not listed*: the model cannot see it, so it cannot call it --
     which is the whole of what disabling can mean now that there is no passive
-    matcher left to mute. An explicit ``raven playbook run`` still resolves one,
+    matcher left to mute. An explicit ``rarus playbook run`` still resolves one,
     because that is the user's own hand."""
 
     router: PlaybookRouterConfig = Field(default_factory=PlaybookRouterConfig)

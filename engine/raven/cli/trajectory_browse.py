@@ -1,6 +1,6 @@
-"""Interactive trajectory browser — the human face of ``raven trajectory``.
+"""Interactive trajectory browser — the human face of ``rarus trajectory``.
 
-A bare ``raven trajectory`` on a TTY opens a three-screen questionary flow:
+A bare ``rarus trajectory`` on a TTY opens a three-screen questionary flow:
 session list -> attempt list -> action menu (save / report / minimize /
 verdict / pin|unpin / split); with two or more attempts, the M key opens the
 multi-select merge. The machine face (id-taking subcommands) lives in
@@ -140,7 +140,7 @@ _ESC_FLUSH_TIMEOUT = 0.05
 _QUESTIONARY_INSTALL_HINT = (
     "[red]The interactive browser needs the questionary package.[/red]"
     " Install it with [cyan]uv add questionary[/cyan], or use the subcommands"
-    " ([cyan]raven trajectory list[/cyan], ...)."
+    " ([cyan]rarus trajectory list[/cyan], ...)."
 )
 
 

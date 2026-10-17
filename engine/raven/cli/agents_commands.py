@@ -1,6 +1,6 @@
 """Agents scaffolding subcommands -- owns the ``agents_app`` Typer instance.
 
-``raven agents new <name>`` instantiates the packaged scaffold templates
+``rarus agents new <name>`` instantiates the packaged scaffold templates
 (``raven/templates/agents_scaffold/``) into a fresh agent folder: the roster
 manifest, the launcher, the birth-certificate config, and a plugin package
 carrying one tool and one hook factory. A folder dropped under the raven
@@ -585,7 +585,7 @@ def new(
         if candidate.lower() in roster:
             _refuse(
                 f"the host roster already holds a row named '{candidate}' "
-                "(raven agents is one namespace across casings); choose another name"
+                "(rarus agents is one namespace across casings); choose another name"
             )
 
     if here:
@@ -602,7 +602,7 @@ def new(
         if candidate.casefold() in taken:
             _refuse(
                 f"the agents tree at {target.parent} already holds an agent named '{candidate}' "
-                "(raven agents is one namespace across casings); choose another name"
+                "(rarus agents is one namespace across casings); choose another name"
             )
 
     # The engine skeleton is a development project: inside a checkout (--here)
@@ -798,7 +798,7 @@ def show_matrix(json_output: bool = typer.Option(False, "--json")) -> None:
         console.print_json(json.dumps({a: {c: vars(v) for c, v in caps.items()} for a, caps in cells.items()}))
         return
     if not cells:
-        console.print("no observations yet: run `raven agents probe`")
+        console.print("no observations yet: run `rarus agents probe`")
         return
     caps = list(PROBES)
     console.print(f"{'agent':<16}" + "".join(f"{c:<14}" for c in caps), markup=False)
@@ -854,17 +854,17 @@ def hire_employee(
     except HireError as exc:
         _refuse(str(exc))
     console.print(f"[green]✓[/green] hired {name} ({folder})")
-    console.print("The roster picks it up on its next refresh; a running gateway re-reads agents on `raven gateway reload`.")
+    console.print("The roster picks it up on its next refresh; a running gateway re-reads agents on `rarus gateway reload`.")
 
 
 @agents_app.command("employees")
 def list_employees() -> None:
-    """Everyone hired with `raven agents hire`."""
+    """Everyone hired with `rarus agents hire`."""
     from raven.agent.subagent.hire import employees
 
     rows = employees()
     if not rows:
-        console.print("No employees yet: `raven agents hire <name> --role ... --prompt ...`")
+        console.print("No employees yet: `rarus agents hire <name> --role ... --prompt ...`")
         return
     for e in rows:
         model = e.model or "the host's model"

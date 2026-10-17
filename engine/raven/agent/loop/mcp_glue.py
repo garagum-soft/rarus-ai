@@ -249,7 +249,7 @@ class McpGlueMixin:
           it is early enough that no turn has arrived yet.
         * ``run_turn``, on every turn. Idempotent, so it costs three boolean
           reads once MCP is up; what it still covers is each host that never
-          reaches the line above -- ``raven tui``, which has no other MCP path at
+          reaches the line above -- ``rarus tui``, which has no other MCP path at
           all -- plus the reconnect after ``close_mcp`` and the retry after an
           assembly-time prewarm that failed.
 

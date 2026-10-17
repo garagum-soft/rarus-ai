@@ -517,7 +517,7 @@ class TestExternalEffectFamilies:
     The built-in policy asks about exactly one family -- deletion -- which fits a
     terminal the reader is already watching. Behind an editor nothing is on
     screen, so ``git push``, ``npm install`` and ``curl -o`` would run unannounced.
-    The group registered by ``raven acp`` closes that, and the tests below are as
+    The group registered by ``rarus acp`` closes that, and the tests below are as
     much about what it does *not* ask for: a prompt on every build and every
     documentation fetch trains the reader to approve without looking, which costs
     more than it buys.

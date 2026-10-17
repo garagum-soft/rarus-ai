@@ -226,7 +226,7 @@ def check_blocker(blocker: str, backlog: Backlog, question_ids: Iterable[str] | 
         if question_ids is not None and what not in set(question_ids):
             raise BacklogError(
                 f"no question {what!r} in {DECISIONS_FILE}. Ask it first: "
-                f'`raven playbook stint ask "..." --blocks <id>` files the question and blocks the task on the id it mints'
+                f'`rarus playbook stint ask "..." --blocks <id>` files the question and blocks the task on the id it mints'
             )
     elif kind == "task":
         if not what.isdigit():
@@ -246,7 +246,7 @@ def backlog_path(project: Path) -> Path:
 def load(project: Path) -> Backlog:
     path = backlog_path(project)
     if not path.is_file():
-        raise BacklogError(f"no backlog at {path}: `raven playbook stint task add` files the first one")
+        raise BacklogError(f"no backlog at {path}: `rarus playbook stint task add` files the first one")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:

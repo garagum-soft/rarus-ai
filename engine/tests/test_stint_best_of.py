@@ -96,7 +96,7 @@ async def test_a_run_that_cannot_start_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_command_line_runs_attempts_on_a_roster_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The main path: `raven playbook best-of` drives a configured agent once per checkout."""
+    """The main path: `rarus playbook best-of` drives a configured agent once per checkout."""
     from raven.cli.commands import app
 
     home = tmp_path / "home"

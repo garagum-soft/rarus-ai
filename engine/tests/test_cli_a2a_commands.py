@@ -86,7 +86,7 @@ def test_the_gateway_facade_is_refused_in_a_subagent_process(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# `raven a2a enable` / `raven a2a disable`
+# `rarus a2a enable` / `rarus a2a disable`
 # ---------------------------------------------------------------------------
 
 

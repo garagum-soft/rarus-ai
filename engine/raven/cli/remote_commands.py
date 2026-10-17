@@ -1,4 +1,4 @@
-"""``raven remote``: pair a remote device with this Raven, list the paired ones, revoke one.
+"""``rarus remote``: pair a remote device with this Raven, list the paired ones, revoke one.
 
 ``pair`` prints a one-time ticket good for five minutes and how a device trades
 it for a token (``POST /pair`` on the gateway). The device then reaches the
@@ -37,7 +37,7 @@ def pair(ttl: int = typer.Option(300, "--ttl", min=30, max=3600, help="Seconds t
     port = _gateway_port()
     console.print(f"ticket: {ticket}", markup=False, soft_wrap=True)
     console.print(f"good for {seconds} seconds, once.")
-    where = f"http://<this machine>:{port}" if port else "the gateway (start it with `raven web`)"
+    where = f"http://<this machine>:{port}" if port else "the gateway (start it with `rarus web`)"
     console.print(
         f'On the device: POST {where}/pair with {{"ticket": "{ticket}", "device": "<name>"}}; '
         "the answer carries the device token for X-Raven-Device-Token.",

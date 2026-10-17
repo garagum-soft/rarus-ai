@@ -194,7 +194,7 @@ def _is_blacklist_argv(argv: list[str]) -> bool:
 
 
 async def session_status(params: dict[str, Any]) -> dict[str, Any]:
-    """Real ``session.status`` handler — delegates to ``raven status``.
+    """Real ``session.status`` handler — delegates to ``rarus status``.
 
     Replaces the hermes-only -32012 stub so the ``/status`` slash renders
     Raven's Rich status output via ``SessionStatusResponse {output}``.

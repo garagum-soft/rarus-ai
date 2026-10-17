@@ -811,7 +811,7 @@ def test_no_surface_writes_the_default_model_without_naming_its_provider():
     model while leaving the provider to whatever it was.
 
     That hole was real. It was fixed at one call site and stayed open at four
-    others: ``raven provider use`` was taught to write the provider, and the
+    others: ``rarus provider use`` was taught to write the provider, and the
     warning about a stale one was deleted as impossible, while onboarding still
     wrote the model through its own helper and left the provider alone -- so
     finishing the wizard on Anthropic with DeepSeek configured sent Anthropic's

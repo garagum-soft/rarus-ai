@@ -28,7 +28,7 @@ what they produce:
     and only a ``repeat``'s ``{{ <id>.output }}`` -- its last pass -- may be read.
 
 Items are written in the file: a list known when the playbook is loaded. A list
-that only exists at run time is a batch (``raven playbook batch``) instead.
+that only exists at run time is a batch (``rarus playbook batch``) instead.
 """
 
 from __future__ import annotations

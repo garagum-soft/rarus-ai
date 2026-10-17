@@ -1,4 +1,4 @@
-"""``raven attention``: the queue on the command line."""
+"""``rarus attention``: the queue on the command line."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """The control-plane client, driven against a real control plane.
 
-``live_probe`` is what ``raven gateway status|reload|stop`` calls: one websocket
+``live_probe`` is what ``rarus gateway status|reload|stop`` calls: one websocket
 request per call, the per-boot token as the first frame. Its single network path
 carries every one of those commands, so it is exercised here against the server
 from :mod:`raven.rpc.control` rather than a stub.

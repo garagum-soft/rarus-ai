@@ -1,4 +1,4 @@
-"""``raven areas``: roster agents that own a part of a project, with a journal and, if asked, a standing duty."""
+"""``rarus areas``: roster agents that own a part of a project, with a journal and, if asked, a standing duty."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def assign(
         f"{area.agent} owns '{area.name}' in {area.project}: {', '.join(area.paths + area.topics) or 'its charter'}; {duty}"
     )
     if area.every_s:
-        typer.echo("a running gateway starts keeping watch on its next restart; `raven areas run` runs it now")
+        typer.echo("a running gateway starts keeping watch on its next restart; `rarus areas run` runs it now")
 
 
 @areas_app.command("list")

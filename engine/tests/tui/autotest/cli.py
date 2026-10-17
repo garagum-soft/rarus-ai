@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "smoke",
         help="Spawn <command>, wait readiness, then terminate; print trace + exit code",
     )
-    smoke.add_argument("command", help="Command to spawn (e.g. 'uv run raven tui --check')")
+    smoke.add_argument("command", help="Command to spawn (e.g. 'uv run rarus tui --check')")
     smoke.add_argument("--cols", type=int, default=120, help="Terminal cols (default 120)")
     smoke.add_argument("--rows", type=int, default=40, help="Terminal rows (default 40)")
     smoke.add_argument(

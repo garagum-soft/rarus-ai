@@ -242,7 +242,7 @@ def test_the_mac_app_folders_are_the_system_one_then_the_users() -> None:
 def test_every_seat_that_reports_libreoffice_missing_asks_one_resolver() -> None:
     """The resolver, not just the conversion.
 
-    The engine's render gate, the gateway preview and `raven doctor` each decide
+    The engine's render gate, the gateway preview and `rarus doctor` each decide
     whether LibreOffice is present, and they have to decide it the same way --
     a seat that calls it missing on an install the runner would have used is the
     divergence this module exists to end. The engine re-exports rather than

@@ -1,9 +1,9 @@
-"""Reusable RPC stack assembly for headless transports (`raven serve`).
+"""Reusable RPC stack assembly for headless transports (`rarus serve`).
 
 Extracted shape of the wiring in ``tui_commands._run_rpc_server_until_done``:
 AgentLoop + brokers + SubscriptionEmitter + spine scheduler + method
 registration, minus any transport. The caller supplies a ``send_frame``
-sink (the TUI hands it a single socket writer; ``raven serve`` hands it a
+sink (the TUI hands it a single socket writer; ``rarus serve`` hands it a
 WebSocket broadcast), so the same engine assembly serves both transports.
 """
 
@@ -307,7 +307,7 @@ async def build_rpc_stack(
     any other caller keep telling the user where to enter a key instead.
 
     ``emitter`` and ``ensure_stack`` belong to a host that can assemble this
-    stack a second time -- ``raven serve``, whose first run comes up without a
+    stack a second time -- ``rarus serve``, whose first run comes up without a
     loop because no model is configured yet and builds one once the page writes
     the config. ``ensure_stack`` is what ``config.set`` asks to do that: the
     handler decides whether the moment calls for it, the host owns the
@@ -416,7 +416,7 @@ async def build_rpc_stack(
         # server connecting is not part of anybody's turn. Clients already listen
         # for these three, and an OAuth connect is not completable without them --
         # the authorization URL would only ever reach the gateway host's own
-        # browser, which for `raven serve` is not where the user is.
+        # browser, which for `rarus serve` is not where the user is.
         async def _mcp_event(method: str, params: dict) -> None:
             await send_frame({"jsonrpc": "2.0", "method": method, "params": params})
 

@@ -71,7 +71,7 @@ def isolated_raven_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     Both handoff paths write one before spawning, and their failure paths
     delete one. Unisolated, running this file writes a marker into the real
-    ~/.rarus that makes a genuine `raven serve` refuse to start for the next
+    ~/.rarus that makes a genuine `rarus serve` refuse to start for the next
     two minutes -- and, worse, deletes the marker of an upgrade that is
     actually in flight, disarming the guard it exists to arm.
     """
@@ -1406,7 +1406,7 @@ def test_upgrade_helper_reports_a_reinstall_when_the_version_does_not_move(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`raven upgrade` sends an up-to-date install here when the release's list
+    """`rarus upgrade` sends an up-to-date install here when the release's list
     names a plugin the environment lacks; the same command repairs it."""
     monkeypatch.setattr(subprocess, "run", Mock(return_value=Mock(returncode=0)))
     helper_main = _load_upgrade_helper()
@@ -1551,7 +1551,7 @@ def test_upgrade_helper_reports_a_failed_restart_after_a_good_install(
 
 
 def test_parent_wait_outlasts_a_slow_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A `raven serve` teardown routinely runs past half a minute, and the bound
+    # A `rarus serve` teardown routinely runs past half a minute, and the bound
     # used to be 30s -- so this asserts the helper is still waiting at a point
     # where it used to have given up and abandoned the upgrade.
     namespace = _load_upgrade_helper_namespace()
@@ -1927,7 +1927,7 @@ def test_upgrade_check_reports_available_without_install(monkeypatch: pytest.Mon
 
     assert result.exit_code == 0
     assert "0.1.3 -> 0.1.4" in result.stdout
-    assert "raven upgrade" in result.stdout
+    assert "rarus upgrade" in result.stdout
     handoff.assert_not_called()
 
 
@@ -1986,7 +1986,7 @@ def test_upgrade_check_names_the_missing_plugins_without_installing(monkeypatch:
 
     assert result.exit_code == 0
     assert "lacks ppt-engine" in " ".join(result.stdout.split())
-    assert "raven upgrade" in result.stdout
+    assert "rarus upgrade" in result.stdout
     handoff.assert_not_called()
 
 

@@ -162,7 +162,7 @@ def test_a_broken_file_is_not_reported_as_an_empty_one(store, tmp_path, monkeypa
 
     A hand-edited registry with one stray comma raised ValueError, became [], and
     the listing then told the loop the owner had set no machine up. Every file
-    here was hand-edited until `raven ops connection add` existed, so this was one
+    here was hand-edited until `rarus ops connection add` existed, so this was one
     keystroke away at all times -- and the one thing the loop was told about it
     was false. There may well be machines in that file.
     """

@@ -1,4 +1,4 @@
-"""`raven gateway reload|status|stop`: drive the running gateway's control plane.
+"""`rarus gateway reload|status|stop`: drive the running gateway's control plane.
 
 These are the CLI clients of :mod:`raven.rpc.control`, through
 :mod:`raven.gateway.live_probe`, which finds the daemon by the lock payload.
@@ -19,7 +19,7 @@ console = Console()
 
 
 def register(gateway_app: typer.Typer) -> None:
-    """Attach the control-plane verbs to the ``raven gateway`` group."""
+    """Attach the control-plane verbs to the ``rarus gateway`` group."""
 
     @gateway_app.command("status")
     def status() -> None:
@@ -75,8 +75,8 @@ def register(gateway_app: typer.Typer) -> None:
             supervised = False
         if supervised:
             console.print(
-                "[yellow]A `raven web` supervisor is running and would restart the gateway; "
-                "use `raven web --stop` to stop both.[/yellow]"
+                "[yellow]A `rarus web` supervisor is running and would restart the gateway; "
+                "use `rarus web --stop` to stop both.[/yellow]"
             )
             raise typer.Exit(1)
         if not asyncio.run(live_probe.shutdown()):

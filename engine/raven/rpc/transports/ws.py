@@ -1,4 +1,4 @@
-"""aiohttp WebSocket + static transport for `raven serve`.
+"""aiohttp WebSocket + static transport for `rarus serve`.
 
 Browser auth bootstrap (Jupyter-style): the launcher mints a one-time nonce
 and opens ``http://127.0.0.1:<port>/auth#<nonce>``. The fragment never enters
@@ -47,7 +47,7 @@ _AUTH_PAGE = """<!DOCTYPE html>
     body: JSON.stringify({nonce}),
   });
   if (r.ok) { location.replace('/'); }
-  else { document.getElementById('s').textContent = 'Sign-in link expired. Re-run: raven serve --open'; }
+  else { document.getElementById('s').textContent = 'Sign-in link expired. Re-run: rarus serve --open'; }
 })();
 </script></body></html>"""
 
@@ -58,7 +58,7 @@ def cookie_name(port: int) -> str:
     """The session cookie's name for a gateway on `port`.
 
     The port has to be IN THE NAME because cookies are scoped to a host and
-    ignore the port entirely: two `raven serve` instances on 127.0.0.1 both
+    ignore the port entirely: two `rarus serve` instances on 127.0.0.1 both
     setting `raven_session` write the same jar entry, so whichever
     authenticated last owns it and the other one's page starts sending a value
     that gateway never minted.
@@ -184,7 +184,7 @@ class WsGateway:
         header = request.headers.get("X-Raven-Token")
         if header is not None and secrets.compare_digest(header, self.session_token):
             return True
-        # A device paired through `raven remote pair` holds its own token; see
+        # A device paired through `rarus remote pair` holds its own token; see
         # raven.auth.pairing for how it was issued.
         return self._paired_device(request.headers.get("X-Raven-Device-Token")) is not None
 
@@ -255,7 +255,7 @@ class WsGateway:
         return resp
 
     async def handle_pair(self, request: web.Request) -> web.Response:
-        """Trade a pairing ticket for a device token (``raven remote pair`` issued the ticket).
+        """Trade a pairing ticket for a device token (``rarus remote pair`` issued the ticket).
 
         Open to any caller, like ``/auth/exchange``: the ticket is the
         credential, it is good once and for minutes, and a wrong one is refused
@@ -280,7 +280,7 @@ class WsGateway:
     async def handle_mint_nonce(self, request: web.Request) -> web.Response:
         """Trade the shared secret for a fresh one-time nonce.
 
-        Lets a relauncher (a second `raven serve --open` against an
+        Lets a relauncher (a second `rarus serve --open` against an
         already-running gateway, or a desktop wrapper) bootstrap a new browser
         session without restarting the server. Requires the X-Raven-Token
         header; never cookie-callable, so a page script cannot mint nonces.
@@ -834,7 +834,7 @@ def build_app(
             caller's judgement of that, asked per response so a rebuild takes
             the header away without a restart). The page's own HEAD probe of
             ``/`` reads it and shows the reader how to rebuild: the terminal
-            that resolved the page has already said so, but `raven web`
+            that resolved the page has already said so, but `rarus web`
             detaches that terminal, and the page is the one place both launch
             paths can show it.
             """
@@ -848,7 +848,7 @@ def build_app(
 
         async def placeholder(_request: web.Request) -> web.Response:
             return web.Response(
-                text="<h1>raven serve</h1><p>No front end built here; the /rpc WebSocket endpoint is live.</p>",
+                text="<h1>rarus serve</h1><p>No front end built here; the /rpc WebSocket endpoint is live.</p>",
                 content_type="text/html",
             )
 

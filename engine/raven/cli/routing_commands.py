@@ -1,4 +1,4 @@
-"""``raven routing``: which router is on, and where a given request would go and why."""
+"""``rarus routing``: which router is on, and where a given request would go and why."""
 
 from __future__ import annotations
 

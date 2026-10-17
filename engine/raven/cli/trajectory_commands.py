@@ -1,4 +1,4 @@
-"""``raven trajectory`` subapp — package, label, and protect trajectories.
+"""``rarus trajectory`` subapp — package, label, and protect trajectories.
 
 Trajectories are addressed by attempt id (equal to the trace id for a
 single-turn attempt; see :mod:`raven.trajectory`). Every id-taking command
@@ -83,7 +83,7 @@ def trajectory_main(
     # scripts running `trajectory save/list/...` would die on the check.
     if ctx.invoked_subcommand is not None:
         return
-    die_if_not_tty("raven trajectory list")
+    die_if_not_tty("rarus trajectory list")
     # Local import: the browser (and its questionary dependency) loads only
     # when actually entered, and the module cycle commands <-> browse breaks.
     from raven.cli.trajectory_browse import browse_trajectories
@@ -115,7 +115,7 @@ def _bundle_dir_or_exit(target: str) -> Path:
         return bundle_dir
     console.print(
         f"[red]no bundle found for {escape(repr(target))}[/red]"
-        f" — run [cyan]raven trajectory save {escape(target)}[/cyan] first"
+        f" — run [cyan]rarus trajectory save {escape(target)}[/cyan] first"
     )
     raise typer.Exit(code=1)
 
@@ -482,7 +482,7 @@ def trajectory_report_bug(
         except breport.PackagingError as exc:
             console.print(f"[red]✗ Bug report {escape(prep.report_id)} failed: {escape(str(exc))}[/red]")
             if exc.retryable:
-                console.print('  The collected snapshot is kept. Retry from "Bug reports" in raven trajectory.')
+                console.print('  The collected snapshot is kept. Retry from "Bug reports" in rarus trajectory.')
             exit_code = 1
             return
         console.print(f"[green]✓[/green] Bug report {escape(record['report_id'])} ready (local_ready)", highlight=False)

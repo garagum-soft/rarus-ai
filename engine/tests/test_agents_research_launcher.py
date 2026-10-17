@@ -4,7 +4,7 @@ The B-side product must hold the same launch contract as its vendored twin
 while consuming installed raven: secrets merge into a rendered 0600 config
 whose parent decides the data dir, the workspace is pinned and seeded with
 the identity, refusals fire before a server that could not work starts, and
-the exec targets ``python -m raven acp``. The strongest pin is the loader
+the exec targets ``python -m rarus acp``. The strongest pin is the loader
 round-trip: what the launcher renders, trunk raven's own loader loads.
 """
 

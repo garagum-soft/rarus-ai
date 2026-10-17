@@ -1,4 +1,4 @@
-"""``raven codemap``: the code index of a project -- build it, read the ranked map, find a definition."""
+"""``rarus codemap``: the code index of a project -- build it, read the ranked map, find a definition."""
 
 from __future__ import annotations
 

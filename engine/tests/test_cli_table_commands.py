@@ -1,4 +1,4 @@
-"""``raven table``: create a table, give it a source, sync it, and see the change arrive."""
+"""``rarus table``: create a table, give it a source, sync it, and see the change arrive."""
 
 from __future__ import annotations
 

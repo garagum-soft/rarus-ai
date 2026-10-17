@@ -294,7 +294,7 @@ class PendingDecisionStore:
 
     def all_active(self, *, now_ms: int) -> list[PendingDecision]:
         """Diagnostic helper — return every still-live decision (any
-        channel/to). Used by ``raven sentinel decisions`` and tests."""
+        channel/to). Used by ``rarus sentinel decisions`` and tests."""
         raw_state = self._store.load()
         out: list[PendingDecision] = []
         for raw in raw_state.get(self._STATE_KEY, []):

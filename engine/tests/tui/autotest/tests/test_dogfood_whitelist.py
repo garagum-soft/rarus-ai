@@ -68,7 +68,7 @@ def _assert_absent_before_submit(harness, slash: str, expected: str) -> None:
     ids=[_make_test_id(e) for e in _WHITELIST],
 )
 def test_dogfood_slash_command(harness, slash, expected):
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     assert harness.wait(READY_RE, timeout=60.0), (
         f"TUI status bar never reported ready for /{slash}; screen=\n{harness.screen()}"
     )

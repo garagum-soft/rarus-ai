@@ -243,7 +243,7 @@ async def test_session_status_removed_from_stubs():
     the real handler in ``slash_routing.py`` supersedes it."""
     assert "session.status" not in HERMES_ONLY_STUB_METHODS, (
         "session.status must be promoted to a real handler so /status routes "
-        "to `raven status` instead of returning -32012."
+        "to `rarus status` instead of returning -32012."
     )
 
 

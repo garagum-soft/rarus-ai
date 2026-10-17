@@ -1,4 +1,4 @@
-"""``raven acp``'s process shell: the channel, the reader, and the callback.
+"""``rarus acp``'s process shell: the channel, the reader, and the callback.
 
 What the command owns is narrow on purpose -- claim fd 1, send the logs
 elsewhere, open stdin, hand both to the server -- so what is pinned here is that
@@ -185,7 +185,7 @@ class TestOpenStdin:
 
     async def test_a_regular_file_on_stdin_falls_back_to_a_thread(self, monkeypatch, tmp_path):
         """``connect_read_pipe`` refuses a regular file outright, so
-        ``raven acp < script.jsonl`` -- how anyone first tries this by hand --
+        ``rarus acp < script.jsonl`` -- how anyone first tries this by hand --
         would die with a traceback before reading a byte."""
         script = tmp_path / "script.jsonl"
         script.write_bytes(b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n')
@@ -303,7 +303,7 @@ class TestCallback:
         assert caught.value.exit_code == 1
 
     def test_it_defers_to_a_subcommand(self, monkeypatch):
-        """``acp`` is a Typer group, so a future ``raven acp <something>`` must
+        """``acp`` is a Typer group, so a future ``rarus acp <something>`` must
         not also start the server."""
 
         async def _must_not_run(*, verbose: bool = False) -> None:
@@ -478,7 +478,7 @@ class TestHelp:
 
     def test_it_does_not_promise_subcommands_it_has_none_of(self):
         """The group shape is deliberate -- see ``test_it_defers_to_a_subcommand``
-        -- but Click's default metavar advertises a ``raven acp <command>`` that
+        -- but Click's default metavar advertises a ``rarus acp <command>`` that
         does not exist."""
 
         assert "COMMAND [ARGS]" not in self._rendered()

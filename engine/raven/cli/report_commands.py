@@ -1,4 +1,4 @@
-"""``raven report``: reports, retrospectives and the run archive, built from the journals."""
+"""``rarus report``: reports, retrospectives and the run archive, built from the journals."""
 
 from __future__ import annotations
 

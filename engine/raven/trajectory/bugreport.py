@@ -137,7 +137,7 @@ def _pack_clean_tar(source_dir: Path, out_file: Path, arcname: str) -> Path:
     """A ``.tar.gz`` of ``source_dir`` rooted at ``arcname``, headers normalized.
 
     Same archive layout as ``pack_report`` — only the member ownership headers
-    differ (see :func:`_clean_member`); ``raven trajectory report`` keeps its
+    differ (see :func:`_clean_member`); ``rarus trajectory report`` keeps its
     existing behavior untouched.
     """
     out_file.parent.mkdir(parents=True, exist_ok=True)

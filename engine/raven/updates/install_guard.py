@@ -199,7 +199,7 @@ def inspect_install(*, now: float | None = None) -> InstallFault | None:
     if marker is not None:
         # The install outlived the helper that was running it. Nothing is
         # missing, so the marker is only noise now, and leaving it would make
-        # `raven doctor` report a fault that no longer exists.
+        # `rarus doctor` report a fault that no longer exists.
         clear_marker()
     return None
 

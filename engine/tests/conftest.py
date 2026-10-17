@@ -794,7 +794,7 @@ def _no_production_waits(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
 def _no_update_check(tmp_path, monkeypatch):
     """Keep the startup update check off the network and off the real disk.
 
-    ``raven tui`` fires ``maybe_refresh_async()`` and ``session.create`` reads
+    ``rarus tui`` fires ``maybe_refresh_async()`` and ``session.create`` reads
     the cache, so any test reaching either path would otherwise fetch the
     GitHub releases API and write ``<cache dir>/update_check.json`` under the
     real home. Redirecting the cache dir alone still leaves an empty cache,
@@ -839,7 +839,7 @@ def _isolate_tracing_state_dir(tmp_path, monkeypatch):
     code (agent loop, subagents, TUI RPC), so any test exercising those paths
     emits spans with fabricated session keys (``session-a``, ``weixin:c``, ...)
     into the real trace store — they then surface as phantom sessions in
-    ``raven trajectory``. Redirect only the directory, not the enabled switch,
+    ``rarus trajectory``. Redirect only the directory, not the enabled switch,
     so the suite keeps exercising the real emission path with zero behavior
     change; leaks land in tmp instead.
 

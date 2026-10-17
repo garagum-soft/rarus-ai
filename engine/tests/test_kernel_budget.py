@@ -82,10 +82,10 @@ argued for the first time, not room set aside to spend.
 
 2,791 -> 2,960 (2026-09-14): the memory seam grew two declared shapes.
 ``contracts/memory.py`` gained ``health()`` with ``HealthCheck`` / ``BackendHealth``
-(what ``raven doctor`` and ``raven import`` read instead of the plugin's
+(what ``rarus doctor`` and ``raven import`` read instead of the plugin's
 internals), and ``contracts/onboard.py`` is a new paper (``OnboardUI`` /
 ``OnboardStep`` / ``StepOutcome``, the screen a memory plugin contributes to
-``raven onboard``). Measured at 2,938 on top of the ``CallRecord`` round
+``rarus onboard``). Measured at 2,938 on top of the ``CallRecord`` round
 above; the headroom is the same twenty-odd lines as above, for the same reason.
 
 2,960 -> 2,990 (2026-09-15): two grants the seam round left implicit. A

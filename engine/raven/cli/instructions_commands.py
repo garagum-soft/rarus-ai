@@ -1,4 +1,4 @@
-"""``raven instructions``: the revision log of the agent's instruction files.
+"""``rarus instructions``: the revision log of the agent's instruction files.
 
 ``log`` lists the revisions, ``show`` prints one, ``diff`` compares two for
 review, ``record`` keeps the file's current text as a revision, and
@@ -65,7 +65,7 @@ def log_cmd(
         return
     if not entries:
         console.print(
-            f"No revisions recorded for {_key(name)}. `raven instructions record {name}` keeps the current text."
+            f"No revisions recorded for {_key(name)}. `rarus instructions record {name}` keeps the current text."
         )
         return
     table = Table(title=f"{_key(name)} (head: {head})")

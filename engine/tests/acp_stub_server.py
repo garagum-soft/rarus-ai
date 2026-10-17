@@ -256,7 +256,7 @@ def handle_steer(request_id, params) -> None:
         ok(request_id, {"status": "no_turn"})
         return
     prompt_id, session_id = _AWAITING_STEER.pop(0)
-    # What a raven agent does on an accepted steer: announce the person's words
+    # What a rarus agent does on an accepted steer: announce the person's words
     # on the session stream, then answer them, then the turn ends.
     update(session_id, {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": text}})
     ok(request_id, {"status": "injected"})

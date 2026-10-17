@@ -12,7 +12,7 @@ history -- and only then delivered:
 - to an agent whose live turn takes steering (an ACP agent that declares it),
   at once;
 - to anyone else, at the start of their next turn, or when they read their
-  inbox (``read_messages``, ``raven mail inbox``).
+  inbox (``read_messages``, ``rarus mail inbox``).
 
 Names. A participant is the instance handle it runs under when it has one (a
 named or minted instance, a DAG node's id), else its roster agent name. A
@@ -26,7 +26,7 @@ One file pair per conversation under ``<RARUS_HOME>/mailbox``: an append-only
 ``.jsonl`` log (the history, never consumed) and a ``.json`` state holding the
 members, the next sequence number and how far each member has read. Both are
 written under the state's lock, so other processes -- an external CLI agent
-running ``raven mail send`` -- share it safely.
+running ``rarus mail send`` -- share it safely.
 """
 
 from __future__ import annotations
@@ -388,7 +388,7 @@ async def deliver_live(box: Mailbox, recipient: str) -> bool:
 
 
 def env_for_current() -> dict[str, str]:
-    """Environment naming the current participant, for a child that runs ``raven mail``."""
+    """Environment naming the current participant, for a child that runs ``rarus mail``."""
     me = current()
     if me is None:
         return {}

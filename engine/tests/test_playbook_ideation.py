@@ -90,7 +90,7 @@ async def test_the_roadmap_is_written_out(tmp_path: Path) -> None:
 
 
 def test_the_command_line_ideates_with_a_roster_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The main path: `raven playbook ideate` puts each category to a configured agent."""
+    """The main path: `rarus playbook ideate` puts each category to a configured agent."""
     from raven.cli.commands import app
 
     home = tmp_path / "home"

@@ -1,6 +1,6 @@
 """Channel subcommands — owns the ``channels_app`` Typer instance.
 
-This module bundles all ``raven channels ...`` subcommands:
+This module bundles all ``rarus channels ...`` subcommands:
 
 Lifecycle commands:
 
@@ -186,7 +186,7 @@ def _parse_channel_flags(extra_args: list[str], channel_name: str) -> dict:
             key = _normalize(flag[3:])
             if key not in specs:
                 raise typer.BadParameter(
-                    f"Unknown field '--no-{flag[3:]}'. Run 'raven channels show {channel_name}' for available flags."
+                    f"Unknown field '--no-{flag[3:]}'. Run 'rarus channels show {channel_name}' for available flags."
                 )
             out[key] = False
             continue
@@ -195,7 +195,7 @@ def _parse_channel_flags(extra_args: list[str], channel_name: str) -> dict:
         if key not in specs:
             raise typer.BadParameter(
                 f"Unknown field '--{flag}' for channel '{channel_name}'. "
-                f"Run 'raven channels show {channel_name}' for available flags."
+                f"Run 'rarus channels show {channel_name}' for available flags."
             )
 
         if value is None:
@@ -222,12 +222,12 @@ def _register_config_commands(channels_app: typer.Typer) -> None:
     ``@command`` decorator silently appends to ``registered_commands``, so a
     second call shadows the first set with duplicates.
     """
-    # `raven channels` (no subcommand) should print help, not "Missing command".
+    # `rarus channels` (no subcommand) should print help, not "Missing command".
     channels_app.info.no_args_is_help = True
 
     base_help = channels_app.info.help or "Manage channels"
     if "channels list" not in base_help:
-        channels_app.info.help = f"{base_help}\n\nRun 'raven channels list' to see available channels."
+        channels_app.info.help = f"{base_help}\n\nRun 'rarus channels list' to see available channels."
 
     @channels_app.command(
         "enable",
@@ -240,9 +240,9 @@ def _register_config_commands(channels_app: typer.Typer) -> None:
         """Enable a channel; optionally fill credential fields inline.
 
         Examples:
-            raven channels enable telegram --token 123:AAAA
-            raven channels enable feishu --app-id X --app-secret Y
-            raven channels enable slack --bot-token X --app-token Y --dm.policy open
+            rarus channels enable telegram --token 123:AAAA
+            rarus channels enable feishu --app-id X --app-secret Y
+            rarus channels enable slack --bot-token X --app-token Y --dm.policy open
         """
         if help_requested(ctx.args):
             _print_schema_table(name)
@@ -307,8 +307,8 @@ def _register_config_commands(channels_app: typer.Typer) -> None:
         """Update specific fields. Same --flag syntax as ``enable``.
 
         Examples:
-            raven channels set telegram --token NEW --proxy http://127.0.0.1:7890
-            raven channels set slack --dm.policy open
+            rarus channels set telegram --token NEW --proxy http://127.0.0.1:7890
+            rarus channels set slack --dm.policy open
         """
         if help_requested(ctx.args):
             _print_schema_table(name)
@@ -443,7 +443,7 @@ __all__ = ["channels_app"]
 
 
 # ---------------------------------------------------------------------------
-# channels_app: top-level Typer group for `raven channels ...`
+# channels_app: top-level Typer group for `rarus channels ...`
 # ---------------------------------------------------------------------------
 
 channels_app = typer.Typer(help="Manage channels")
@@ -521,10 +521,10 @@ def channels_login(
     if not spec.capabilities.interactive_login:
         console.print(
             f"[yellow]{channel_name} needs no interactive login.[/yellow] "
-            f"Configure it with: [cyan]raven channels set {channel_name}[/cyan]"
+            f"Configure it with: [cyan]rarus channels set {channel_name}[/cyan]"
         )
         return
-    die_if_not_tty(f"raven channels login {channel_name} (from an interactive terminal)")
+    die_if_not_tty(f"rarus channels login {channel_name} (from an interactive terminal)")
     console.print(f"{__logo__} {spec.display_name} Login\n")
     from raven.config.admission import dispense_channel_config
 

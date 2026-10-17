@@ -12,7 +12,7 @@ Two artifacts with one writer each per install:
   stream, one line per observed install event.
 - ``.install-meta.json`` (:func:`write_install_meta`) — a single stamp
   inside the skill directory itself, the O(1) provenance source for
-  ``raven skill list`` (no log scan needed). First install wins; later
+  ``rarus skill list`` (no log scan needed). First install wins; later
   observations of the same bundle never rewrite it.
 """
 

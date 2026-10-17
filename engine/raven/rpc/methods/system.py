@@ -100,7 +100,7 @@ async def system_hello(params: dict, *, channel: str = LOCAL_CHANNEL) -> dict:
         declare_surface(surface)
 
     client_capabilities = params.get("client_capabilities", []) or []
-    # pid distinguishes concurrent `raven tui` processes sharing one log file.
+    # pid distinguishes concurrent `rarus tui` processes sharing one log file.
     logger.info(
         "rpc: handshake — pid={} client_version={} client_capabilities={} surface={}",
         os.getpid(),
@@ -215,11 +215,11 @@ async def system_version(params: dict, *, send_frame: Any = None) -> dict:
 async def system_upgrade(params: dict) -> dict:
     """`system.upgrade` — install the latest release and restart what serves the page.
 
-    Two hosts, two restarts. Under standalone `raven serve` the helper waits for
-    this process and brings back another `raven serve`. Under `raven gateway` --
-    what `raven web` runs -- this process exits cleanly, its supervisor reads the
+    Two hosts, two restarts. Under standalone `rarus serve` the helper waits for
+    this process and brings back another `rarus serve`. Under `rarus gateway` --
+    what `rarus web` runs -- this process exits cleanly, its supervisor reads the
     zero exit as "stand down" and exits too, and the helper waits for *that*
-    before it installs and brings back a fresh `raven web --supervise`: the same
+    before it installs and brings back a fresh `rarus web --supervise`: the same
     gateway, IM channels included, on the same port. Returns as soon as the
     helper owns the install; the shutdown is scheduled a beat later so this reply
     reaches the client first.
@@ -238,12 +238,12 @@ async def system_upgrade(params: dict) -> dict:
     if SERVE.hosted_by_gateway:
         if SERVE.supervisor_pid is None:
             # Nothing would bring this gateway back: started by hand, or under
-            # `raven web --foreground`. Starting a resident supervisor on the
+            # `rarus web --foreground`. Starting a resident supervisor on the
             # reader's behalf would change how their Raven runs, so say so.
             raise _refuse(
                 "unsupervised",
                 "This Raven was started by hand, so nothing would bring it back after an upgrade. "
-                "Run `raven upgrade` in a terminal, then start Raven again.",
+                "Run `rarus upgrade` in a terminal, then start Raven again.",
             )
         busy = SERVE.busy()
         if busy is not None:
@@ -255,7 +255,7 @@ async def system_upgrade(params: dict) -> dict:
                 "Upgrading restarts it and would cut that off; let it finish first.",
             )
     if not SERVE.running:
-        raise _refuse("not_serving", "system.upgrade is only available while `raven serve` is running")
+        raise _refuse("not_serving", "system.upgrade is only available while `rarus serve` is running")
 
     try:
         # Network-bound and synchronous (httpx), so keep it off the event loop.
@@ -285,7 +285,7 @@ async def system_upgrade(params: dict) -> dict:
             # Waited for as the parent, not this process: the supervisor's own
             # cleanup runs after the gateway exits and removes web.json, and a
             # new supervisor started before that would have its file removed
-            # out from under it -- inviting the next `raven web` to start a
+            # out from under it -- inviting the next `rarus web` to start a
             # second one beside it.
             relaunch = [str(raven_bin), "web", "--supervise", "--port", str(SERVE.port)]
             parent_pid = SERVE.supervisor_pid or parent_pid

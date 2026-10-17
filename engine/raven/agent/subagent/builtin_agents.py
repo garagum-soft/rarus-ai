@@ -5,7 +5,7 @@ external agents so that ``spawn`` and a DAG node pick from one roster -- a
 built-in agent only reachable by omitting the ``subagent`` argument is an agent
 the model cannot be told about. The transport is the seed's, with one deliberate
 exception: a config row of a seed's name with ``kind: "acp"`` redeclares it as
-the host's own ``raven acp`` (see :func:`merge_builtin_seeds`), which is the
+the host's own ``rarus acp`` (see :func:`merge_builtin_seeds`), which is the
 established way to run the generic agent's work outside the main process.
 
 It is a seed rather than a default-in-a-field: the row exists whether or not
@@ -191,7 +191,7 @@ def merge_builtin_seeds(configs: list[Any] | None) -> list[Any]:
     cli / openai row take the slot would silently put an external backend behind
     every such dispatch. An ``acp`` row of a seed's name is exactly that tradeoff
     named by the user, so it wins: the generic agent is then served by a spawned
-    ``raven acp`` (see :func:`host_raven_acp_command`), not the in-process loop.
+    ``rarus acp`` (see :func:`host_raven_acp_command`), not the in-process loop.
     The seed is not recoverable either way except by renaming that row, which
     the warning says.
     """
@@ -218,14 +218,14 @@ def merge_builtin_seeds(configs: list[Any] | None) -> list[Any]:
         if getattr(cfg, "kind", None) == "acp":
             # A deliberate transport switch: the generic agent is served over
             # ACP, so every dispatch to it -- an unnamed ``spawn``, a dag node
-            # with no ``subagent`` -- spawns the host's own ``raven acp``. The
+            # with no ``subagent`` -- spawns the host's own ``rarus acp``. The
             # row takes the seed's slot wholesale rather than field-by-field: the
             # seed's fields are in-process-loop fields (``model``, ``tools``,
             # ``skills``) and a third of an acp row would not run.
             by_name[name] = _acp_host_override(cfg, name=name)
             logger.info(
                 "sub-agent {!r} is served over acp: the built-in row's transport has been overridden "
-                "to this raven's own `raven acp`",
+                "to this raven's own `rarus acp`",
                 name,
             )
             continue
@@ -245,7 +245,7 @@ def merge_builtin_seeds(configs: list[Any] | None) -> list[Any]:
 
 
 def host_raven_acp_command() -> str:
-    """This installation's own ``raven acp`` command line, or "" if it cannot be resolved.
+    """This installation's own ``rarus acp`` command line, or "" if it cannot be resolved.
 
     The console script beside the running interpreter wins -- an editable
     checkout's ``.venv/bin/raven`` -- with ``$PATH`` as the fallback, so an acp
@@ -271,7 +271,7 @@ def _acp_host_override(cfg: Any, *, name: str) -> Any:
     """An acp row that takes a seed's slot, with the host defaults filled in.
 
     The config row brings the transport choice and nothing else: ``command``
-    defaults to this install's own ``raven acp``, ``env`` carries the host's
+    defaults to this install's own ``rarus acp``, ``env`` carries the host's
     ``RARUS_HOME`` (unless the row sets one) so the child engine reads the same
     config and provider the host does, and a blank ``description`` gets the
     host-raven line rather than leaving the roster entry with the in-process

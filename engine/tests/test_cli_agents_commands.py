@@ -1,4 +1,4 @@
-"""Tests for ``raven agents new`` -- the scaffold command and its refusals.
+"""Tests for ``rarus agents new`` -- the scaffold command and its refusals.
 
 The command instantiates ``raven/templates/agents_scaffold/`` into a fresh
 agent folder. Pinned here: the dry-run tree, the three conflict refusals

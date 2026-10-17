@@ -1,4 +1,4 @@
-"""CLI tests for ``raven doctor``.
+"""CLI tests for ``rarus doctor``.
 
 Static checks are validated against on-disk config produced by the
 ``tmp_config`` / ``healthy_config`` fixtures. The probe boundary
@@ -93,7 +93,7 @@ def test_doctor_default_on_missing_config_exit1(tmp_config: Path) -> None:
     r = runner.invoke(app, ["doctor"])
     assert r.exit_code == 1, r.stdout
     assert "not configured" in r.stdout
-    assert "raven onboard" in r.stdout
+    assert "rarus onboard" in r.stdout
 
 
 def test_doctor_default_healthy_exit0(healthy_config: Path) -> None:
@@ -365,7 +365,7 @@ def test_memory_section_reaches_the_json_output(healthy_config, monkeypatch) -> 
 
 
 def _run_doctor_subprocess(home: Path) -> tuple[str, int]:
-    """Run ``raven doctor`` in a subprocess with a sandbox HOME.
+    """Run ``rarus doctor`` in a subprocess with a sandbox HOME.
 
     A subprocess (not CliRunner) is required here: the loader's duplicate
     warning went out over two channels (print + loguru), and loguru's sink
@@ -488,7 +488,7 @@ class TestTheInstallationSection:
 
         assert r.exit_code == 1, r.stdout
         assert "incomplete" in r.stdout
-        assert "raven onboard" not in r.stdout
+        assert "rarus onboard" not in r.stdout
 
     def test_a_running_upgrade_is_a_note_not_a_failure(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
@@ -510,7 +510,7 @@ class TestTheInstallationSection:
         assert payload["install"]["missing"] == ["the page"]
 
 
-# ── raven doctor --fix ──────────────────────────────────────────────────
+# ── rarus doctor --fix ──────────────────────────────────────────────────
 #
 # The migrations run at load, so nothing is ever "pending" by the time this
 # command looks. What is left to ask about is what they deliberately do not
@@ -652,7 +652,7 @@ def test_doctor_reports_a_config_that_names_no_provider(tmp_path) -> None:
     health = _inspect_config_health(load_config(cfg), fix=False)
 
     assert any("provider is not set" in f for f in health.findings)
-    assert any("raven provider use" in f for f in health.findings)
+    assert any("rarus provider use" in f for f in health.findings)
     # Reported, never fixed: the migration already tried the derivation and had
     # no answer, so only the user knows which vendor they meant to pay.
     assert not health.fixes
@@ -683,7 +683,7 @@ def test_doctor_reads_a_leftover_auto_as_unset_not_as_a_typo(tmp_path) -> None:
     health = _inspect_config_health(load_config(cfg), fix=False)
 
     assert any("provider is not set" in f for f in health.findings)
-    assert any("raven provider use" in f for f in health.findings)
+    assert any("rarus provider use" in f for f in health.findings)
     assert any("retired spelling of unset" in f for f in health.findings)
     assert not any("nothing routes to" in f for f in health.findings)
     assert not health.fixes
@@ -745,7 +745,7 @@ def test_doctor_prints_the_config_section_it_found(tmp_path, monkeypatch, capsys
     out = capsys.readouterr().out
     assert "Config" in out
     assert "pinned to 32,768" in out
-    assert "raven doctor --fix" in out
+    assert "rarus doctor --fix" in out
     assert "remove agents.defaults.contextWindowTokens" in out
 
 
@@ -762,7 +762,7 @@ def test_doctor_prints_what_the_fix_applied(tmp_path, capsys) -> None:
 
     out = capsys.readouterr().out
     assert "fixed" in out
-    assert "raven doctor --fix" not in out, "nothing left to apply, so nothing to advertise"
+    assert "rarus doctor --fix" not in out, "nothing left to apply, so nothing to advertise"
 
 
 # ------------------------------------------------------- tool capabilities
@@ -1102,7 +1102,7 @@ def test_doctor_finds_the_windows_install_the_remedy_it_prints_creates(
     healthy_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The Windows remedy is `winget install TheDocumentFoundation.LibreOffice`,
-    which puts nothing on PATH. `raven doctor` has to find what it told the user
+    which puts nothing on PATH. `rarus doctor` has to find what it told the user
     to install, or the row calls LibreOffice missing on a host that has it and
     the ppt engine's render gate says the same.
     """
@@ -1346,7 +1346,7 @@ def test_install_summary_answers_without_a_config(tmp_config: Path) -> None:
     for label in _SUMMARY_LABELS:
         assert label in r.stdout, f"missing row: {label}"
     assert "Paths" not in r.stdout
-    assert "raven onboard" not in r.stdout
+    assert "rarus onboard" not in r.stdout
 
 
 def test_install_summary_answers_on_an_invalid_config(tmp_config: Path) -> None:

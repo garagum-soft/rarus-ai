@@ -64,7 +64,7 @@ def test_skill_forge_block_loaded_from_snake_case(stub_config_path: Path) -> Non
 
 
 def test_skill_forge_block_loaded_from_camel_case(stub_config_path: Path) -> None:
-    """Match the format ``raven onboard`` writes (camelCase via
+    """Match the format ``rarus onboard`` writes (camelCase via
     ``model_dump(by_alias=True)``)."""
     _write_config(
         stub_config_path,

@@ -961,7 +961,7 @@ class TestImportRefusesToRunWithoutMemory:
     ) -> None:
         """Both cases arrive as ``backend is None`` and need different words.
 
-        `raven onboard` is the fix for "nobody configured one" and no fix at all
+        `rarus onboard` is the fix for "nobody configured one" and no fix at all
         for "the configured one ships separately and is not installed here" --
         sending the second case to the wizard is a loop with no exit.
         """
@@ -974,7 +974,7 @@ class TestImportRefusesToRunWithoutMemory:
 
         out = " ".join(capsys.readouterr().out.split())
         assert "everos-memory" in out
-        assert "raven onboard" not in out
+        assert "rarus onboard" not in out
 
     def test_the_run_path_consults_the_guard(self) -> None:
         """Pins the wiring: the guard is worthless if _build_and_run never

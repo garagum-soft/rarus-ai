@@ -85,7 +85,7 @@ def redirect_loguru_to_file(
     if terminal_level is not None:
         # backtrace/diagnose off on the stderr sink too, and for one more
         # reason than on the file sink: an ACP client displays this stream (a
-        # ``raven acp`` runs as the editor's subprocess), and annotated frames
+        # ``rarus acp`` runs as the editor's subprocess), and annotated frames
         # carry the value of every local, config and payload included. The
         # interpreter's own excepthook still prints the plain traceback.
         logger.add(sys.stderr, level=terminal_level, backtrace=False, diagnose=False)

@@ -6,8 +6,8 @@ parent decides the data dir, the workspace is pinned to the hosting's state
 partition, the tool guide and coding conduct refresh untouched seeds, and the code-flow
 and its tool face are switched on through the rendered slice (verdict D6; the
 write gate and its worktree isolation retired, so nothing arms). The
-ACP hosting execs ``python -m raven acp``; the CLI hosting runs one
-adjudicated ``raven agent -m`` turn and owes the fork launcher's five
+ACP hosting execs ``python -m rarus acp``; the CLI hosting runs one
+adjudicated ``rarus agent -m`` turn and owes the fork launcher's five
 commitments (preamble, transcript verdict, changes footer, workspace pin,
 exit 124 vs 1). The strongest pins are the trunk-loader round-trip and the
 hermetic tool face. The fork-loader round-trip retired with the swap: the
@@ -186,7 +186,7 @@ def test_the_conduct_is_seeded_as_agent_md_for_the_configured_models_family(grou
 
 
 def test_the_soul_survives_the_cli_hostings_template_sync(grounded, tmp_path):
-    """The one-turn CLI hosting runs ``raven agent``, whose startup syncs the
+    """The one-turn CLI hosting runs ``rarus agent``, whose startup syncs the
     workspace templates -- and trunk's SOUL.md template is a personal assistant
     with a personality. The sync only creates what is missing, so the soul this
     product seeds first is the one bootstrap reads, on this hosting as on ACP."""
@@ -499,7 +499,7 @@ def test_no_llm_key_anywhere_refuses_before_serving(grounded, monkeypatch):
 
 
 def test_the_acp_exec_lane_is_installed_ravens(grounded, tmp_path, monkeypatch):
-    """The served process is ``python -m raven acp`` on this interpreter,
+    """The served process is ``python -m rarus acp`` on this interpreter,
     execed so it inherits this pid and stdio; the rendered file is on disk at
     exec time; and the fork's env arming is gone -- the flow is switched on
     through the rendered slice, not the process environment."""
@@ -552,7 +552,7 @@ def _cli_args(workspace: Path, session: str = "conv-1", **overrides):
 def cli_run(grounded, tmp_path, monkeypatch):
     """Run the CLI hosting with a fake engine; returns (invoke, calls).
 
-    The fake stands in for the ``raven agent`` subprocess only -- git
+    The fake stands in for the ``rarus agent`` subprocess only -- git
     invocations (describe_changes) pass through to the real subprocess.run.
     ``calls['answer']`` seeds the transcript row the fake commits;
     ``calls['raise_timeout']`` kills the run the way a deadline does.
@@ -589,7 +589,7 @@ def cli_run(grounded, tmp_path, monkeypatch):
 
 
 def test_the_cli_lane_is_installed_ravens_agent_turn(cli_run, grounded, tmp_path, capsys):
-    """The turn is ``python -m raven agent`` under the rendered config, run
+    """The turn is ``python -m rarus agent`` under the rendered config, run
     from the workspace (raven groups sessions by launch directory), on the
     full ``cli:<id>`` session form, markdown off, the task preambled -- and
     without the fork's two skill flags (verdict D5: installed raven has

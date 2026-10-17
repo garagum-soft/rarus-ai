@@ -1,5 +1,5 @@
-"""``raven team``: join, stop and remove roster agents through requests the leader approves;
-``raven team list`` shows the teams (projects) sharing this Raven and their limits.
+"""``rarus team``: join, stop and remove roster agents through requests the leader approves;
+``rarus team list`` shows the teams (projects) sharing this Raven and their limits.
 
 ``request-join``, ``request-shutdown`` and ``request-remove`` file a request and
 change nothing; ``approve`` applies one and ``reject`` closes it, and both are

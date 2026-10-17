@@ -102,7 +102,7 @@ def load(project: Path, names: Sequence[str] = DEFAULT_ROLES) -> Roster:
     for name in names:
         path = role_path(project, name)
         if not path.is_file():
-            raise RosterError(f"no guard file at {path}: run `raven playbook stint init` before a run")
+            raise RosterError(f"no guard file at {path}: run `rarus playbook stint init` before a run")
         roles.append(parse(path.read_text(encoding="utf-8", errors="replace"), name=name, path=path))
     return Roster(roles=roles, project=Path(project))
 
@@ -200,7 +200,7 @@ def preflight(
     spec = roster_dir(project) / "SPEC.md"
     if not spec.exists():
         reasons.append(
-            f"no specification at {spec}: `raven playbook stint init` links it to the project's own document"
+            f"no specification at {spec}: `rarus playbook stint init` links it to the project's own document"
         )
 
     # A read boundary is enforced through the per-role config that carries the

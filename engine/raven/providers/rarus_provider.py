@@ -40,7 +40,7 @@ class RarusProvider(LiteLLMProvider):
             raise MissingCredentialsError(
                 "Rarus AI needs a sign-in",
                 provider=PROVIDER_NAME,
-                remedy="Run `raven provider login rarus`, or press Sign in in the app.",
+                remedy="Run `rarus provider login rarus`, or press Sign in in the app.",
             )
         self.api_key = key
 

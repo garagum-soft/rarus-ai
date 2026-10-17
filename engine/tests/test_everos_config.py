@@ -299,7 +299,7 @@ class TestEverosEnv:
         assert env["EVEROS_RERANK__MODEL"] == ""
 
     def test_a_binding_raven_made_itself_is_not_mistaken_for_an_export(self, pinned, monkeypatch) -> None:
-        """`raven gateway --restart` goes through os.execv, which keeps the
+        """`rarus gateway --restart` goes through os.execv, which keeps the
         environment. Without provenance the restarted gateway reads its own
         binding as somebody else's export and never binds again."""
         from raven_everos import config as cf

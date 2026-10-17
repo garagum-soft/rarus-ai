@@ -1,5 +1,5 @@
 """Regression tests for the ``--config`` flag precedence in
-``raven agent`` / ``gateway`` subcommands.
+``rarus agent`` / ``gateway`` subcommands.
 
 Pre-fix, both subcommands called ``load_raven_config()`` BEFORE
 ``_load_runtime_config(--config)``. Because ``load_raven_config()``

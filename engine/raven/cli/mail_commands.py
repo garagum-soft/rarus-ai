@@ -1,4 +1,4 @@
-"""``raven mail``: agent mail from a shell -- an external agent's own line, and the operator's view."""
+"""``rarus mail``: agent mail from a shell -- an external agent's own line, and the operator's view."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _SESSION_HELP = "The conversation (default: $RAVEN_MAIL_SESSION, set for an agen
 def _session(session: str) -> str:
     key = session or os.environ.get("RAVEN_MAIL_SESSION", "")
     if not key:
-        typer.echo("no conversation: pass --session (see `raven mail sessions`)", err=True)
+        typer.echo("no conversation: pass --session (see `rarus mail sessions`)", err=True)
         raise typer.Exit(2)
     return key
 

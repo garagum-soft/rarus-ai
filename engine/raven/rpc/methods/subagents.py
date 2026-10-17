@@ -223,7 +223,7 @@ async def _rows(*, probe: bool = True) -> list[dict]:
 
     # One merge, so the rows rendered here are the rows the runtime dispatches
     # against -- including an acp row of a built-in name, where the merge fills
-    # the host's `raven acp` command and the list must show that command, not the
+    # the host's `rarus acp` command and the list must show that command, not the
     # empty one the config file holds. The Test button probes the command it is
     # shown, so a view that keeps the empty one would test a different launch.
     merged_all = merge_builtin_seeds(merged)

@@ -42,7 +42,7 @@ _LEAK_RE = re.compile(
 @pytest.mark.e2e
 def test_tui_chat_streaming_no_log_overlay(harness):
     prompt = "Reply in exactly 30 words about anything."
-    harness.spawn("uv run raven tui")
+    harness.spawn("uv run rarus tui")
     # Key off the status bar, not the banner, and confirm the composer took the
     # text before submitting. The assertion below is negative (no leak), so a
     # dropped prompt would mean no streaming, no leak, and a vacuous pass.

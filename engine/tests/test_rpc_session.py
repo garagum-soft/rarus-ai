@@ -211,7 +211,7 @@ async def test_session_resume_loads_n_stored_messages(tmp_path: Path, monkeypatc
 
 def _loop_with_resolver(tmp_path: Path, *, explicit: Path | None = None) -> SimpleNamespace:
     """A stand-in loop that answers ``peek_session_workdir`` the way the real one
-    does: through a ``WorkdirResolver`` built the way ``raven serve`` builds it."""
+    does: through a ``WorkdirResolver`` built the way ``rarus serve`` builds it."""
     resolver = WorkdirResolver(
         WorkdirPolicy.PER_CHANNEL,
         agent_home=tmp_path / "home",
@@ -288,7 +288,7 @@ async def test_session_resume_reports_the_policy_default_not_the_launch_dir(
 ) -> None:
     """The gateway's own case: nothing pinned, and its turns still do not run here.
 
-    ``raven serve`` resolves per channel, so a ``tui:`` session lands under the
+    ``rarus serve`` resolves per channel, so a ``tui:`` session lands under the
     channel root -- a sibling of agent home. Reading the session's stored
     ``workdir`` alone answered ``os.getcwd()`` for every such session, which is
     the case the page hits most.

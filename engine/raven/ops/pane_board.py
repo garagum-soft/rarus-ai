@@ -183,7 +183,7 @@ class PaneBoard:
         raise BoardError(f"{name} has no pane")
 
     def type(self, name: str, text: str) -> str:
-        """Type into the agent's pane when it is safe; otherwise held, as ``raven ops pane send`` does."""
+        """Type into the agent's pane when it is safe; otherwise held, as ``rarus ops pane send`` does."""
         delivery = SafeDelivery(self.outbox, pane=lambda target: TmuxPane(target, self._run))
         return delivery.deliver(self.pane_of(name), text)
 

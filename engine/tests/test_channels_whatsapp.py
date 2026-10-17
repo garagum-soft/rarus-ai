@@ -818,7 +818,7 @@ async def test_send_raises_a_transient_error_while_the_bridge_is_down(tmp_path, 
 
 
 async def test_login_returns_once_the_bridge_reports_a_paired_session(tmp_path, monkeypatch):
-    """`raven channels login whatsapp` runs the same bridge the gateway runs and
+    """`rarus channels login whatsapp` runs the same bridge the gateway runs and
     ends when the phone has scanned."""
     port = _free_port()
     fake, proc = _FakeBridge(), _FakeProcess()

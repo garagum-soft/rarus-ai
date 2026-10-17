@@ -116,7 +116,7 @@ def _command_line_windows(pid: int) -> Optional[str]:  # pragma: no cover - no W
 _RESIDENT_SUBCOMMANDS = frozenset({"serve", "web", "gateway"})
 """The subcommands a state file may have come from, and only those.
 
-``raven web`` leaves a supervisor; ``raven serve`` and ``raven gateway`` are
+``rarus web`` leaves a supervisor; ``rarus serve`` and ``rarus gateway`` are
 the engines it watches. The other verbs are run-and-done -- they may get a
 recycled pid attached to their name, but they never write serve.json or
 web.json, so the stop paths under this module cannot confuse them with the
@@ -163,7 +163,7 @@ def _is_console_serve(line: str) -> bool:
 
     The console script is a tiny shim that forwards to ``raven.cli.entry:run``;
     its argv[0] is the script name and argv[1] is the subcommand. Anything else
-    (``raven --version``, ``raven tui``) is fine to reject: it is not a process
+    (``raven --version``, ``rarus tui``) is fine to reject: it is not a process
     this module's state files can point at.
     """
     import re

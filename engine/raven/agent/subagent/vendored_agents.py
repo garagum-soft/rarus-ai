@@ -404,7 +404,7 @@ def host_can_lend_a_key() -> bool:
     that home's config and sign-ins instead of the host's. And a host config
     that names no ``agents.defaults.provider`` leaves an agent's own
     configured provider in force, which this check, reading only the host
-    file, does not see; ``raven onboard`` writes the provider before it asks.
+    file, does not see; ``rarus onboard`` writes the provider before it asks.
 
     Invalid host settings leave nothing to inherit rather than preventing the
     setup wizard from opening.
@@ -429,7 +429,7 @@ def _resolved_python() -> str:
     ``SUBAGENT_PYTHON`` then this interpreter, which is ``install.py``'s own
     default order minus its ``--python`` flag (there is no flag to pass here).
     The launchers import raven (``raven.config.product_render``) and exec
-    ``python -m raven acp``, so the interpreter must be one with raven
+    ``python -m rarus acp``, so the interpreter must be one with raven
     installed -- which this process's own is by definition, and an override
     must be too.
     """
@@ -609,7 +609,7 @@ def _read_route_notes(folder: Path, entry: dict) -> None:
 
 
 def employees_root() -> Path:
-    """``<RARUS_HOME>/employees``: the agents a person hired (``raven agents hire``).
+    """``<RARUS_HOME>/employees``: the agents a person hired (``rarus agents hire``).
 
     A tree of its own beside the products rather than a folder in theirs: a hire
     written into ``<RARUS_HOME>/agents`` would make that tree the products' tree

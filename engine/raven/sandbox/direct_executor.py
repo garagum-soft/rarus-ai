@@ -43,7 +43,7 @@ _ENV_ALLOWLIST = (
     "VIRTUAL_ENV",
     # This instance's own identity: which home a `raven ...` child resolves its
     # config, registry and stores against. Paths, not secrets. Measured
-    # 2026-08-31 on a cold-start test: the loop ran `raven ops connection add`
+    # 2026-08-31 on a cold-start test: the loop ran `rarus ops connection add`
     # from a tool call, this filter stripped RARUS_HOME, and the row landed in
     # the default home rather than the one this instance and its sub-agents
     # read -- so the machine the owner had just registered stayed invisible,
