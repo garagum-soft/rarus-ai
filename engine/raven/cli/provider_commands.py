@@ -280,6 +280,15 @@ def _login_rarus() -> None:
         raise typer.Exit(1)
     who = f" as {session.email}" if session.email else ""
     console.print(f"[green]Signed in to Rarus AI{who}[/green]")
+    _use_rarus_by_default()
+
+
+def _use_rarus_by_default() -> None:
+    """After a sign-in the program should just work: point the default model at Rarus."""
+    from raven.config.update import set_default_model
+
+    set_default_model("rarus/deepseek-flash", provider="rarus")
+    console.print("[green]Default model: rarus/deepseek-flash[/green]")
 
 
 def _print_schema_table(name: str) -> None:

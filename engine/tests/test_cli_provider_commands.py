@@ -1109,3 +1109,42 @@ def test_endpoint_list_unknown_provider_exits_1(tmp_config: Path) -> None:
     r = runner.invoke(app, ["provider", "endpoint", "list", "no-such-provider"])
     assert r.exit_code == 1
     assert "Unknown provider" in r.output
+
+
+def test_provider_login_rarus_makes_rarus_the_default(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finished sign-in leaves the program pointed at Rarus, with no key to type."""
+    from raven.providers import rarus_login, rarus_session
+
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    monkeypatch.setenv(rarus_session.STORE_ENV, "plain")
+    tmp_config.write_text(json.dumps({"agents": {"defaults": {"model": "anthropic/claude", "provider": "anthropic"}}}))
+    key = "sk-ab-" + "0123456789abcdef" * 3
+    monkeypatch.setattr(rarus_login, "login", lambda **_: rarus_session.save_session(key, email="me@example.com"))
+
+    r = runner.invoke(app, ["provider", "login", "rarus"])
+
+    assert r.exit_code == 0, r.stdout
+    defaults = json.loads(tmp_config.read_text())["agents"]["defaults"]
+    assert defaults["model"] == "rarus/deepseek-flash"
+    assert defaults["provider"] == "rarus"
+
+
+def test_provider_login_rarus_failure_changes_nothing(
+    tmp_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from raven.providers import rarus_login
+
+    monkeypatch.setenv("RARUS_HOME", str(tmp_path / "rarus-home"))
+    tmp_config.write_text(json.dumps({"agents": {"defaults": {"model": "anthropic/claude"}}}))
+
+    def _fail(**_):
+        raise rarus_login.LoginError("timeout", "the browser did not come back in time")
+
+    monkeypatch.setattr(rarus_login, "login", _fail)
+
+    r = runner.invoke(app, ["provider", "login", "rarus"])
+
+    assert r.exit_code == 1
+    assert json.loads(tmp_config.read_text())["agents"]["defaults"]["model"] == "anthropic/claude"
