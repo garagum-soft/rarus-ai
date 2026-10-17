@@ -4,7 +4,7 @@
    and writes the section's name to #setTitle on every draw. */
 import {
   AiContentGenerator01Icon, BrainIcon, ComputerTerminal01Icon, Flowchart01Icon, InformationCircleIcon, Note01Icon, Plug02Icon,
-  Settings03Icon, Settings05Icon, TimeQuarter02Icon, UserGroupIcon, Wrench01Icon,
+  Settings03Icon, Settings05Icon, TimeQuarter02Icon, UserAccountIcon, UserGroupIcon, Wrench01Icon,
 } from '@hugeicons/core-free-icons'
 import { useEffect, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
@@ -14,6 +14,7 @@ import { t } from '../../i18n/t'
 import * as lang from '../../state/lang'
 import { InlineErr } from './Fields'
 import { About } from './pages/About'
+import { Account } from './pages/Account'
 import { Archive } from './pages/Archive'
 import { Connect } from './pages/Connect'
 import { General } from './pages/General'
@@ -40,6 +41,7 @@ import type { JSX } from 'react'
    glyph, the design's own drawing where it does not. */
 const ICON: Record<SectionId, JSX.Element> = {
   general: <Icon icon={Settings03Icon} />,
+  account: <Icon icon={UserAccountIcon} />,
   usage: <UsageGlyph />,
   provider: <CubeGlyph />,
   model: <Icon icon={Settings05Icon} />,
@@ -59,6 +61,7 @@ const ICON: Record<SectionId, JSX.Element> = {
 /* Literal keys, so the i18n gate can read each one. */
 const NAV: Record<SectionId, string> = {
   general: 'gui.settings.nav.general',
+  account: 'gui.settings.nav.account',
   usage: 'gui.settings.nav.usage',
   provider: 'gui.settings.nav.provider',
   model: 'gui.settings.nav.model',
@@ -95,7 +98,7 @@ function Nav({ tab }: { tab: SectionId }): JSX.Element {
    that each of them is rooted in, and the panel below draws nothing for
    them. */
 const PAGE: Partial<Record<SectionId, () => JSX.Element>> = {
-  general: General, usage: Usage, provider: Provider, model: Model, skills: Skills,
+  general: General, account: Account, usage: Usage, provider: Provider, model: Model, skills: Skills,
   tools: Tools, plugins: Plugins, workflows: Workflows, team: Team, connect: Connect, instructions: Instructions, archive: Archive, about: About,
 }
 

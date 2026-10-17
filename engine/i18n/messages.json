@@ -16151,6 +16151,116 @@
       "en": "Loading...",
       "zh": "正在加载...",
       "ru": "Загрузка..."
+    },
+    "gui.settings.nav.account": {
+      "en": "Account",
+      "zh": "账户",
+      "ru": "Аккаунт"
+    },
+    "gui.settings.account.email": {
+      "en": "Signed in as",
+      "zh": "当前账户",
+      "ru": "Вы вошли как"
+    },
+    "gui.settings.account.signed_out": {
+      "en": "Not signed in",
+      "zh": "未登录",
+      "ru": "Вход не выполнен"
+    },
+    "gui.settings.account.loading": {
+      "en": "Loading...",
+      "zh": "正在加载...",
+      "ru": "Загрузка..."
+    },
+    "gui.settings.account.balance": {
+      "en": "Credits",
+      "zh": "积分余额",
+      "ru": "Баланс кредитов"
+    },
+    "gui.settings.account.balance_sub": {
+      "en": "The server takes credits off after each reply.",
+      "zh": "每次回复后由服务器扣除积分。",
+      "ru": "Сервер списывает кредиты после каждого ответа."
+    },
+    "gui.settings.account.credits": {
+      "en": "{n} credits",
+      "zh": "{n} 积分",
+      "ru": "{n} кр."
+    },
+    "gui.settings.account.balance_unknown": {
+      "en": "Unknown",
+      "zh": "未知",
+      "ru": "Неизвестно"
+    },
+    "gui.settings.account.refresh": {
+      "en": "Refresh",
+      "zh": "刷新",
+      "ru": "Обновить"
+    },
+    "gui.settings.account.top_up": {
+      "en": "Top up",
+      "zh": "充值",
+      "ru": "Пополнение"
+    },
+    "gui.settings.account.top_up_sub": {
+      "en": "Credits are bought on the site.",
+      "zh": "积分在网站上购买。",
+      "ru": "Кредиты покупаются на сайте."
+    },
+    "gui.settings.account.top_up_open": {
+      "en": "Open the site",
+      "zh": "打开网站",
+      "ru": "Открыть сайт"
+    },
+    "gui.settings.account.sign_out": {
+      "en": "Sign out",
+      "zh": "退出登录",
+      "ru": "Выход"
+    },
+    "gui.settings.account.sign_out_do": {
+      "en": "Sign out",
+      "zh": "退出登录",
+      "ru": "Выйти"
+    },
+    "gui.settings.account.sign_out_hint": {
+      "en": "Sign out from the Rarus AI window.",
+      "zh": "请在 Rarus AI 窗口中退出登录。",
+      "ru": "Выйти можно в окне Rarus AI."
+    },
+    "gui.settings.account.sign_out_failed": {
+      "en": "Could not sign out",
+      "zh": "无法退出登录",
+      "ru": "Не удалось выйти"
+    },
+    "gui.settings.account.title": {
+      "en": "Rarus AI account",
+      "zh": "Rarus AI 账户",
+      "ru": "Аккаунт Rarus AI"
+    },
+    "gui.settings.account.err_unauthorized": {
+      "en": "The key was revoked or is not valid. Sign in again.",
+      "zh": "密钥已被撤销或无效，请重新登录。",
+      "ru": "Ключ отозван или недействителен. Войдите снова."
+    },
+    "gui.settings.account.err_no_credits": {
+      "en": "No credits left on the account. Top up on the site.",
+      "zh": "账户积分已用完，请在网站上充值。",
+      "ru": "Кредиты на аккаунте закончились. Пополните их на сайте."
+    },
+    "gui.settings.account.err_blocked": {
+      "en": "The account is blocked.",
+      "zh": "账户已被封禁。",
+      "ru": "Аккаунт заблокирован."
+    },
+    "gui.settings.account.err_network": {
+      "en": "Could not reach the server. Check the connection and refresh.",
+      "zh": "无法连接服务器，请检查网络后刷新。",
+      "ru": "Не удалось связаться с сервером. Проверьте соединение и обновите."
+    },
+    "gui.settings.account.err_server": {
+      "en": "The server answered with an error. Try again later.",
+      "zh": "服务器返回错误，请稍后再试。",
+      "ru": "Сервер ответил ошибкой. Попробуйте позже."
     }
   }
 }

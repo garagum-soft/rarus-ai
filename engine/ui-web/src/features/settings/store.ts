@@ -35,7 +35,7 @@ import type {
 } from './types'
 
 export type SectionId =
-  | 'general' | 'usage' | 'provider' | 'model' | 'skills' | 'tools' | 'plugins' | 'workflows' | 'team'
+  | 'general' | 'account' | 'usage' | 'provider' | 'model' | 'skills' | 'tools' | 'plugins' | 'workflows' | 'team'
   | 'connect' | 'cron' | 'memory' | 'instructions' | 'archive' | 'about'
 
 /* The nav's order, which is also the reading: what the dialog is about first
@@ -44,7 +44,7 @@ export type SectionId =
    reader sets up once and leaves alone, then the record and the version.
    Channels were a third and are a page on the rail now (state/pages.ts). */
 export const SECTIONS: SectionId[] = [
-  'general', 'usage', 'provider', 'model', 'skills', 'tools', 'plugins', 'workflows', 'team',
+  'general', 'account', 'usage', 'provider', 'model', 'skills', 'tools', 'plugins', 'workflows', 'team',
   'connect', 'cron', 'memory', 'instructions', 'archive', 'about',
 ]
 

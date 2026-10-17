@@ -317,6 +317,8 @@ export interface SettingsSource {
      shown selected, agent home opened. Named rather than sent as a path -- the
      gateway resolves both itself, so this reaches nothing else. */
   revealPlace(place: 'config' | 'workspace'): Promise<void>
+  /* Who is signed in to Rarus and what is left of their credits: `rarus.account`. */
+  account(): Promise<AccountInfo>
   uninstallSkill(name: string): Promise<SettingsSnapshot>
   /* The credential fields the catalogue declares for this server, empty for
      one nobody installed from the catalogue. A read, so no snapshot back. */
@@ -342,4 +344,12 @@ export interface SettingsSource {
      MEANS differs between the modes -- live persists it through config.language,
      which also drives the TUI and the language the agent replies in. */
   setLang(lang: string): void
+}
+
+/** What `rarus.account` says about the signed-in person. */
+export interface AccountInfo {
+  signed_in: boolean
+  email: string
+  balance?: number | null
+  error: string
 }

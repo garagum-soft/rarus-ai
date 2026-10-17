@@ -85,7 +85,7 @@ describe('settings root', () => {
     await mount('general')
     const nav = document.querySelectorAll('#snavList .settings-nitem')
     expect([...nav].map((b) => b.textContent)).toEqual([
-      'gui.settings.nav.general', 'gui.settings.nav.usage', 'gui.settings.nav.provider',
+      'gui.settings.nav.general', 'gui.settings.nav.account', 'gui.settings.nav.usage', 'gui.settings.nav.provider',
       'gui.settings.nav.model', 'gui.settings.nav.skills', 'gui.settings.nav.tools',
       'gui.settings.nav.plugins', 'gui.settings.nav.workflows', 'gui.settings.nav.team', 'gui.settings.nav.connect', 'gui.settings.nav.cron',
       'gui.settings.nav.memory', 'gui.settings.nav.instructions', 'gui.settings.nav.archive', 'gui.settings.nav.about',

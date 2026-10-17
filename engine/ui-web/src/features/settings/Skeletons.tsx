@@ -298,6 +298,7 @@ const ROLE_ROWS = 11
 
 const SHAPE: Partial<Record<SectionId, () => JSX.Element>> = {
   about: () => <Wait><WCard ctl={160} n={4} /></Wait>,
+  account: () => <Wait><WCard ctl={120} n={4} titled /></Wait>,
   archive: () => (
     <Wait>
       <div className="settings-card">

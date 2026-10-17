@@ -45,7 +45,7 @@ const count = (sel: string): number => document.querySelectorAll(sel).length
 const shape = (): string =>
   [count('.settings-card'), count('.settings-row'), count('.settings-xrow'), count('.settings-wbar')].join('/')
 
-const SECTIONS: SectionId[] = ['general', 'usage', 'provider', 'model', 'skills', 'tools', 'plugins', 'archive', 'about']
+const SECTIONS: SectionId[] = ['general', 'account', 'usage', 'provider', 'model', 'skills', 'tools', 'plugins', 'archive', 'about']
 
 describe('the wait a settings section draws', () => {
   it('announces itself once, with the word the line it replaces used to say', async () => {
