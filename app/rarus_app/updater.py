@@ -31,7 +31,16 @@ from rarus_app.paths import app_home
 
 URL_ENV = "RARUS_UPDATE_URL"
 DEFAULT_MANIFEST_URL = "https://sanlykatip.com/api/desktop/rarus/latest.json"
-ALLOWED_HOSTS = frozenset({"sanlykatip.com", "www.sanlykatip.com", "alembox.com", "www.alembox.com"})
+ALLOWED_HOSTS = frozenset(
+    {
+        "sanlykatip.com",
+        "www.sanlykatip.com",
+        "alembox.com",
+        "www.alembox.com",
+        "rarus-ai.com",
+        "www.rarus-ai.com",
+    }
+)
 _SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 _MAX_INSTALLER_BYTES = 1_500_000_000
 

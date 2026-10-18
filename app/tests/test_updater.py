@@ -169,6 +169,7 @@ class TestTheSite:
         monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
         assert updater._headers(updater.DEFAULT_MANIFEST_URL) == {"Authorization": "Bearer sk-ab-test"}
         assert updater._headers("https://alembox.com/api/desktop/rarus/download") != {}
+        assert updater._headers("https://rarus-ai.com/api/desktop/rarus/download") != {}
         assert updater._headers("https://updates.example.test/manifest.json") == {}
         assert updater._headers("https://sanlykatip.com.evil.example/x") == {}
 
