@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from rarus_app import account, autostart, updater
+from rarus_app import __version__, account, autostart, updater
 from rarus_app.engine import Engine, EngineError
 from rarus_app.paths import app_home
 
@@ -25,6 +26,9 @@ class Controller:
         self._engine_ready = threading.Event()
         self._sign_in: account.SignIn | None = None
         self._lock = threading.Lock()
+        self._update: dict[str, Any] = {"state": "idle"}
+        self._update_release: updater.Release | None = None
+        self._update_path: Path | None = None
 
     # -- engine ----------------------------------------------------------------
 
@@ -126,7 +130,84 @@ class Controller:
         try:
             release = updater.check()
         except updater.UpdateError as exc:
-            return {"available": False, "error": str(exc)}
+            return {"available": False, "current": __version__, "error": str(exc)}
         if release is None:
-            return {"available": False}
-        return {"available": True, "version": release.version, "notes": release.notes}
+            return {"available": False, "current": __version__}
+        return {"available": True, "current": __version__, "version": release.version, "notes": release.notes}
+
+    # -- update: fetch in the background, then run the installer ----------------
+
+    def update_start(self) -> dict[str, Any]:
+        """Check, then download and verify the newer installer on a worker thread; poll ``update_status``."""
+        with self._lock:
+            if self._update["state"] in ("checking", "downloading", "ready"):
+                return self._update_status_locked()
+            self._update = {"state": "checking"}
+            self._update_release = None
+            self._update_path = None
+        threading.Thread(target=self._update_work, name="rarus-update", daemon=True).start()
+        return self.update_status()
+
+    def _update_work(self) -> None:
+        try:
+            release = updater.check()
+            if release is None:
+                self._set_update(state="current")
+                return
+            self._set_update(state="downloading", version=release.version, received=0, total=None)
+            self._keep_running_installer()
+
+            def progress(received: int, total: int | None) -> None:
+                self._set_update(received=received, total=total)
+
+            path = updater.download(release, progress=progress)
+        except updater.UpdateError as exc:
+            self._set_update(state="error", error=str(exc))
+            return
+        except OSError as exc:
+            self._set_update(state="error", error=str(exc))
+            return
+        with self._lock:
+            self._update_release, self._update_path = release, path
+        self._set_update(state="ready")
+
+    def _keep_running_installer(self) -> None:
+        """If this version came from an earlier in-app update, keep its installer as the way back."""
+        mine = updater.updates_dir() / f"RarusAI-{__version__}-setup.exe"
+        try:
+            if mine.is_file():
+                updater.remember_current(mine, __version__)
+        except OSError:
+            pass
+
+    def _set_update(self, **fields: Any) -> None:
+        with self._lock:
+            self._update.update(fields)
+
+    def _update_status_locked(self) -> dict[str, Any]:
+        info = self._update
+        received, total = info.get("received"), info.get("total")
+        percent = int(received * 100 / total) if isinstance(received, int) and total else None
+        out: dict[str, Any] = {"state": info["state"], "current": __version__, "percent": percent}
+        for key in ("version", "error"):
+            if info.get(key):
+                out[key] = info[key]
+        return out
+
+    def update_status(self) -> dict[str, Any]:
+        with self._lock:
+            return self._update_status_locked()
+
+    def update_apply(self) -> dict[str, Any]:
+        """Run the verified installer; the caller closes the program right after a ``{"ok": True}``."""
+        with self._lock:
+            ready = self._update["state"] == "ready"
+            release, path = self._update_release, self._update_path
+        if not ready or release is None or path is None:
+            return {"ok": False, "error": "no update is ready"}
+        try:
+            updater.launch_installer(path, release.sha256)
+        except updater.UpdateError as exc:
+            self._set_update(state="error", error=str(exc))
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "version": release.version}

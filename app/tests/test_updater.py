@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -160,7 +161,7 @@ def _site_client(seen: list[httpx.Request], payload: dict | None = None) -> http
 class TestTheSite:
     def test_the_default_address_is_the_owners_site(self, monkeypatch):
         monkeypatch.delenv(updater.URL_ENV)
-        assert updater.manifest_url() == "https://sanlykatip.com/api/desktop/rarus/latest.json"
+        assert updater.manifest_url() == "https://rarus-ai.com/api/desktop/rarus/latest.json"
 
     def test_an_empty_address_turns_checking_off(self):
         assert updater.manifest_url() == ""
@@ -241,3 +242,65 @@ class TestRollback:
         kept = updater.rollback_installer()
         assert kept is not None and kept.name == "RarusAI-0.2.0-setup.exe"
         assert len(list((updater.updates_dir() / "previous").glob("*.exe"))) == 1
+
+
+class TestProgress:
+    def test_the_download_reports_how_much_has_arrived(self, server):
+        s = server()
+        seen: list[tuple[int, int | None]] = []
+        release = updater.Release("0.2.0", f"{s.base}/setup.exe", GOOD)
+        updater.download(release, allow_http=True, progress=lambda got, total: seen.append((got, total)))
+        assert seen and seen[-1] == (len(INSTALLER), len(INSTALLER))
+        assert [got for got, _ in seen] == sorted(got for got, _ in seen)
+
+
+class TestLaunch:
+    @pytest.fixture
+    def popen(self, monkeypatch):
+        calls: list[tuple[list[str], dict]] = []
+
+        def fake(args, **kwargs):
+            calls.append((list(args), kwargs))
+
+        monkeypatch.setattr(subprocess, "Popen", fake)
+        return calls
+
+    def _downloaded(self, server):
+        s = server()
+        return updater.download(updater.Release("0.2.0", f"{s.base}/setup.exe", GOOD), allow_http=True)
+
+    def test_a_verified_installer_runs_silently_in_update_mode(self, server, popen):
+        path = self._downloaded(server)
+        updater.launch_installer(path, GOOD)
+        assert popen[0][0] == [str(path.resolve()), "/S", "/UPDATE"]
+
+    def test_a_file_outside_the_updates_folder_is_never_run(self, tmp_path, popen):
+        stray = tmp_path / "RarusAI-0.2.0-setup.exe"
+        stray.write_bytes(INSTALLER)
+        with pytest.raises(updater.UpdateError, match="not a downloaded update"):
+            updater.launch_installer(stray, GOOD)
+        assert popen == []
+
+    def test_a_file_with_another_name_in_the_folder_is_never_run(self, popen):
+        other = updater.updates_dir() / "evil.exe"
+        other.write_bytes(INSTALLER)
+        with pytest.raises(updater.UpdateError, match="not a downloaded update"):
+            updater.launch_installer(other, GOOD)
+        assert popen == []
+
+    def test_an_installer_changed_after_the_download_is_never_run(self, server, popen):
+        path = self._downloaded(server)
+        path.write_bytes(INSTALLER + b"tampered")
+        with pytest.raises(updater.UpdateError, match="changed on disk"):
+            updater.launch_installer(path, GOOD)
+        assert popen == []
+
+    def test_a_start_that_fails_is_reported(self, server, monkeypatch):
+        path = self._downloaded(server)
+
+        def boom(*args, **kwargs):
+            raise OSError("blocked")
+
+        monkeypatch.setattr(subprocess, "Popen", boom)
+        with pytest.raises(updater.UpdateError, match="could not start"):
+            updater.launch_installer(path, GOOD)

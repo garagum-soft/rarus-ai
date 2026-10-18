@@ -5,7 +5,7 @@ the address and an empty value turns checking off. The site is members-only, so 
 person's account key rides along, and only to the hosts in ``ALLOWED_HOSTS``. A manifest looks
 like::
 
-    {"version": "0.2.0", "url": "https://sanlykatip.com/api/desktop/rarus/download",
+    {"version": "0.2.0", "url": "https://rarus-ai.com/api/desktop/rarus/download",
      "sha256": "<64 hex>", "notes": "..."}
 
 The installer address must be https and on an allowed host (or the manifest's own host). An
@@ -20,6 +20,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -30,7 +32,7 @@ from rarus_app import __version__
 from rarus_app.paths import app_home
 
 URL_ENV = "RARUS_UPDATE_URL"
-DEFAULT_MANIFEST_URL = "https://sanlykatip.com/api/desktop/rarus/latest.json"
+DEFAULT_MANIFEST_URL = "https://rarus-ai.com/api/desktop/rarus/latest.json"
 ALLOWED_HOSTS = frozenset(
     {
         "sanlykatip.com",
@@ -132,8 +134,17 @@ def updates_dir() -> Path:
     return path
 
 
-def download(release: Release, *, client: httpx.Client | None = None, allow_http: bool = False) -> Path:
-    """Fetch the installer next to the old ones; delete it and raise unless its SHA-256 matches."""
+def download(
+    release: Release,
+    *,
+    client: httpx.Client | None = None,
+    allow_http: bool = False,
+    progress: Callable[[int, int | None], None] | None = None,
+) -> Path:
+    """Fetch the installer next to the old ones; delete it and raise unless its SHA-256 matches.
+
+    ``progress(received, total)`` is called after every chunk; ``total`` is None when the server sent no length.
+    """
     if urlparse(release.url).scheme != "https" and not allow_http:
         raise UpdateError("the installer address must be https")
     target = updates_dir() / f"RarusAI-{release.version}-setup.exe"
@@ -145,6 +156,7 @@ def download(release: Release, *, client: httpx.Client | None = None, allow_http
             "GET", release.url, headers=_headers(release.url), timeout=60.0, follow_redirects=True
         ) as reply:
             reply.raise_for_status()
+            total = int(reply.headers.get("content-length") or 0) or None
             with partial.open("wb") as out:
                 for chunk in reply.iter_bytes(1 << 16):
                     size += len(chunk)
@@ -152,6 +164,8 @@ def download(release: Release, *, client: httpx.Client | None = None, allow_http
                         raise UpdateError("the installer is larger than expected")
                     digest.update(chunk)
                     out.write(chunk)
+                    if progress is not None:
+                        progress(size, total)
     except httpx.HTTPError as exc:
         partial.unlink(missing_ok=True)
         raise UpdateError(f"could not download the installer: {exc}") from exc
@@ -163,6 +177,29 @@ def download(release: Release, *, client: httpx.Client | None = None, allow_http
         raise UpdateError("the installer does not match its sha256: it was deleted")
     partial.replace(target)
     return target
+
+
+def launch_installer(installer: Path, sha256: str) -> None:
+    """Start a downloaded installer in update mode, detached from this process.
+
+    ``/S /UPDATE``: silent, over the existing install, keeping the earlier choices; the installer closes the
+    program, replaces its files and starts the new one itself. Only a file this module downloaded is run:
+    it must sit in the updates folder and still match the SHA-256 it was verified against.
+    """
+    path = installer.resolve()
+    if path.parent != updates_dir().resolve() or not re.fullmatch(r"RarusAI-[0-9.]+-setup\.exe", path.name):
+        raise UpdateError("refusing to run a file that is not a downloaded update")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha256.lower():
+        raise UpdateError("the downloaded installer changed on disk: not running it")
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen([str(path), "/S", "/UPDATE"], close_fds=True, creationflags=flags)
+    except OSError as exc:
+        raise UpdateError(f"could not start the installer: {exc}") from exc
 
 
 def remember_current(installer: Path, version: str) -> Path:

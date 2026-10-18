@@ -7,12 +7,16 @@ available; "Quit" in the tray menu ends the program and its engine.
 
 from __future__ import annotations
 
+import threading
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from rarus_app import APP_NAME
 from rarus_app.controller import Controller
+
+#: How long the page has to read the update answer before the program closes under it.
+QUIT_DELAY_S = 1.5
 
 
 class Bridge:
@@ -54,6 +58,19 @@ class Bridge:
 
     def update_check(self) -> dict[str, Any]:
         return self._controller.update_check()
+
+    def update_start(self) -> dict[str, Any]:
+        return self._controller.update_start()
+
+    def update_status(self) -> dict[str, Any]:
+        return self._controller.update_status()
+
+    def update_apply(self) -> dict[str, Any]:
+        """Run the installer, then leave: the page gets its answer first, the program closes a moment later."""
+        result = self._controller.update_apply()
+        if result.get("ok"):
+            threading.Timer(QUIT_DELAY_S, self._quit).start()
+        return result
 
     def quit(self) -> None:
         self._quit()
