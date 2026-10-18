@@ -36,7 +36,7 @@ class TestTheRegistryEntry:
         assert spec.is_oauth
         assert spec.via_driver == "openai"
         assert spec.strip_model_prefix
-        assert spec.default_api_base == "https://alembox.com/api/agent/v1"
+        assert spec.default_api_base == "https://rarus-ai.com/api/agent/v1"
 
     def test_the_section_exists_with_no_key_in_it(self):
         assert Config().providers.rarus.api_key == ""
@@ -65,7 +65,7 @@ class TestTheProviderObject:
         rarus_session.save_session(KEY)
         provider = make_provider(_config())
         assert isinstance(provider, RarusProvider)
-        assert provider.api_base == "https://alembox.com/api/agent/v1"
+        assert provider.api_base == "https://rarus-ai.com/api/agent/v1"
 
     def test_a_site_override_reaches_chat_and_not_only_sign_in(self, monkeypatch):
         monkeypatch.setenv(rarus_session.SITE_ENV, "http://127.0.0.1:47901")

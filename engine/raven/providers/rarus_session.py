@@ -1,6 +1,7 @@
 """The Rarus sign-in: the agent key the server hands out, and where it is kept.
 
-Rarus reaches its models through the alembox.com agent API (spec section 18).
+Rarus reaches its models through the agent API of its own site, rarus-ai.com (spec section 18);
+the account, key and credits are shared with alembox.com.
 Signing in through the browser ends with one secret, an ``sk-ab-...`` agent key,
 and this module is the only place that stores it. On Windows the key is sealed
 with DPAPI, so the file is useless on another account or machine; elsewhere
@@ -27,7 +28,7 @@ from raven.utils.atomic_io import atomic_replace
 #: The site root; the agent API lives under ``/api/agent``. Overridable for a
 #: staging server and for the tests, which run against a local stand-in.
 SITE_ENV = "RARUS_SITE"
-DEFAULT_SITE = "https://alembox.com"
+DEFAULT_SITE = "https://rarus-ai.com"
 API_PATH = "/api/agent/v1"
 
 STORE_ENV = "RARUS_SECRET_STORE"

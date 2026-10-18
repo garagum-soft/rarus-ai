@@ -1,4 +1,4 @@
-"""The built-in Rarus provider: OpenAI-style chat through the alembox.com agent API.
+"""The built-in Rarus provider: OpenAI-style chat through the agent API of rarus-ai.com.
 
 The wire is plain chat completions, so LiteLLM does the streaming and tool
 calls. What is Rarus's own is the credential: the agent key a browser sign-in

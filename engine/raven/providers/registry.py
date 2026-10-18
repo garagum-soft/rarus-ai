@@ -1038,7 +1038,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="minimax-cn/MiniMax-M3",
     ),
     # === Rarus AI: the built-in models, behind a browser sign-in =============
-    # Reached through the alembox.com agent API (spec section 18). The agent key
+    # Reached through the agent API of rarus-ai.com (spec section 18). The agent key
     # lives in the sign-in store, not in config, so it is an OAuth-shaped provider
     # to routing: usable once signed in, never a fallback for another vendor.
     ProviderSpec(
@@ -1047,12 +1047,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("rarus",),
         env_key="",
         display_name="Rarus AI",
-        homepage="https://alembox.com/",
+        homepage="https://rarus-ai.com/",
         via_driver="openai",
         strip_model_prefix=True,
         is_gateway=True,
         is_oauth=True,
-        default_api_base="https://alembox.com/api/agent/v1",
+        default_api_base="https://rarus-ai.com/api/agent/v1",
         passes_default_api_base=True,
         default_model="rarus/deepseek-flash",
     ),
