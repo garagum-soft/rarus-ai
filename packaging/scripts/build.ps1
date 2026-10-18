@@ -1,6 +1,8 @@
 # Build Rarus AI: page -> engine wheel -> frozen program -> gates -> installer.
 #
-#   powershell -File packaging\scripts\build.ps1 [-Version 0.1.0] [-SkipPage] [-SkipInstaller]
+#   powershell -File packaging\scripts\build.ps1 [-Version 0.1.0] [-SkipPage] [-SkipInstaller] [-GatesOnly]
+#
+# -GatesOnly stops after step 3 (page, wheel, shell and packaging tests): what CI runs on every push.
 #
 # Every step checks its result and stops the build when it fails. Needs: node (npm) on PATH for the
 # page (-SkipPage uses the ui-web/dist that is already built), `uv` for the build venv, and
@@ -11,7 +13,8 @@
 param(
   [string]$Version = "0.1.0",
   [switch]$SkipPage,
-  [switch]$SkipInstaller
+  [switch]$SkipInstaller,
+  [switch]$GatesOnly
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
@@ -53,6 +56,10 @@ Run "uv" @("pip", "install", "--python", $py, "--reinstall-package", "raven", "-
   $wheel.FullName, "$root\app[gui]", "pyinstaller", "pytest", "pytest-asyncio")
 $env:PYTHONUTF8 = "1"
 Run $py @("-m", "pytest", "-q", "-p", "no:cacheprovider", (Join-Path $root "app\tests"), (Join-Path $root "packaging\tests"))
+if ($GatesOnly) {
+  Write-Host "-GatesOnly: the gates passed, stopping before PyInstaller" -ForegroundColor Yellow
+  exit 0
+}
 
 Step 4 "PyInstaller: onedir RarusAI"
 Remove-Item (Join-Path $build "dist") -Recurse -Force -ErrorAction SilentlyContinue

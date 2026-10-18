@@ -1,0 +1,160 @@
+name: Rarus Release
+
+# A tag vX.Y.Z (X.Y.Z must equal __version__ in app/rarus_app/__init__.py) builds the Windows
+# installer and puts it on the site, where the download menu and the program's own update check
+# read it. Run by hand with "publish" to upload without a tag.
+#
+# The upload needs six repository secrets, set by the owner (Settings > Secrets and variables > Actions):
+#   DEPLOY_SSH_KEY      private key of a user that may write to DEPLOY_PATH (and nothing else)
+#   DEPLOY_KNOWN_HOSTS  the server's line from known_hosts (host key is checked, never trusted blindly)
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_PORT
+#   DEPLOY_PATH         the folder the site serves Rarus from, e.g. <WAN_DATA>/desktop/rarus
+# Without them the build job still succeeds, the upload job fails, and the installer stays an
+# artifact of the run for a day.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the installer to the site
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rarus-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # NSIS 3.13 from the official project; the hash is the one of the archive used for the first build.
+  NSIS_URL: https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip
+  NSIS_SHA256: ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8
+  # Microsoft updates this file in place, so it is not pinned by hash: build.ps1 refuses a copy that
+  # has no valid Microsoft signature.
+  WEBVIEW2_URL: https://go.microsoft.com/fwlink/p/?LinkId=2124703
+
+jobs:
+  windows:
+    name: Build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -nE 's/^__version__ = "([^"]+)".*/\1/p' app/rarus_app/__init__.py)
+          [ -n "$version" ] || { echo "NO_VERSION"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "TAG_VERSION_MISMATCH: $GITHUB_REF_NAME != v$version"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/ui-web/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Fetch NSIS
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build\tools\nsis | Out-Null
+          curl.exe -L --fail --retry 3 -o nsis.zip $env:NSIS_URL
+          if ((Get-FileHash nsis.zip -Algorithm SHA256).Hash.ToLower() -ne $env:NSIS_SHA256) { throw 'NSIS_SHA256_MISMATCH' }
+          Expand-Archive nsis.zip -DestinationPath build\tools\nsis
+          Remove-Item nsis.zip
+
+      - name: Fetch the WebView2 bootstrapper
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force packaging\redist | Out-Null
+          curl.exe -L --fail --retry 3 -o packaging\redist\MicrosoftEdgeWebview2Setup.exe $env:WEBVIEW2_URL
+
+      # Page, wheel, tests, PyInstaller, the secret and address gate, NSIS, SHA-256: one script, the
+      # same one that was run by hand. It stops the build at the first step that fails.
+      - name: Build the installer
+        shell: pwsh
+        run: ./packaging/scripts/build.ps1 -Version ${{ steps.version.outputs.value }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: rarus-windows
+          path: |
+            build/RarusSetup-*.exe
+            build/RarusSetup-*.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Upload to the site
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v7
+        with:
+          name: rarus-windows
+          path: installer
+
+      - name: Upload to server
+        env:
+          VERSION: ${{ needs.windows.outputs.version }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          files=(installer/RarusSetup-*.exe)
+          [ ${#files[@]} -eq 1 ] || { echo "INSTALLER_COUNT: ${#files[@]}"; exit 1; }
+          expected=$(cut -d' ' -f1 installer/RarusSetup-*.sha256)
+          actual=$(sha256sum "${files[0]}" | cut -d' ' -f1)
+          [ "$expected" = "$actual" ] || { echo "SHA256_CHANGED_BETWEEN_JOBS"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          port="${DEPLOY_PORT:-22}"
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          opts=(-i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=30)
+          scp "${opts[@]}" -P "$port" "${files[0]}" "$target:$DEPLOY_PATH/RarusAI-Setup.exe.uploading"
+          # The file is checked on the server, then replaced atomically and before version.txt: the
+          # program must never see a new version without its file, nor a file that does not match.
+          ssh "${opts[@]}" -p "$port" "$target" bash -s -- "$DEPLOY_PATH" "$VERSION" "$actual" <<'EOF'
+          set -euo pipefail
+          cd "$1"
+          got=$(sha256sum RarusAI-Setup.exe.uploading | cut -d' ' -f1)
+          [ "$got" = "$3" ] || { rm -f RarusAI-Setup.exe.uploading; echo "SHA256_MISMATCH_ON_SERVER"; exit 1; }
+          old=$({ tr -d '[:space:]' < version.txt; } 2>/dev/null || true)
+          if [ -f RarusAI-Setup.exe ] && [ -n "$old" ] && [ "$old" != "$2" ]; then
+            find . -maxdepth 1 -name 'RarusAI-Setup-*.bak' -delete
+            ln -f RarusAI-Setup.exe "RarusAI-Setup-$old.bak"
+          fi
+          chmod 644 RarusAI-Setup.exe.uploading
+          mv -f RarusAI-Setup.exe.uploading RarusAI-Setup.exe
+          printf '%s\n' "$3" > sha256.txt.tmp
+          mv -f sha256.txt.tmp sha256.txt
+          printf '%s\n' "$2" > version.txt.tmp
+          mv -f version.txt.tmp version.txt
+          EOF

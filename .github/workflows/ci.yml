@@ -1,0 +1,112 @@
+name: CI
+
+# What the repository can check on every push: the page (types, lint, RPC contract, tests, the
+# single-file build and its boot snapshot), the Windows shell and packaging tests, and the Rarus
+# provider tests of the engine. The installer itself is built by rarus-release.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  page:
+    name: page (types, lint, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: engine/ui-web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/ui-web/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Types
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: RPC contract (generated client matches the engine)
+        run: npm run gen:check
+
+      # Roles.test.tsx has two failures that Raven's own tree has too (it asserts a thousands separator
+      # that depends on the runtime's locale data). Everything else must pass.
+      - name: Tests
+        run: npx vitest run --exclude src/features/settings/providers/Roles.test.tsx
+
+      - name: Build the page and check its boot snapshot
+        run: |
+          npm run build
+          uv run --python 3.12 --no-project python build.py
+
+  shell:
+    name: shell and packaging (windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/ui-web/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Page, engine wheel and the shell and packaging tests
+        shell: pwsh
+        run: ./packaging/scripts/build.ps1 -GatesOnly
+
+  engine:
+    name: engine (Rarus provider contract)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen --python 3.12 --extra dev --dev
+
+      - name: Rarus provider, command set and org store tests
+        run: >-
+          uv run --frozen --python 3.12 --all-extras pytest -q
+          tests/test_rarus_provider.py tests/test_cli_smoke.py tests/test_rpc_org.py
