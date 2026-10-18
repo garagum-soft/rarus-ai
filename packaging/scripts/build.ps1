@@ -1,6 +1,6 @@
 # Build Rarus AI: page -> engine wheel -> frozen program -> gates -> installer.
 #
-#   powershell -File packaging\scripts\build.ps1 [-Version 0.1.0] [-SkipPage] [-SkipInstaller] [-GatesOnly]
+#   powershell -File packaging\scripts\build.ps1 [-Version <x.y.z>] [-SkipPage] [-SkipInstaller] [-GatesOnly]
 #
 # -GatesOnly stops after step 3 (page, wheel, shell and packaging tests): what CI runs on every push.
 #
@@ -11,7 +11,7 @@
 # downloads an installer or a toolchain: Python packages come from the package index through uv,
 # the rest must already be on the machine.
 param(
-  [string]$Version = "0.1.0",
+  [string]$Version = "",
   [switch]$SkipPage,
   [switch]$SkipInstaller,
   [switch]$GatesOnly
@@ -19,6 +19,11 @@ param(
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $build = Join-Path $root "build"
+if (-not $Version) {
+  # the version lives in one place, the shell package
+  $Version = [regex]::Match((Get-Content (Join-Path $root "app\rarus_app\__init__.py") -Raw), '__version__ = "([^"]+)"').Groups[1].Value
+  if (-not $Version) { throw "could not read __version__ from app\rarus_app\__init__.py" }
+}
 $venv = Join-Path $build "venv"
 $py = Join-Path $venv "Scripts\python.exe"
 
