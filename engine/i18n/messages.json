@@ -16203,9 +16203,9 @@
       "ru": "Пополнение"
     },
     "gui.settings.account.top_up_sub": {
-      "en": "Credits are bought on the site.",
-      "zh": "积分在网站上购买。",
-      "ru": "Кредиты покупаются на сайте."
+      "en": "Your balance and the credit packs are on the site.",
+      "zh": "余额和积分套餐请在网站上查看。",
+      "ru": "Баланс и пакеты кредитов — на сайте."
     },
     "gui.settings.account.top_up_open": {
       "en": "Open the site",

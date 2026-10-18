@@ -16,9 +16,8 @@ import { UpdateRow } from './Updates'
 import type { AccountInfo } from '../types'
 import type { JSX } from 'react'
 
-/* Where credits are bought. The site moves to its own domain later (spec 18); this is its one
-   place on the page. */
-export const TOP_UP_URL = 'https://alembox.com/'
+/* Where credits are topped up: the balance and packs page on the Rarus site. */
+export const TOP_UP_URL = 'https://rarus-ai.com/pricing'
 
 /* The codes `rarus.account` answers with (raven/providers/rarus_client.py), each in words; a text
    that is not one of them is shown as it came. */
