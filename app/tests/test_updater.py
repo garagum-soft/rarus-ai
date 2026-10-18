@@ -7,6 +7,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import httpx
 import pytest
 
 from rarus_app import updater
@@ -65,7 +66,13 @@ def server():
         s.close()
 
 
-def _manifest(base: str = "https://updates.example.test", version: str = "0.2.0", sha: str = GOOD) -> dict:
+@pytest.fixture(autouse=True)
+def _ask_nobody_by_default(monkeypatch):
+    """A test that wants the real default address says so; none may reach the site by accident."""
+    monkeypatch.setenv(updater.URL_ENV, "")
+
+
+def _manifest(base: str = "https://sanlykatip.com", version: str = "0.2.0", sha: str = GOOD) -> dict:
     return {"version": version, "url": f"{base}/setup.exe", "sha256": sha, "notes": "fixes"}
 
 
@@ -110,6 +117,14 @@ class TestManifest:
         with pytest.raises(updater.UpdateError):
             updater.parse_manifest(["nope"])
 
+    def test_an_installer_on_a_foreign_host_is_refused(self):
+        with pytest.raises(updater.UpdateError, match="trust"):
+            updater.parse_manifest(_manifest(base="https://evil.example.test"))
+
+    def test_an_installer_on_the_manifests_own_host_is_accepted(self):
+        data = _manifest(base="https://updates.example.test")
+        assert updater.parse_manifest(data, manifest_host="updates.example.test").version == "0.2.0"
+
 
 class TestCheck:
     def test_with_no_address_nobody_is_asked(self):
@@ -132,6 +147,50 @@ class TestCheck:
         s = server(manifest=_manifest())
         monkeypatch.setenv(updater.URL_ENV, f"{s.base}/manifest.json")
         assert updater.check(current="0.1.0") is not None
+
+
+def _site_client(seen: list[httpx.Request], payload: dict | None = None) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=payload if payload is not None else _manifest())
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+class TestTheSite:
+    def test_the_default_address_is_the_owners_site(self, monkeypatch):
+        monkeypatch.delenv(updater.URL_ENV)
+        assert updater.manifest_url() == "https://sanlykatip.com/api/desktop/rarus/latest.json"
+
+    def test_an_empty_address_turns_checking_off(self):
+        assert updater.manifest_url() == ""
+
+    def test_the_account_key_goes_to_the_site_and_only_there(self, monkeypatch):
+        monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
+        assert updater._headers(updater.DEFAULT_MANIFEST_URL) == {"Authorization": "Bearer sk-ab-test"}
+        assert updater._headers("https://alembox.com/api/desktop/rarus/download") != {}
+        assert updater._headers("https://updates.example.test/manifest.json") == {}
+        assert updater._headers("https://sanlykatip.com.evil.example/x") == {}
+
+    def test_the_manifest_is_asked_with_the_key(self, monkeypatch):
+        monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
+        seen: list[httpx.Request] = []
+        release = updater.check(current="0.1.0", url=updater.DEFAULT_MANIFEST_URL, client=_site_client(seen))
+        assert release is not None and release.version == "0.2.0"
+        assert seen[0].headers["authorization"] == "Bearer sk-ab-test"
+
+    def test_nobody_signed_in_means_nobody_is_asked(self, monkeypatch):
+        monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: None)
+        seen: list[httpx.Request] = []
+        assert updater.check(current="0.1.0", url=updater.DEFAULT_MANIFEST_URL, client=_site_client(seen)) is None
+        assert seen == []
+
+    def test_a_custom_address_gets_no_key(self, monkeypatch):
+        monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
+        seen: list[httpx.Request] = []
+        data = _manifest(base="https://updates.example.test")
+        updater.check(current="0.1.0", url="https://updates.example.test/m.json", client=_site_client(seen, data))
+        assert "authorization" not in seen[0].headers
 
 
 class TestDownload:

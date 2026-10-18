@@ -1,12 +1,15 @@
 """Update client (spec 7.8 / 18.5): ask a manifest, fetch the installer, check it, keep a way back.
 
-The manifest address is configuration and is empty by default: until a Rarus release
-channel exists the program asks nobody. A manifest looks like::
+The manifest lives on the owner's site (``DEFAULT_MANIFEST_URL``); ``RARUS_UPDATE_URL`` replaces
+the address and an empty value turns checking off. The site is members-only, so the signed-in
+person's account key rides along, and only to the hosts in ``ALLOWED_HOSTS``. A manifest looks
+like::
 
-    {"version": "0.2.0", "url": "https://.../RarusAI-0.2.0-setup.exe",
+    {"version": "0.2.0", "url": "https://sanlykatip.com/api/desktop/rarus/download",
      "sha256": "<64 hex>", "notes": "..."}
 
-An installer without a matching SHA-256 is never handed on. The previous installer stays in
+The installer address must be https and on an allowed host (or the manifest's own host). An
+installer without a matching SHA-256 is never handed on. The previous installer stays in
 ``updates/previous`` so a bad release can be rolled back by running it again.
 """
 
@@ -27,6 +30,8 @@ from rarus_app import __version__
 from rarus_app.paths import app_home
 
 URL_ENV = "RARUS_UPDATE_URL"
+DEFAULT_MANIFEST_URL = "https://sanlykatip.com/api/desktop/rarus/latest.json"
+ALLOWED_HOSTS = frozenset({"sanlykatip.com", "www.sanlykatip.com", "alembox.com", "www.alembox.com"})
 _SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 _MAX_INSTALLER_BYTES = 1_500_000_000
 
@@ -44,7 +49,19 @@ class Release:
 
 
 def manifest_url() -> str:
-    return os.environ.get(URL_ENV, "").strip()
+    """The configured address; an empty ``RARUS_UPDATE_URL`` means "do not check"."""
+    configured = os.environ.get(URL_ENV)
+    return DEFAULT_MANIFEST_URL if configured is None else configured.strip()
+
+
+def _headers(address: str) -> dict[str, str]:
+    """The account key for the site's own hosts, nothing for any other address."""
+    if urlparse(address).hostname not in ALLOWED_HOSTS:
+        return {}
+    from raven.providers.rarus_session import load_key
+
+    key = load_key()
+    return {"Authorization": f"Bearer {key}"} if key else {}
 
 
 def version_key(value: str) -> tuple[int, ...]:
@@ -60,7 +77,7 @@ def version_key(value: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def parse_manifest(data: object) -> Release:
+def parse_manifest(data: object, *, manifest_host: str = "") -> Release:
     if not isinstance(data, dict):
         raise UpdateError("the update manifest is not an object")
     version, url, digest = (str(data.get(k) or "") for k in ("version", "url", "sha256"))
@@ -70,6 +87,9 @@ def parse_manifest(data: object) -> Release:
         raise UpdateError(str(exc)) from exc
     if urlparse(url).scheme != "https":
         raise UpdateError("the installer address must be https")
+    host = urlparse(url).hostname or ""
+    if host not in ALLOWED_HOSTS and host != manifest_host:
+        raise UpdateError(f"the installer is on a host the program does not trust: {host or url}")
     if not _SHA256.fullmatch(digest):
         raise UpdateError("the manifest has no valid sha256: refusing to offer an unverified installer")
     return Release(version=version, url=url, sha256=digest.lower(), notes=str(data.get("notes") or ""))
@@ -80,10 +100,13 @@ def check(*, current: str = __version__, url: str | None = None, client: httpx.C
     address = url if url is not None else manifest_url()
     if not address:
         return None
+    headers = _headers(address)
+    if urlparse(address).hostname in ALLOWED_HOSTS and not headers:
+        return None  # the site is members-only: nobody is signed in, so there is nobody to ask for
     try:
-        reply = (client or httpx).get(address, timeout=10.0)
+        reply = (client or httpx).get(address, headers=headers, timeout=10.0)
         reply.raise_for_status()
-        release = parse_manifest(reply.json())
+        release = parse_manifest(reply.json(), manifest_host=urlparse(address).hostname or "")
     except httpx.HTTPError as exc:
         raise UpdateError(f"could not reach the update server: {exc}") from exc
     except ValueError as exc:
@@ -106,7 +129,9 @@ def download(release: Release, *, client: httpx.Client | None = None, allow_http
     digest = hashlib.sha256()
     size = 0
     try:
-        with (client or httpx).stream("GET", release.url, timeout=60.0, follow_redirects=True) as reply:
+        with (client or httpx).stream(
+            "GET", release.url, headers=_headers(release.url), timeout=60.0, follow_redirects=True
+        ) as reply:
             reply.raise_for_status()
             with partial.open("wb") as out:
                 for chunk in reply.iter_bytes(1 << 16):
