@@ -11,6 +11,7 @@ import { shell } from '../../../lib/shell'
 import { show as toast } from '../../../state/toast'
 import { Card, InlineErr, Row, Rov } from '../Fields'
 import * as store from '../store'
+import { UpdateRow } from './Updates'
 
 import type { AccountInfo } from '../types'
 import type { JSX } from 'react'
@@ -86,6 +87,7 @@ export function Account(): JSX.Element {
           {t('gui.settings.account.top_up_open')}
         </button>
       </Row>
+      <UpdateRow windowed={windowed} />
       <Row label={t('gui.settings.account.sign_out')} sub={windowed === false ? t('gui.settings.account.sign_out_hint') : undefined}>
         <button type="button" className="mini ghost" disabled={windowed === false} onClick={() => void signOut()}>
           {t('gui.settings.account.sign_out_do')}

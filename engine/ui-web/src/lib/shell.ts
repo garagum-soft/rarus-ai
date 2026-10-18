@@ -6,12 +6,38 @@
  * is no bridge and `shell()` answers null -- every caller treats that as "not
  * a desktop window", never as a failure. No secret crosses the bridge. */
 
+export interface UpdateCheck {
+  available: boolean
+  current: string
+  version?: string
+  notes?: string
+  error?: string
+}
+
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'downloading' | 'ready' | 'current' | 'error'
+  current: string
+  percent: number | null
+  version?: string
+  error?: string
+}
+
+export interface UpdateApplied {
+  ok: boolean
+  version?: string
+  error?: string
+}
+
 export interface ShellApi {
   first_run(): Promise<boolean>
   onboarded(): Promise<void>
   autostart_enabled(): Promise<boolean>
   set_autostart(enabled: boolean): Promise<boolean>
   sign_out(): Promise<unknown>
+  update_check(): Promise<UpdateCheck>
+  update_start(): Promise<UpdateStatus>
+  update_status(): Promise<UpdateStatus>
+  update_apply(): Promise<UpdateApplied>
 }
 
 type Host = Window & { pywebview?: { api?: Partial<ShellApi> } }

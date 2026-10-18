@@ -16232,6 +16232,66 @@
       "zh": "无法退出登录",
       "ru": "Не удалось выйти"
     },
+    "gui.settings.account.updates": {
+      "en": "Updates",
+      "zh": "更新",
+      "ru": "Обновления"
+    },
+    "gui.settings.account.updates_sub": {
+      "en": "Rarus AI {v}",
+      "zh": "Rarus AI {v}",
+      "ru": "Rarus AI {v}"
+    },
+    "gui.settings.account.update_check": {
+      "en": "Check for updates",
+      "zh": "检查更新",
+      "ru": "Проверить обновления"
+    },
+    "gui.settings.account.update_checking": {
+      "en": "Checking...",
+      "zh": "正在检查...",
+      "ru": "Проверяю..."
+    },
+    "gui.settings.account.update_current": {
+      "en": "You have the latest version.",
+      "zh": "已是最新版本。",
+      "ru": "У вас последняя версия."
+    },
+    "gui.settings.account.update_available": {
+      "en": "Version {v} is available.",
+      "zh": "有新版本 {v}。",
+      "ru": "Доступна версия {v}."
+    },
+    "gui.settings.account.update_install": {
+      "en": "Install and restart",
+      "zh": "安装并重启",
+      "ru": "Установить и перезапустить"
+    },
+    "gui.settings.account.update_downloading": {
+      "en": "Downloading {n}%",
+      "zh": "正在下载 {n}%",
+      "ru": "Скачиваю {n}%"
+    },
+    "gui.settings.account.update_downloading_plain": {
+      "en": "Downloading...",
+      "zh": "正在下载...",
+      "ru": "Скачиваю..."
+    },
+    "gui.settings.account.update_restarting": {
+      "en": "Installing. Rarus AI will restart.",
+      "zh": "正在安装，Rarus AI 将重新启动。",
+      "ru": "Устанавливаю. Rarus AI перезапустится."
+    },
+    "gui.settings.account.update_failed": {
+      "en": "Update failed: {e}",
+      "zh": "更新失败：{e}",
+      "ru": "Не удалось обновить: {e}"
+    },
+    "gui.settings.account.update_hint": {
+      "en": "Update from the Rarus AI window.",
+      "zh": "请在 Rarus AI 窗口中更新。",
+      "ru": "Обновлять можно в окне Rarus AI."
+    },
     "gui.settings.account.title": {
       "en": "Rarus AI account",
       "zh": "Rarus AI 账户",

@@ -6,6 +6,9 @@ import { resetSources, setSources } from '../../../state/sources'
 import { install, modelSource, mount, snap, source as settingsSource } from '../../../test/settingsHarness'
 import * as store from '../store'
 import { TOP_UP_URL, balanceText, errorText } from './Account'
+import { timing } from './Updates'
+
+import type { ShellApi } from '../../../lib/shell'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -13,7 +16,7 @@ const toasts = vi.hoisted(() => ({ values: [] as string[] }))
 vi.mock('../../../state/toast', () => ({ show: (v: string) => { toasts.values.push(v) }, subscribe: () => () => {}, get: () => [] }))
 const opened = vi.hoisted(() => ({ values: [] as string[] }))
 vi.mock('../../../lib/openUrl', () => ({ open: (v: string) => { opened.values.push(v) } }))
-const bridge = vi.hoisted(() => ({ api: null as null | { sign_out: () => Promise<unknown> } }))
+const bridge = vi.hoisted(() => ({ api: null as null | Partial<ShellApi> }))
 vi.mock('../../../lib/shell', () => ({ shell: async () => bridge.api }))
 
 beforeEach(() => {
@@ -107,5 +110,79 @@ describe('account errors', () => {
     install(snap(), { account: async () => ({ signed_in: true, email: 'me@example.com', balance: null, error: 'network' }) })
     await mount('account')
     expect(await screen.findByText('gui.settings.account.err_network')).toBeTruthy()
+  })
+})
+
+describe('update row', () => {
+  const status = (over: Record<string, unknown> = {}): ShellApi['update_status'] => async () => ({ state: 'idle', current: '0.1.0', percent: null, ...over }) as Awaited<ReturnType<ShellApi['update_status']>>
+
+  beforeEach(() => { timing.pollMs = 1 })
+
+  const open = async (api: Partial<ShellApi> | null): Promise<void> => {
+    bridge.api = api
+    install()
+    await mount('account')
+    await screen.findByText('me@example.com')
+  }
+
+  it('says which version is installed and that it is the latest', async () => {
+    await open({ update_status: status(), update_check: async () => ({ available: false, current: '0.1.0' }) })
+    expect(await screen.findByText(/^gui.settings.account.updates_sub .*0\.1\.0/)).toBeTruthy()
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_check')) })
+    expect(await screen.findByText('gui.settings.account.update_current')).toBeTruthy()
+  })
+
+  it('offers the install of a newer version, follows the download and runs the installer', async () => {
+    const polls = [{ state: 'downloading', percent: 40 }, { state: 'ready', percent: 100 }]
+    const apply = vi.fn(async () => ({ ok: true, version: '0.2.0' }))
+    await open({
+      update_status: async () => ({ state: 'idle', current: '0.1.0', percent: null }),
+      update_check: async () => ({ available: true, current: '0.1.0', version: '0.2.0' }),
+      update_start: async () => ({ state: 'downloading', current: '0.1.0', percent: null, version: '0.2.0' }),
+      update_apply: apply,
+    })
+    const status = vi.spyOn(bridge.api as ShellApi, 'update_status').mockImplementation(async () => ({ current: '0.1.0', ...(polls.shift() ?? { state: 'ready', percent: 100 }) }) as never)
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_check')) })
+    expect(await screen.findByText(/^gui.settings.account.update_available .*0\.2\.0/)).toBeTruthy()
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_install')) })
+    expect(await screen.findByText('gui.settings.account.update_restarting')).toBeTruthy()
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(status).toHaveBeenCalled()
+  })
+
+  it('shows the reason when the installer is refused', async () => {
+    await open({
+      update_status: status(),
+      update_check: async () => ({ available: true, current: '0.1.0', version: '0.2.0' }),
+      update_start: async () => ({ state: 'ready', current: '0.1.0', percent: 100 }),
+      update_apply: async () => ({ ok: false, error: 'changed on disk' }),
+    })
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_check')) })
+    await act(async () => { fireEvent.click(await screen.findByText('gui.settings.account.update_install')) })
+    expect(await screen.findByText(/^gui.settings.account.update_failed .*changed on disk/)).toBeTruthy()
+  })
+
+  it('shows the reason when the download fails', async () => {
+    await open({
+      update_status: status(),
+      update_check: async () => ({ available: true, current: '0.1.0', version: '0.2.0' }),
+      update_start: async () => ({ state: 'error', current: '0.1.0', percent: null, error: 'does not match its sha256' }),
+    })
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_check')) })
+    await act(async () => { fireEvent.click(await screen.findByText('gui.settings.account.update_install')) })
+    expect(await screen.findByText(/^gui.settings.account.update_failed .*sha256/)).toBeTruthy()
+  })
+
+  it('shows why a check could not be made', async () => {
+    await open({ update_status: status(), update_check: async () => ({ available: false, current: '0.1.0', error: 'offline' }) })
+    await act(async () => { fireEvent.click(screen.getByText('gui.settings.account.update_check')) })
+    expect(await screen.findByText(/^gui.settings.account.update_failed .*offline/)).toBeTruthy()
+  })
+
+  it('is switched off in an ordinary browser, which has no shell to update', async () => {
+    await open(null)
+    const button = screen.getByText('gui.settings.account.update_check') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getAllByText('gui.settings.account.update_hint').length).toBeGreaterThan(0)
   })
 })
