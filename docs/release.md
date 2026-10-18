@@ -1,7 +1,7 @@
 # Выпуск Rarus AI: GitHub, Actions и сайт sanlykatip.com
 
 Состояние на 2026-10-18. Всё, что можно сделать без доступа к вашему серверу и к GitHub, сделано и
-проверено на этой машине. Выкладка на сервер и создание репозитория — за вами (команды ниже).
+проверено на этой машине. Создание репозитория и выкладка установщика на sanlykatip.com — за вами (команды ниже); домен rarus-ai.com выложен 18.10 (раздел «Домен rarus-ai.com»).
 
 ## Что готово
 
@@ -103,23 +103,20 @@ alembox.com. Уборщик задач остаётся у основного п
 Проверено: процесс запущен через uvicorn на локальном порту (health 200, закрытые пути 404, регистрация
 работает); 14 тестов нового и 93 теста затронутых модулей на чистой копии последнего коммита сайта.
 
-**Что нужно сделать вам (я не могу): шесть шагов**
+**Выложено 18.10 и проверено снаружи** (слово владельца: «сделай сам»):
 
-1. **DNS у регистратора:** A-записи `rarus-ai.com` и `www.rarus-ai.com` на `95.85.125.50`.
-2. **Верхний nginx (`192.168.2.10`)**, который владеет 80/443 этого адреса (там же `garagumgames.com`): отдавать
-   нам имя `rarus-ai.com` — порт 443 сквозным проксированием по SNI, порт 80 по `Host`. Требования — в
-   `wan-site/deploy/nginx-upstream-proxy.conf`. Без этого снаружи до VDS ничего не дойдёт.
-3. **Сертификат на VDS** для `rarus-ai.com` и `www` тем же способом, что для alembox.com (DNS-проверка вручную,
-   `deploy/acme-hook.sh`, см. `VDS.md`).
-4. **Бэкап базы** перед первым запуском: `sqlite3 /opt/wan-site/data/wan.sqlite3 ".backup '/opt/backups/wan-<дата>.sqlite3'"`
-   (второй процесс при старте выполняет те же идемпотентные миграции, что и основной).
-5. **Положить файлы** (`scp` + `mv`, не `cp`): `backend/rarus_main.py`, `rarus_dl.py`, `password_reset.py`,
-   `deploy/restart_rarus_backend.py`, `deploy/rarus-backend.service`, `deploy/nginx-rarus-ai.conf`; запустить
-   `/opt/wan-site/venv/bin/python /opt/wan-site/app/deploy/restart_rarus_backend.py` (печатает, поднялся ли
-   процесс и под systemd ли он). Основной сайт перезапускать не нужно. Затем с sudo: nginx-блок в
-   `sites-enabled`, `nginx -t`, `systemctl reload nginx`, по желанию юнит (команда напечатана скриптом).
-6. **Проверка снаружи:** `https://rarus-ai.com/api/health` отвечает `ok`; `/api/admin/users` — 404;
-   регистрация на rarus-ai.com и вход тем же паролем на alembox.com работают.
+1. DNS: A-записи `rarus-ai.com` и `www` на `95.85.125.50` — сделал владелец, проверено на серверах hostia.
+2. Бэкап базы: `/opt/wan-site/data/wan.sqlite3.bak-2026-10-18-rarus` (`integrity_check` ok).
+3. Файлы на VDS (`mv`): `rarus_main.py`, `rarus_dl.py`, `password_reset.py` (копия старого — `/opt/wan-site/password_reset.py.bak-1810rarus`), тесты, `restart_rarus_backend.py`. Боевой `main.py` отличается от репозиторного, поэтому его НЕ трогали: второй процесс сам подключает маршруты установщика. Запуск — от `llm`: `runuser -u llm -- /opt/wan-site/venv/bin/python /opt/wan-site/app/deploy/restart_rarus_backend.py`. Процесс вне systemd (юнит `rarus-backend.service` ставит владелец с sudo).
+4. Сертификат `rarus-ai.com` + `www` (Let's Encrypt, до 2027-01-16): на VDS в `/etc/letsencrypt/live/rarus-ai.com/`, копия на верхней машине в `/home/launcher/ssl_rarus/`.
+5. Блоки nginx: на VDS `sites-available/rarus-ai` (ссылка в `sites-enabled`, копия старого `wan-site.bak-1810rarus`); на верхней машине два блока в конце `garagumgames.conf` (скрипт `deploy/upper-add-rarus-ai.sh`, копия `garagumgames.conf.bak-<время>`).
+6. Снаружи: TLS валиден для обоих имён, `/api/health` 200, `/api/admin/users` и `/api/jobs` 404, `/api/plans` 200, `/` и `/app-login` 200, `http` -> 301 на https; alembox.com и sanlykatip.com отвечают как раньше. Ключ токенов и путь к базе у обоих процессов совпадают (сверено по хешам).
+
+**Не проверено мной:** вход одним паролем на обоих сайтах (создавать аккаунты на боевом сайте и вводить пароли мне нельзя) — проверяет владелец: войти на rarus-ai.com почтой и паролем от alembox.com.
+
+**Продление сертификата (важно).** Certbot запомнил разовый хук `acme-hook-flag.sh`, который ждёт файл `/tmp/acme-go`; DNS на самом VDS сейчас не работает, штатный `acme-hook.sh` тоже не подтвердит запись. Поэтому продлевать вручную, так же как выпускали: примерно за месяц до 2027-01-16 запустить `certbot certonly --manual --preferred-challenges dns --manual-auth-hook … -d rarus-ai.com -d www.rarus-ai.com --cert-name rarus-ai.com` (в `/etc/hosts` VDS на время выпуска нужна строка для `acme-v02.api.letsencrypt.org` -> `172.65.32.248`), владелец заводит две TXT-записи (`_acme-challenge` и `_acme-challenge.www`), затем **заново скопировать файлы в `/home/launcher/ssl_rarus/` на верхней машине и перезагрузить nginx** — иначе снаружи останется старый сертификат.
+
+**Ключ к верхней машине.** `~/.ssh/claude_rarus_upper` у меня; на верхней машине строка `claude-rarus-ai 2026-10-18` в `~launcher/.ssh/authorized_keys` с ограничением `from="192.168.2.25"`. После работы её можно удалить.
 
 **Что программа Rarus делает сейчас:** она по-прежнему входит через `alembox.com` и спрашивает обновления на
 `sanlykatip.com` (клиент уже доверяет и `rarus-ai.com`). Переключить на новый домен — три строки:
@@ -140,4 +137,5 @@ alembox.com. Уборщик задач остаётся у основного п
   (`/UPDATE`) не подключена. Пока новую версию человек ставит, скачав её из меню «Скачать».
 * Workflow не запускались на GitHub (у меня нет доступа): первый прогон может найти поправки, например в версиях действий.
 * Установщик без подписи: SmartScreen покажет предупреждение.
-* Сервер и GitHub не менялись: ничего не отправлено и не выложено.
+* GitHub не менялся: репозитория нет, push не было. На сервере 18.10 выложен только rarus-ai.com (см. выше); маршруты
+  `/api/desktop/rarus/*` на sanlykatip.com / alembox.com, пункт меню «Rarus AI» и установщик в `desktop/rarus` ещё не выложены.
