@@ -185,6 +185,12 @@ class TestTheSite:
         assert updater.check(current="0.1.0", url=updater.DEFAULT_MANIFEST_URL, client=_site_client(seen)) is None
         assert seen == []
 
+    def test_a_site_with_nothing_published_is_not_an_error(self, monkeypatch):
+        monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
+        seen: list[httpx.Request] = []
+        client = _site_client(seen, {"available": False})
+        assert updater.check(current="0.1.0", url=updater.DEFAULT_MANIFEST_URL, client=client) is None
+
     def test_a_custom_address_gets_no_key(self, monkeypatch):
         monkeypatch.setattr("raven.providers.rarus_session.load_key", lambda: "sk-ab-test")
         seen: list[httpx.Request] = []

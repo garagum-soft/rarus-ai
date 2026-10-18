@@ -106,7 +106,10 @@ def check(*, current: str = __version__, url: str | None = None, client: httpx.C
     try:
         reply = (client or httpx).get(address, headers=headers, timeout=10.0)
         reply.raise_for_status()
-        release = parse_manifest(reply.json(), manifest_host=urlparse(address).hostname or "")
+        data = reply.json()
+        if isinstance(data, dict) and data.get("available") is False:
+            return None  # the site has nothing published (yet)
+        release = parse_manifest(data, manifest_host=urlparse(address).hostname or "")
     except httpx.HTTPError as exc:
         raise UpdateError(f"could not reach the update server: {exc}") from exc
     except ValueError as exc:
