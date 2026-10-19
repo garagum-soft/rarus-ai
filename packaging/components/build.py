@@ -181,8 +181,14 @@ def install_packages(entry: dict, site: Path, *, python: Path, wheels: Path, pin
             *[spec_of(p) for p in packages],
         ]
     )
+    # Distributions the program carries only in part (PyInstaller takes the modules the engine imports)
+    # but the component needs more of: kept whole, and the component's copy -- the same version -- wins.
+    whole = {w.lower() for w in entry.get("whole") or []}
     kept, dropped = [], []
     for name, info, paths in installed_distributions(site):
+        if name.lower() in whole:
+            kept.append(name)
+            continue
         if name.lower() in ("raven", "rarus-app") or bundle.carries(paths):
             drop_distribution(site, info, paths)
             dropped.append(name)
@@ -257,6 +263,62 @@ def pack(stage: Path, target_dir: Path, cid: str) -> dict:
     return {"file": name, "sha256": digest, "size": final.stat().st_size, "unpacked": unpacked, "count": len(files)}
 
 
+# Helpers every check may call. ``walk`` imports each module of a package, so a module of a library the
+# program carries only in part shows up here rather than on someone's computer; ``everos_up`` starts the
+# memory server the way the engine does (``RarusAI.exe --everos``) and waits for its health answer.
+CHECK_PRELUDE = r"""
+def walk(name, skip=()):
+    import importlib, pkgutil
+    module = importlib.import_module(name)
+    bad = []
+    for info in pkgutil.walk_packages(getattr(module, '__path__', []), name + '.'):
+        parts = info.name.split('.')
+        if any(p in ('tests', 'test', 'testing', '__main__') for p in parts) or info.name.startswith(tuple(skip)):
+            continue
+        try:
+            importlib.import_module(info.name)
+        except ImportError as exc:
+            bad.append(info.name + ': ' + str(exc))
+    assert not bad, bad
+
+
+def everos_up():
+    import os, socket, subprocess, sys, tempfile, time, urllib.request
+    from raven_everos.config import configure_everos_env, ensure_everos_home, set_everos_api
+    root = tempfile.mkdtemp(prefix='everos-check-')
+    configure_everos_env(root)
+    ensure_everos_home(root)
+    probe = socket.socket()
+    probe.bind(('127.0.0.1', 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    set_everos_api(host='127.0.0.1', port=port)
+    # The address and the model travel the way the engine sends the roles (EVEROS_<SECTION>__<KEY>).
+    env = dict(os.environ, EVEROS_API__HOST='127.0.0.1', EVEROS_API__PORT=str(port), EVEROS_LLM__MODEL='check',
+               EVEROS_LLM__BASE_URL='http://127.0.0.1:9/v1', EVEROS_LLM__API_KEY='placeholder-not-a-key',
+               PYTHONIOENCODING='utf-8')
+    log = open(os.path.join(root, 'server.log'), 'w')
+    server = subprocess.Popen([sys.executable, '--everos', 'server', 'start', '--root', root], stdout=log, stderr=log, env=env)
+    try:
+        for _ in range(120):
+            try:
+                if urllib.request.urlopen('http://127.0.0.1:%d/health' % port, timeout=2).status == 200:
+                    return
+            except OSError:
+                pass
+            if server.poll() is not None:
+                break
+            time.sleep(1)
+        log.close()
+        tail = open(os.path.join(root, 'server.log'), encoding='utf-8', errors='replace').read()[-3000:]
+        raise AssertionError('the memory server did not answer: ' + tail)
+    finally:
+        server.kill()
+
+
+"""
+
+
 def smoke(entries: list[dict], dist: Path, zips: Path, scratch: Path) -> None:
     """Unpack every built component into a scratch home and run each ``check`` in the frozen program."""
     if scratch.exists():
@@ -278,6 +340,7 @@ def smoke(entries: list[dict], dist: Path, zips: Path, scratch: Path) -> None:
             continue
         out = scratch / f"check-{entry['id']}.txt"
         wrapped = (
+            CHECK_PRELUDE +
             "import traceback\n"
             f"try:\n" + "".join(f"    {line}\n" for line in code.splitlines()) +
             f"    open({str(out)!r}, 'w', encoding='utf-8').write('ok')\n"

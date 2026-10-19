@@ -16,7 +16,10 @@
       "packages": [
         "engine/plugins-dist/everos-memory"
       ],
-      "check": "import raven_everos.backend, raven_everos.server, everos.entrypoints.cli.main"
+      "whole": [
+        "starlette"
+      ],
+      "check": "walk('raven_everos')\neveros_up()"
     },
     {
       "id": "documents",
@@ -77,7 +80,7 @@
       "packages": [
         "engine/plugins-dist/ppt-engine"
       ],
-      "check": "import raven_ppt, pptx, fitz, pypdfium2, matplotlib, raven_ppt.tools.fetch"
+      "check": "import pptx, fitz, pypdfium2, matplotlib\nwalk('raven_ppt')"
     },
     {
       "id": "design",
@@ -96,7 +99,7 @@
       "packages": [
         "engine/plugins-dist/design-engine[render]"
       ],
-      "check": "import raven_design, fitz, pypdfium2"
+      "check": "import fitz, pypdfium2\nwalk('raven_design', skip=('raven_design.rendering.uno_spreadsheet_worker',))"
     },
     {
       "id": "messengers",
@@ -112,7 +115,7 @@
       "packages": [
         "raven[channels]"
       ],
-      "check": "import telegram, slack_sdk, websockets, lark_oapi"
+      "check": "import telegram, slack_sdk, websockets, lark_oapi\nwalk('raven.channels', skip=('raven.channels.adapters.matrix',))"
     }
   ]
 }

@@ -145,3 +145,19 @@ def test_a_frozen_program_execing_itself_continues_in_the_same_process(tmp_path,
     assert stop.value.code == 0
     assert out.read_text(encoding="utf-8") == "in place"
     assert calls == [("C:/Windows/notepad.exe", ["notepad"])]
+
+
+def test_on_windows_the_streams_speak_utf8(monkeypatch) -> None:
+    """The code page could not print what EverOS prints, nor read a Russian prompt."""
+    import io
+
+    streams = {name: io.TextIOWrapper(io.BytesIO(), encoding="cp1251") for name in ("stdin", "stdout", "stderr")}
+    monkeypatch.setattr(sys, "platform", "win32")
+    for name, stream in streams.items():
+        monkeypatch.setattr(sys, name, stream)
+    monkeypatch.delenv("PYTHONIOENCODING", raising=False)
+
+    entry._utf8_streams()
+
+    assert {s.encoding for s in streams.values()} == {"utf-8"}
+    assert os.environ["PYTHONIOENCODING"] == "utf-8"

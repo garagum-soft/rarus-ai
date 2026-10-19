@@ -3,6 +3,8 @@
 # packaging/scripts/build.ps1, inside the build venv that has the engine wheel, the shell and
 # PyInstaller installed -- the wheel, not the checkout, so the page (raven/ui/dist), the templates
 # and the data files the hatch hook maps in are the ones that ship.
+import importlib.util
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
@@ -22,6 +24,20 @@ for tree in ("agents", "templates"):
     datas += collect_data_files("raven", include_py_files=True, subdir=tree)
 hiddenimports += collect_submodules("rarus_app")
 datas += collect_data_files("rarus_app")
+
+# The whole standard library, not only what the engine itself imports: the components, the agents and
+# the scripts a person runs import whatever they need of it (the deck engine wanted ``filecmp``), and the
+# frozen program is the only Python they have. Test suites and GUI toolkits stay out.
+_STDLIB_OUT = ("test", "idlelib", "tkinter", "turtle", "turtledemo", "lib2to3", "ensurepip", "venv", "pydoc_data")
+for _name in sorted(sys.stdlib_module_names):
+    if _name.startswith("_") or _name in _STDLIB_OUT or _name in ("this", "antigravity"):
+        continue
+    _spec = importlib.util.find_spec(_name)
+    if _spec is None:  # POSIX-only modules
+        continue
+    hiddenimports.append(_name)
+    if _spec.submodule_search_locations:
+        hiddenimports += collect_submodules(_name, filter=lambda n: ".test" not in n and "idle_test" not in n)
 
 # Libraries that find their own data or native pieces at run time.
 for package in ("litellm", "tiktoken", "tiktoken_ext", "lancedb", "onnxruntime", "certifi", "mcp"):

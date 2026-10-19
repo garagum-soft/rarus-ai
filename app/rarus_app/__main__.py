@@ -30,6 +30,24 @@ def _give_streams_a_sink() -> None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 -- lives as long as the process
 
 
+def _utf8_streams() -> None:
+    """UTF-8 on the standard streams, as the engine's own CLI sets them (raven/cli/commands.py).
+
+    A frozen program's streams start in the Windows code page, which cannot write most of what EverOS
+    and the agents print (a rich help screen died on an arrow), nor read a Russian prompt correctly.
+    """
+    if sys.platform != "win32":
+        return
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+
 def python_call(args: list[str]) -> list[str] | None:
     """What follows the interpreter options when ``args`` is a python command line, else None."""
     i = 0
@@ -118,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         # ``rarus``/``raven``: the gateway restarts itself as ``<python> <its argv>``.
         _activate_components()
         _give_streams_a_sink()
+        _utf8_streams()
         from raven.cli.entry import run
 
         sys.argv = ["rarus", *args[1:]]
@@ -126,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     if args[:1] == ["--everos"]:
         _activate_components()
         _give_streams_a_sink()
+        _utf8_streams()
         from everos.entrypoints.cli.main import app
 
         sys.argv = ["everos", *args[1:]]
@@ -135,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     if rest is not None:
         _activate_components()
         _give_streams_a_sink()
+        _utf8_streams()
         run_python(rest)
         return 0
     from rarus_app.main import run_app
