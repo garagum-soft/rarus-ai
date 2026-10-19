@@ -2297,6 +2297,24 @@ class OrgMemberRow(_Strict):
     reports_to: str | None = None
     department: str = ""
     title: str = ""
+    company: str = ""
+    avatar: str = ""
+
+
+class OrgDepartmentRow(_Strict):
+    name: str
+    head: str = ""
+    background: str = ""
+
+
+class OrgCompanyRow(_Strict):
+    id: str
+    name: str
+    logo: str = ""
+    head: str = ""
+    frozen: bool = False
+    background: str = ""
+    departments: list[OrgDepartmentRow] = []
 
 
 class OrgGetParams(_Strict):
@@ -2305,15 +2323,18 @@ class OrgGetParams(_Strict):
 
 class OrgGetResult(_Strict):
     members: list[OrgMemberRow]
+    companies: list[OrgCompanyRow]
     max_depth: int
 
 
 class OrgSetParams(_Strict):
     members: list[OrgMemberRow]
+    companies: list[OrgCompanyRow] | None = None
 
 
 class OrgSetResult(_Strict):
     members: list[OrgMemberRow]
+    companies: list[OrgCompanyRow]
     max_depth: int
 
 

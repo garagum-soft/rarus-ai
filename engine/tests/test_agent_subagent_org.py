@@ -218,3 +218,74 @@ def test_the_manager_takes_its_chart_from_the_config_rows(tmp_path: Path) -> Non
     assert mgr.org_chart().manager_of("Dev") == "Lead"
     mgr.apply_org([OrgMember("a", "b"), OrgMember("b", "a")])
     assert not mgr.org_chart(), "a set of rows that is not a forest leaves the roster flat"
+
+
+class TestCompanies:
+    """Who may hand work to whom inside a company (the agent canvas, 2026-10-19)."""
+
+    def _chart(self, frozen=False):
+        rows = [
+            {"name": "ceo", "company": "c1"},
+            {"name": "pm", "company": "c1", "reports_to": "ceo"},
+            {"name": "devlead", "company": "c1", "department": "Dev", "reports_to": "ceo"},
+            {"name": "dev", "company": "c1", "department": "Dev", "reports_to": "devlead"},
+            {"name": "qa", "company": "c1", "department": "QA"},
+            {"name": "other", "company": "c2"},
+            {"name": "loner"},
+        ]
+        companies = [
+            {"id": "c1", "name": "Acme", "head": "ceo", "frozen": frozen,
+             "departments": [{"name": "Dev", "head": "devlead"}, {"name": "QA", "head": ""}]},
+            {"id": "c2", "name": "Other"},
+        ]
+        return OrgChart.from_rows(rows, companies)
+
+    def test_a_department_talks_inside_itself(self) -> None:
+        chart = self._chart()
+        assert chart.may_talk("dev", "devlead") and chart.may_talk("devlead", "dev")
+
+    def test_the_company_level_the_head_and_department_heads_talk_to_each_other(self) -> None:
+        chart = self._chart()
+        assert chart.may_talk("ceo", "pm") and chart.may_talk("pm", "devlead") and chart.may_talk("devlead", "ceo")
+
+    def test_a_department_member_does_not_talk_past_its_head(self) -> None:
+        chart = self._chart()
+        assert not chart.may_talk("dev", "pm") and not chart.may_talk("ceo", "dev") and not chart.may_talk("dev", "qa")
+        assert "devlead" in chart.refusal_for_assign("pm", "dev")
+
+    def test_work_does_not_cross_companies_or_leave_one(self) -> None:
+        chart = self._chart()
+        assert "one company" in chart.refusal_for_assign("ceo", "other")
+        assert "one company" in chart.refusal_for_assign("loner", "pm")
+
+    def test_assigning_inside_a_company_follows_who_talks_to_whom(self) -> None:
+        chart = self._chart()
+        assert chart.refusal_for_assign("pm", "devlead") is None
+        assert chart.refusal_for_assign("devlead", "dev") is None
+        assert chart.talks_with("devlead") == ["ceo", "dev", "pm"]
+
+    def test_a_frozen_company_takes_no_work(self) -> None:
+        chart = self._chart(frozen=True)
+        assert "frozen" in chart.refusal_for_target("dev")
+        assert "frozen" in chart.refusal_for_assign("devlead", "dev")
+        assert chart.refusal_for_target("other") is None and chart.refusal_for_target("loner") is None
+
+    def test_members_outside_companies_keep_the_reporting_rule(self) -> None:
+        chart = OrgChart.from_rows([{"name": "a"}, {"name": "b", "reports_to": "a"}])
+        assert chart.refusal_for_assign("a", "b") is None
+        assert chart.refusal_for_assign("b", "a") is not None
+
+
+class TestCompaniesInTheConfig:
+    def test_a_membership_in_a_missing_company_or_department_is_dropped_not_fatal(self) -> None:
+        cfg = SubagentsConfig.model_validate({
+            "org": [
+                {"name": "a", "company": "ghost"},
+                {"name": "b", "company": "c1", "department": "Nope"},
+                {"name": "c", "company": "c1", "department": "Dev"},
+            ],
+            "companies": [{"id": "c1", "name": "Acme", "head": "zed", "departments": [{"name": "Dev", "head": "c"}]}],
+        })
+        rows = {r.name: r for r in cfg.org}
+        assert (rows["a"].company, rows["b"].department, rows["c"].department) == ("", "", "Dev")
+        assert cfg.companies[0].head == "" and cfg.companies[0].departments[0].head == "c"

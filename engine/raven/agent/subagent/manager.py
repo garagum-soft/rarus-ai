@@ -306,6 +306,7 @@ class SubagentManager:
         retry_after_output: bool = False,
         provider_pool: ProviderPool | None = None,
         org: Sequence[Any] = (),
+        companies: Sequence[Any] = (),
         teams: Sequence[Any] = (),
         rate_limit_wait_max_s: float = 0.0,
     ):
@@ -446,7 +447,7 @@ class SubagentManager:
         self._configs = list(agents or [])
         self.registry.apply(self._configs)
         self._org = OrgChart()
-        self.apply_org(org)
+        self.apply_org(org, companies)
         # Per-team budgets and slots on top of the per-session ones; empty when
         # no teams are configured, which leaves dispatch exactly as it was.
         try:
@@ -749,10 +750,10 @@ class SubagentManager:
         """The reporting structure this manager was built with; empty for a flat roster."""
         return self._org
 
-    def apply_org(self, rows: Sequence[Any]) -> None:
+    def apply_org(self, rows: Sequence[Any], companies: Sequence[Any] = ()) -> None:
         """Replace the reporting structure; a set of rows that is not a forest leaves the roster flat."""
         try:
-            self._org = OrgChart.from_rows(rows)
+            self._org = OrgChart.from_rows(rows, companies)
         except OrgChartError as exc:
             logger.warning("The org chart is not usable; treating the roster as flat: {}", exc)
             self._org = OrgChart()

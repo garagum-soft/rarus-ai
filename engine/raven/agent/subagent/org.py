@@ -5,6 +5,12 @@ without a manager is a head. A manager may assign work to anyone below it, at an
 depth, and to nobody else; what a member may look at is its own line of command
 and everything below it. The chart is plain data built from the ``subagents.org``
 config rows, so a roster that configures none behaves exactly as before.
+
+Members can also be grouped into companies and their departments
+(``subagents.companies``, drawn on the agent canvas). Inside a company the rule is who
+talks to whom rather than who is above whom: members of one department talk to each
+other; members at the company level, the company head and the department heads talk to
+each other; nobody talks across companies; a frozen company takes no work at all.
 """
 
 from __future__ import annotations
@@ -20,6 +26,20 @@ class OrgMember:
     reports_to: str | None = None
     department: str = ""
     title: str = ""
+    company: str = ""
+
+
+@dataclass(frozen=True)
+class OrgCompany:
+    id: str
+    name: str
+    head: str = ""
+    frozen: bool = False
+    #: Department name to its head ("" when it has none).
+    departments: tuple[tuple[str, str], ...] = ()
+
+    def department_head(self, department: str) -> str:
+        return dict(self.departments).get(department, "")
 
 
 class OrgChartError(ValueError):
@@ -29,7 +49,8 @@ class OrgChartError(ValueError):
 class OrgChart:
     """An immutable, validated reporting structure."""
 
-    def __init__(self, members: Iterable[OrgMember] = ()) -> None:
+    def __init__(self, members: Iterable[OrgMember] = (), companies: Iterable[OrgCompany] = ()) -> None:
+        self._companies = {c.id: c for c in companies}
         by_name: dict[str, OrgMember] = {}
         for member in members:
             if member.name in by_name:
@@ -57,19 +78,37 @@ class OrgChart:
                 current = by_name[current].reports_to
 
     @classmethod
-    def from_rows(cls, rows: Iterable[Mapping[str, Any] | Any]) -> "OrgChart":
+    def from_rows(
+        cls, rows: Iterable[Mapping[str, Any] | Any], companies: Iterable[Mapping[str, Any] | Any] = ()
+    ) -> "OrgChart":
         members = []
         for row in rows:
-            get = row.get if isinstance(row, Mapping) else lambda key, default=None, _r=row: getattr(_r, key, default)
+            get = _getter(row)
             members.append(
                 OrgMember(
                     name=str(get("name")),
                     reports_to=get("reports_to") or None,
                     department=str(get("department") or ""),
                     title=str(get("title") or ""),
+                    company=str(get("company") or ""),
                 )
             )
-        return cls(members)
+        groups = []
+        for raw in companies:
+            get = _getter(raw)
+            departments = tuple(
+                (str(_getter(d)("name") or ""), str(_getter(d)("head") or "")) for d in (get("departments") or ())
+            )
+            groups.append(
+                OrgCompany(
+                    id=str(get("id") or ""),
+                    name=str(get("name") or ""),
+                    head=str(get("head") or ""),
+                    frozen=bool(get("frozen")),
+                    departments=departments,
+                )
+            )
+        return cls(members, groups)
 
     def __bool__(self) -> bool:
         return bool(self._members)
@@ -119,6 +158,40 @@ class OrgChart:
     def may_assign(self, actor: str, target: str) -> bool:
         return target in self.subordinates(actor)
 
+    def company_of(self, name: str) -> OrgCompany | None:
+        member = self._members.get(name)
+        return self._companies.get(member.company) if member and member.company else None
+
+    def companies(self) -> list[OrgCompany]:
+        return sorted(self._companies.values(), key=lambda c: c.name)
+
+    def _outward(self, member: OrgMember, company: OrgCompany) -> bool:
+        """At the company level, its head, or a department head: the ones who talk across departments."""
+        if not member.department or company.head == member.name:
+            return True
+        return company.department_head(member.department) == member.name
+
+    def may_talk(self, a: str, b: str) -> bool:
+        """Whether two company members may hand each other work (the module docstring has the rule)."""
+        ma, mb = self._members.get(a), self._members.get(b)
+        if ma is None or mb is None or not ma.company or ma.company != mb.company:
+            return False
+        company = self._companies.get(ma.company)
+        if company is None:
+            return False
+        return ma.department == mb.department or (self._outward(ma, company) and self._outward(mb, company))
+
+    def talks_with(self, name: str) -> list[str]:
+        """Everyone ``name`` may hand work to inside its company."""
+        return sorted(m for m in self._members if m != name and self.may_talk(name, m))
+
+    def refusal_for_target(self, target: str) -> str | None:
+        """Why nobody may hand ``target`` work at all right now (its company is frozen), or ``None``."""
+        company = self.company_of(target)
+        if company is not None and company.frozen:
+            return f"{target!r} works in {company.name!r}, which is frozen; unfreeze it on the agent canvas first"
+        return None
+
     def refusal_for_assign(self, actor: str, target: str) -> str | None:
         """Why ``actor`` may not hand work to ``target``, or ``None`` when it may."""
         if not self:
@@ -129,6 +202,18 @@ class OrgChart:
             return f"{target!r} is not in the org chart"
         if actor == target:
             return f"{actor!r} cannot assign work to itself"
+        if (frozen := self.refusal_for_target(target)) is not None:
+            return frozen
+        actor_company, target_company = self.company_of(actor), self.company_of(target)
+        if actor_company is not None or target_company is not None:
+            if actor_company is None or target_company is None or actor_company.id != target_company.id:
+                return f"{actor!r} and {target!r} are not in one company; work does not cross companies"
+            if self.may_talk(actor, target):
+                return None
+            where = self._members[target].department or self._members[actor].department
+            head = actor_company.department_head(where)
+            via = f" -- go through its head, {head!r}" if head else " -- it has no head yet to carry work across"
+            return f"{target!r} and {actor!r} are not in one department of {actor_company.name!r}{via}"
         if self.may_assign(actor, target):
             return None
         if actor in self.subordinates(target):
@@ -142,4 +227,10 @@ class OrgChart:
         return sorted({actor, *self.chain_of_command(actor), *self.subordinates(actor)})
 
 
-__all__ = ["OrgChart", "OrgChartError", "OrgMember"]
+def _getter(row: Mapping[str, Any] | Any) -> Any:
+    if isinstance(row, Mapping):
+        return row.get
+    return lambda key, default=None, _r=row: getattr(_r, key, default)
+
+
+__all__ = ["OrgChart", "OrgChartError", "OrgCompany", "OrgMember"]

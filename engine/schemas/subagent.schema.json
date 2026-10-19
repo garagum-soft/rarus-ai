@@ -2,7 +2,7 @@
   "$comment": "generated, do not edit; regenerate via: uv run python scripts/export_agent_schemas.py",
   "$defs": {
     "SubagentEngineConfig": {
-      "description": "The engine wheel a folder-discovered agent declares, as\n``{\"package\": \"<import name>\", \"wheel\": \"<distribution name>\"}``.\n\nDeclared by the folder's ``subagent.json`` (the ``raven agents new\n--engine-wheel`` scaffold writes it); readiness probes the package where\nraven runs and lists the row disabled, naming the wheel, until it imports.\nCarried on the config row so a pinned copy of the manifest round-trips the\ndeclaration instead of silently dropping it -- discovery itself keeps\nreading the manifest fresh (``vendored_agents._declared_engine``), so this\nfield changes no merge or readiness semantics.",
+      "description": "The engine wheel a folder-discovered agent declares, as\n``{\"package\": \"<import name>\", \"wheel\": \"<distribution name>\"}``.\n\nDeclared by the folder's ``subagent.json`` (the ``rarus agents new\n--engine-wheel`` scaffold writes it); readiness probes the package where\nraven runs and lists the row disabled, naming the wheel, until it imports.\nCarried on the config row so a pinned copy of the manifest round-trips the\ndeclaration instead of silently dropping it -- discovery itself keeps\nreading the manifest fresh (``vendored_agents._declared_engine``), so this\nfield changes no merge or readiness semantics.",
       "properties": {
         "package": {
           "default": "",

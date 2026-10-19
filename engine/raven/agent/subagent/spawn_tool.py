@@ -505,6 +505,8 @@ class SpawnTool(Tool):
             chart = self._org_chart()
             if (why := chart.refusal_for_assign(assigned_by, subagent or GENERIC_AGENT)) is not None:
                 return f"Error: {why}."
+        elif (why := self._org_chart().refusal_for_target(subagent or GENERIC_AGENT)) is not None:
+            return f"Error: {why}."
         if inputs is not None and not isinstance(inputs, dict):
             return (
                 "Error: `inputs` must be an object keyed by input name -- "

@@ -23,7 +23,7 @@ def _rows(*pairs):
 
 
 async def test_an_empty_chart_is_a_flat_roster():
-    assert await org_get({}) == {"members": [], "max_depth": org_store.MAX_DEPTH}
+    assert await org_get({}) == {"members": [], "companies": [], "max_depth": org_store.MAX_DEPTH}
 
 
 async def test_a_saved_chart_is_read_back_and_written_the_way_the_config_spells_it(tmp_path):
@@ -32,7 +32,9 @@ async def test_a_saved_chart_is_read_back_and_written_the_way_the_config_spells_
     got = await org_get({})
     assert [(m["name"], m["reports_to"]) for m in got["members"]] == [("lead", None), ("dev", "lead"), ("qa", "dev")]
     raw = json.loads((tmp_path / "home" / "config.json").read_text(encoding="utf-8"))
-    assert raw["subagents"]["org"][1] == {"name": "dev", "reportsTo": "lead", "department": "", "title": ""}
+    assert raw["subagents"]["org"][1] == {
+        "name": "dev", "reportsTo": "lead", "department": "", "title": "", "company": "", "avatar": ""
+    }
 
 
 async def test_a_hand_written_camel_case_row_is_read_too(tmp_path):
@@ -41,7 +43,7 @@ async def test_a_hand_written_camel_case_row_is_read_too(tmp_path):
         encoding="utf-8",
     )
     members = (await org_get({}))["members"]
-    assert members[1] == {"name": "b", "reports_to": "a", "department": "", "title": "Dev"}
+    assert members[1] == {"name": "b", "reports_to": "a", "department": "", "title": "Dev", "company": "", "avatar": ""}
 
 
 async def test_the_rest_of_the_config_is_left_alone(tmp_path):
@@ -88,3 +90,66 @@ async def test_the_methods_are_registered():
     register_org_methods(dispatcher)
     reply = await dispatcher.dispatch({"jsonrpc": "2.0", "id": 1, "method": "org.get", "params": {}})
     assert reply["result"]["members"] == []
+
+
+# -- companies and departments (the agent canvas, 2026-10-19) -----------------------------------
+
+def _company(**over):
+    base = {"id": "c1", "name": "Acme", "departments": [{"name": "Dev", "head": ""}]}
+    base.update(over)
+    return base
+
+
+async def test_companies_are_saved_with_the_chart_and_read_back(tmp_path):
+    rows = [
+        {"name": "boss", "company": "c1"},
+        {"name": "lead", "company": "c1", "department": "Dev", "reports_to": "boss", "avatar": "a03"},
+        {"name": "dev", "company": "c1", "department": "Dev", "reports_to": "lead"},
+    ]
+    company = _company(head="boss", departments=[{"name": "Dev", "head": "lead", "background": "wood"}], frozen=True)
+    got = await org_set({"members": rows, "companies": [company]})
+    assert got["companies"][0]["departments"] == [{"name": "Dev", "head": "lead", "background": "wood"}]
+    back = await org_get({})
+    assert back["companies"][0]["head"] == "boss" and back["companies"][0]["frozen"] is True
+    assert back["members"][1]["avatar"] == "a03" and back["members"][1]["company"] == "c1"
+    raw = json.loads((tmp_path / "home" / "config.json").read_text(encoding="utf-8"))
+    assert raw["subagents"]["companies"][0]["id"] == "c1"
+
+
+async def test_a_chart_sent_without_companies_keeps_the_ones_on_file():
+    await org_set({"members": [{"name": "a", "company": "c1"}], "companies": [_company()]})
+    await org_set({"members": [{"name": "a", "company": "c1"}, {"name": "b"}]})
+    assert [c["id"] for c in (await org_get({}))["companies"]] == ["c1"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "companies", "why"),
+    [
+        ([{"name": "a", "company": "ghost"}], [], "not there"),
+        ([{"name": "a", "company": "c1", "department": "Ops"}], [_company()], "has not got"),
+        ([{"name": "a"}], [_company(head="a")], "must work in it"),
+        ([{"name": "a", "company": "c1"}], [_company(departments=[{"name": "Dev", "head": "a"}])], "that department"),
+        ([], [_company(), _company()], "share the id"),
+        ([], [_company(departments=[{"name": "Dev"}, {"name": "Dev"}])], "two departments"),
+        ([], [_company(logo="https://example.com/x.png")], "small picture"),
+        ([], [_company(name="")], "characters"),
+    ],
+)
+async def test_a_membership_that_does_not_add_up_is_refused_and_nothing_is_written(rows, companies, why):
+    with pytest.raises(ConfigValidationError, match=why):
+        await org_set({"members": rows, "companies": companies})
+    assert (await org_get({}))["companies"] == []
+
+
+async def test_a_saved_chart_reaches_the_running_agent():
+    seen = []
+
+    class _Manager:
+        def apply_org(self, members, companies):
+            seen.append(([m["name"] for m in members], [c["id"] for c in companies]))
+
+    class _Loop:
+        subagents = _Manager()
+
+    await org_set({"members": [{"name": "a", "company": "c1"}], "companies": [_company()]}, agent_loop_factory=_Loop)
+    assert seen == [(["a"], ["c1"])]

@@ -2425,6 +2425,39 @@ class OrgMemberConfig(Base):
     reports_to: str | None = None
     department: str = ""
     title: str = ""
+    company: str = ""
+    """The ``id`` of the company in ``subagents.companies`` the member works in; empty for none.
+
+    Inside a company ``department`` names one of that company's departments (empty: the
+    company level); outside one it stays the free label it always was."""
+    avatar: str = ""
+    """The picture the agent canvas shows for the member: an id from the page's own set."""
+
+
+class OrgDepartmentConfig(Base):
+    """A department of a company: a name, its head (a member in it) and the canvas background."""
+
+    name: str
+    head: str = ""
+    background: str = ""
+
+
+class OrgCompanyConfig(Base):
+    """A company on the agent canvas: its members talk inside it, never across companies.
+
+    Members at the company level (no department) talk with each other, with the company head
+    and with the department heads; a department's members talk only inside the department,
+    and its head carries the work across. A frozen company takes no work at all.
+    """
+
+    id: str
+    name: str
+    logo: str = ""
+    """A ``data:image/...`` URL; empty draws the first letter of the name."""
+    head: str = ""
+    frozen: bool = False
+    background: str = ""
+    departments: list[OrgDepartmentConfig] = Field(default_factory=list)
 
 
 class TeamConfig(Base):
@@ -2461,6 +2494,9 @@ class SubagentsConfig(Base):
 
     org: list[OrgMemberConfig] = Field(default_factory=list)
     """The reporting structure over the roster; empty means a flat roster."""
+
+    companies: list[OrgCompanyConfig] = Field(default_factory=list)
+    """The companies and departments the org members are grouped into (the agent canvas)."""
 
     hibernate_after_s: float | None = Field(default=None, ge=60)
     """Close an ACP agent's connection after this many idle seconds; the next request wakes it. Off when unset."""
@@ -2504,7 +2540,35 @@ class SubagentsConfig(Base):
                 current = seen[current].reports_to
         if len(seen) != len(self.org):
             self.org = list(seen.values())
+        self._repair_companies(seen)
         return self
+
+    def _repair_companies(self, members: "dict[str, OrgMemberConfig]") -> None:
+        """Membership that names a company or department that is not there is dropped, with a warning."""
+        companies: dict[str, OrgCompanyConfig] = {}
+        for company in self.companies:
+            if not company.id or company.id in companies:
+                logger.warning("company {!r} has no id or repeats one; ignoring it", company.name)
+                continue
+            companies[company.id] = company
+        if len(companies) != len(self.companies):
+            self.companies = list(companies.values())
+        for row in members.values():
+            if not row.company:
+                continue
+            company = companies.get(row.company)
+            if company is None:
+                logger.warning("org member {!r} is in company {!r}, which is not there; left outside", row.name, row.company)
+                row.company, row.department = "", ""
+            elif row.department and row.department not in {d.name for d in company.departments}:
+                logger.warning("org member {!r} is in department {!r}, which {!r} has not got", row.name, row.department, company.name)
+                row.department = ""
+        for company in companies.values():
+            if company.head and members.get(company.head, None) is None:
+                company.head = ""
+            for department in company.departments:
+                if department.head and members.get(department.head, None) is None:
+                    department.head = ""
 
     @model_validator(mode="after")
     def _dedupe_names(self) -> "SubagentsConfig":

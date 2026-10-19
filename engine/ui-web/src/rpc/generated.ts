@@ -3357,6 +3357,21 @@ export interface OrgGetResult {
     reports_to?: string | null;
     department?: string;
     title?: string;
+    company?: string;
+    avatar?: string;
+  }[];
+  companies: {
+    id: string;
+    name: string;
+    logo?: string;
+    head?: string;
+    frozen?: boolean;
+    background?: string;
+    departments?: {
+      name: string;
+      head?: string;
+      background?: string;
+    }[];
   }[];
   max_depth: number;
 }
@@ -3366,6 +3381,21 @@ export interface OrgSetParams {
     reports_to?: string | null;
     department?: string;
     title?: string;
+    company?: string;
+    avatar?: string;
+  }[];
+  companies?: {
+    id: string;
+    name: string;
+    logo?: string;
+    head?: string;
+    frozen?: boolean;
+    background?: string;
+    departments?: {
+      name: string;
+      head?: string;
+      background?: string;
+    }[];
   }[];
 }
 export interface OrgSetResult {
@@ -3374,6 +3404,21 @@ export interface OrgSetResult {
     reports_to?: string | null;
     department?: string;
     title?: string;
+    company?: string;
+    avatar?: string;
+  }[];
+  companies: {
+    id: string;
+    name: string;
+    logo?: string;
+    head?: string;
+    frozen?: boolean;
+    background?: string;
+    departments?: {
+      name: string;
+      head?: string;
+      background?: string;
+    }[];
   }[];
   max_depth: number;
 }

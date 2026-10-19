@@ -2,7 +2,7 @@
   "$comment": "generated, do not edit; regenerate via: uv run python scripts/export_agent_schemas.py",
   "$defs": {
     "Contributes": {
-      "description": "All contribution arrays for a single manifest.\n\n``memory_backends``, ``tools``, ``hooks``, ``services``, ``tool_gates``,\n``session_observers`` and ``onboard`` are consumed today; the model keeps\nextra fields silently so future contribution types don't break older hosts\nreading newer manifests.",
+      "description": "All contribution arrays for a single manifest.\n\n``memory_backends``, ``tools``, ``hooks``, ``services``, ``tool_gates``,\n``session_observers``, ``onboard`` and ``scheduled`` are consumed today; the\nmodel keeps extra fields silently so future contribution types don't break\nolder hosts reading newer manifests.",
       "properties": {
         "hooks": {
           "items": {
@@ -23,6 +23,13 @@
             "$ref": "#/$defs/OnboardContribution"
           },
           "title": "Onboard",
+          "type": "array"
+        },
+        "scheduled": {
+          "items": {
+            "$ref": "#/$defs/ScheduledHookContribution"
+          },
+          "title": "Scheduled",
           "type": "array"
         },
         "services": {
@@ -118,6 +125,54 @@
         "factory"
       ],
       "title": "OnboardContribution",
+      "type": "object"
+    },
+    "ScheduledHookContribution": {
+      "description": "One ``[[plugin.contributes.scheduled]]`` entry: a hook that fires at a time.\n\n``factory`` is a ``module.path:callable`` resolving to a\n``Callable[[PluginContext], ScheduledHook]`` -- an object with\n``async run(fire: ScheduledFire) -> str | None`` (``raven.plugins.schedule``).\n``cron`` is a five-field cron expression read in ``timezone``. A host that\nwas down across one or more occurrences fires once for the latest of them\n(``missed = \"latest\"``) or not at all until the next (``\"skip\"``).\n\nFiring on its own, with no turn and nobody asking, is a power of its own:\na plugin contributing one needs the ``schedule`` permission\n(``raven.plugins.access``).",
+      "properties": {
+        "cron": {
+          "minLength": 1,
+          "title": "Cron",
+          "type": "string"
+        },
+        "factory": {
+          "minLength": 1,
+          "title": "Factory",
+          "type": "string"
+        },
+        "missed": {
+          "default": "latest",
+          "enum": [
+            "latest",
+            "skip"
+          ],
+          "title": "Missed",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "timeout_s": {
+          "default": 300.0,
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "title": "Timeout S",
+          "type": "number"
+        },
+        "timezone": {
+          "default": "UTC",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "factory",
+        "cron"
+      ],
+      "title": "ScheduledHookContribution",
       "type": "object"
     },
     "ServiceContribution": {

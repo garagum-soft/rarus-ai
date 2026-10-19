@@ -538,6 +538,7 @@ class AgentLoop(TurnPathMixin, WiringMixin, McpGlueMixin, OrganGlueMixin):
             self._default_tier = ""
             loaded = None
         org_rows = list(loaded.subagents.org) if loaded is not None else []
+        company_rows = list(loaded.subagents.companies) if loaded is not None else []
         team_rows = list(loaded.subagents.teams) if loaded is not None else []
         self.subagents = SubagentManager(
             provider=provider,
@@ -565,6 +566,7 @@ class AgentLoop(TurnPathMixin, WiringMixin, McpGlueMixin, OrganGlueMixin):
             rate_limit_wait_max_s=self._recovery_limits.rate_limit_wait_max_s,
             provider_pool=self._provider_pool,
             org=org_rows,
+            companies=company_rows,
             teams=team_rows,
         )
         # Reads the live direct chats through a lambda for the reason the identity

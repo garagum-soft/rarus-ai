@@ -3438,7 +3438,7 @@
     {
       "name": "org.get",
       "summary": "The reporting structure (subagents.org) the agent canvas draws.",
-      "description": "Rows as the config holds them (name, reports_to, department, title) and the deepest level the chart allows.",
+      "description": "Rows as the config holds them (name, reports_to, department, title, company, avatar), the companies and departments they are grouped into, and the deepest level the chart allows.",
       "params": [],
       "result": {
         "name": "OrgGetResult",
@@ -3447,6 +3447,7 @@
           "additionalProperties": false,
           "required": [
             "members",
+            "companies",
             "max_depth"
           ],
           "properties": {
@@ -3468,9 +3469,67 @@
                   },
                   "title": {
                     "type": "string"
+                  },
+                  "company": {
+                    "type": "string"
+                  },
+                  "avatar": {
+                    "type": "string"
                   }
                 },
                 "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "companies": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "logo": {
+                    "type": "string"
+                  },
+                  "head": {
+                    "type": "string"
+                  },
+                  "frozen": {
+                    "type": "boolean"
+                  },
+                  "background": {
+                    "type": "string"
+                  },
+                  "departments": {
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "head": {
+                          "type": "string"
+                        },
+                        "background": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
                   "name"
                 ],
                 "type": "object"
@@ -3487,8 +3546,8 @@
     },
     {
       "name": "org.set",
-      "summary": "Replace the reporting structure; refused whole when it is not a forest of at most max_depth levels.",
-      "description": "A cycle, a manager outside the chart, a row reporting to itself or a chart deeper than max_depth is refused with a config validation error and nothing is written.",
+      "summary": "Replace the reporting structure and the companies; refused whole when it is not a forest of at most max_depth levels or a membership does not add up.",
+      "description": "A cycle, a manager outside the chart, a row reporting to itself, a chart deeper than max_depth, a member in a company or department that is not there, or a head that does not work where it heads is refused with a config validation error and nothing is written. Without companies the ones on file are kept.",
       "params": [
         {
           "name": "members",
@@ -3511,9 +3570,71 @@
                 },
                 "title": {
                   "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "avatar": {
+                  "type": "string"
                 }
               },
               "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "name": "companies",
+          "required": false,
+          "schema": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "logo": {
+                  "type": "string"
+                },
+                "head": {
+                  "type": "string"
+                },
+                "frozen": {
+                  "type": "boolean"
+                },
+                "background": {
+                  "type": "string"
+                },
+                "departments": {
+                  "type": "array",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "head": {
+                        "type": "string"
+                      },
+                      "background": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "id",
                 "name"
               ],
               "type": "object"
@@ -3529,6 +3650,7 @@
           "additionalProperties": false,
           "required": [
             "members",
+            "companies",
             "max_depth"
           ],
           "properties": {
@@ -3550,9 +3672,67 @@
                   },
                   "title": {
                     "type": "string"
+                  },
+                  "company": {
+                    "type": "string"
+                  },
+                  "avatar": {
+                    "type": "string"
                   }
                 },
                 "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "companies": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "logo": {
+                    "type": "string"
+                  },
+                  "head": {
+                    "type": "string"
+                  },
+                  "frozen": {
+                    "type": "boolean"
+                  },
+                  "background": {
+                    "type": "string"
+                  },
+                  "departments": {
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "head": {
+                          "type": "string"
+                        },
+                        "background": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
                   "name"
                 ],
                 "type": "object"

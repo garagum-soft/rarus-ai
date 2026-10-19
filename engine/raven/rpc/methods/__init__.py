@@ -149,7 +149,7 @@ def register_aligned_methods_except_system(
     register_cli_methods(dispatcher, confirm_broker=confirm_broker)
     register_setup_methods(dispatcher)
     register_rarus_methods(dispatcher)
-    register_org_methods(dispatcher)
+    register_org_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_import_methods(dispatcher)
     register_reload_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_config_methods(dispatcher, agent_loop_factory=agent_loop_factory, ensure_stack=ensure_stack)
