@@ -25,6 +25,11 @@ class Bridge:
     def __init__(self, controller: Controller, quit_app: Any) -> None:
         self._controller = controller
         self._quit = quit_app
+        self._window: Any = None
+
+    def attach(self, window: Any) -> None:
+        """The window this bridge serves; private, so pywebview does not offer it to the page."""
+        self._window = window
 
     def boot(self) -> dict[str, Any]:
         return self._controller.boot()
@@ -72,6 +77,32 @@ class Bridge:
             threading.Timer(QUIT_DELAY_S, self._quit).start()
         return result
 
+    def components_view(self, lang: str = "ru") -> dict[str, Any]:
+        return self._controller.components_view(str(lang or "ru"))
+
+    def components_install(self, choices: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._controller.components_install(choices if isinstance(choices, dict) else {})
+
+    def components_status(self) -> dict[str, Any]:
+        return self._controller.components_status()
+
+    def components_cancel(self) -> None:
+        self._controller.components_cancel()
+
+    def components_finish(self) -> dict[str, Any]:
+        return self._controller.components_finish()
+
+    def components_restart(self) -> dict[str, Any]:
+        """Restart the engine so it loads what was installed, and take the window back to the start page.
+
+        The start page waits for the engine and opens the page again; the engine page cannot do this
+        itself, because the engine it is talking to is the one going away.
+        """
+        self._controller.restart_engine()
+        if self._window is not None:
+            self._window.load_url(str(start_page()))
+        return {"ok": True}
+
     def quit(self) -> None:
         self._quit()
 
@@ -94,10 +125,11 @@ def run_window(controller: Controller, *, hidden: bool = False) -> int:
         for window in list(webview.windows):
             window.destroy()
 
+    bridge = Bridge(controller, quit_app)
     window = webview.create_window(
         APP_NAME,
         url=str(start_page()),
-        js_api=Bridge(controller, quit_app),
+        js_api=bridge,
         width=1280,
         height=820,
         min_size=(900, 600),
@@ -112,9 +144,13 @@ def run_window(controller: Controller, *, hidden: bool = False) -> int:
         return False
 
     window.events.closing += on_closing
+    bridge.attach(window)
 
     state["tray"] = _make_tray(show=window.show, quit_app=quit_app)
-    controller.start_engine()
+    # On the first start the start page lists the components first and starts the engine itself
+    # once they are answered (Controller.components_finish), so the engine loads them right away.
+    if not controller.components_pending():
+        controller.start_engine()
     webview.start()
     return 0
 

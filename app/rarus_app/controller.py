@@ -7,7 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rarus_app import __version__, account, autostart, updater
+from rarus_app import __version__, account, autostart, components, updater
+from rarus_app.component_paths import components_dir, read_state
 from rarus_app.engine import Engine, EngineError
 from rarus_app.paths import app_home
 
@@ -18,7 +19,13 @@ ONBOARDED_MARK = "onboarded"
 class Controller:
     """State machine behind the start page: starting -> sign-in (if needed) -> ready."""
 
-    def __init__(self, *, engine_factory: Callable[[], Engine] = Engine, open_browser: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        engine_factory: Callable[[], Engine] = Engine,
+        open_browser: bool = True,
+        installer: components.Installer | None = None,
+    ) -> None:
         self._engine_factory = engine_factory
         self._open_browser = open_browser
         self._engine: Engine | None = None
@@ -29,19 +36,30 @@ class Controller:
         self._update: dict[str, Any] = {"state": "idle"}
         self._update_release: updater.Release | None = None
         self._update_path: Path | None = None
+        self._components = installer or components.Installer(components.load_catalogue())
+        self._components_removed = False
+        self._engine_started = False
 
     # -- engine ----------------------------------------------------------------
 
     def start_engine(self, *, wait: bool = False) -> None:
         """Start the engine in the background (the window is already on screen)."""
+        self._engine_started = True
+        self._engine_ready.clear()
 
         def work() -> None:
             try:
                 account.first_run_language()
+                if not self._components.busy():
+                    try:
+                        components.sweep(self._components.catalogue)
+                    except OSError:
+                        pass
                 engine = self._engine_factory()
                 engine.start()
                 with self._lock:
                     self._engine = engine
+                self.components_background()
             except (EngineError, OSError) as exc:
                 with self._lock:
                     self._engine_error = str(exc)
@@ -60,6 +78,16 @@ class Controller:
             engine.stop()
         if self._sign_in is not None:
             self._sign_in.cancel()
+
+    def restart_engine(self) -> None:
+        """Stop the engine and start it again in the background, so it loads the components now installed."""
+        with self._lock:
+            engine, self._engine = self._engine, None
+            self._engine_error = ""
+        self._engine_ready.clear()
+        if engine is not None:
+            engine.stop()
+        self.start_engine()
 
     def engine_alive(self) -> bool:
         with self._lock:
@@ -125,6 +153,98 @@ class Controller:
     def set_autostart(self, enabled: bool) -> bool:
         autostart.set_enabled(bool(enabled))
         return autostart.is_enabled()
+
+    # -- components: what is downloaded after install (rarus_app/components.py) ----------------
+
+    def _choices(self, state: dict[str, Any]) -> dict[str, bool]:
+        raw = state.get("choices")
+        return {str(k): bool(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+    def components_pending(self) -> bool:
+        """True while the list has never been answered: the start page shows it before anything else."""
+        return bool(self._components.catalogue.components) and not read_state(components_dir()).get("decided")
+
+    def components_view(self, lang: str = "ru") -> dict[str, Any]:
+        """The listed components (hidden ones are not), each with its switch, for the start and settings pages."""
+        state = read_state(components_dir())
+        choices = self._choices(state)
+        wanted_ids = {c.id for c in components.wanted(self._components.catalogue, choices)}
+        items, hidden_bytes = [], 0
+        for item in self._components.catalogue.components:
+            installed = components.is_installed(item, state)
+            if item.setup == "hidden":
+                hidden_bytes += 0 if installed else item.size
+                continue
+            items.append(
+                {
+                    "id": item.id,
+                    "setup": item.setup,
+                    **item.text(lang),
+                    "size": item.size,
+                    "unpacked": item.unpacked,
+                    "requires": list(item.requires),
+                    "installed": installed,
+                    "on": item.id in wanted_ids,
+                }
+            )
+        return {
+            "pending": self.components_pending(),
+            "items": items,
+            "hidden_bytes": hidden_bytes,
+            "status": self._components.status(),
+        }
+
+    def components_install(self, choices: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Save the switches, drop what was switched off, and queue whatever is wanted and missing."""
+        root = components_dir()
+        state = read_state(root)
+        merged = self._choices(state)
+        for key, value in (choices or {}).items():
+            item = self._components.catalogue.get(str(key))
+            if item is not None and item.setup in ("optional", "off"):
+                merged[item.id] = bool(value)
+        state["choices"] = merged
+        components.write_state(state, root)
+        wanted = components.wanted(self._components.catalogue, merged)
+        wanted_ids = {c.id for c in wanted}
+        self._components_removed = False
+        for item in self._components.catalogue.components:
+            if item.id not in wanted_ids and item.id in (read_state(root).get("components") or {}):
+                components.remove(item.id, root)
+                self._components_removed = True
+        state = read_state(root)
+        missing = [c for c in wanted if not components.is_installed(c, state, root)]
+        return self._components.start(missing)
+
+    def components_status(self) -> dict[str, Any]:
+        return self._components.status()
+
+    def components_cancel(self) -> None:
+        self._components.cancel()
+
+    def components_finish(self) -> dict[str, Any]:
+        """The list is answered: remember that, and start the engine -- or restart it to load what changed."""
+        root = components_dir()
+        state = read_state(root)
+        state["decided"] = True
+        components.write_state(state, root)
+        if not self._engine_started:
+            self.start_engine()
+            return {"ok": True, "restarted": False}
+        changed = self._components.status().get("installed_any") or self._components_removed
+        if changed:
+            self.restart_engine()
+        return {"ok": True, "restarted": bool(changed)}
+
+    def components_background(self) -> None:
+        """Fetch, without asking, what is wanted but missing: hidden parts, or a component an update changed."""
+        if self.components_pending() or self._components.busy():
+            return
+        state = read_state(components_dir())
+        wanted = components.wanted(self._components.catalogue, self._choices(state))
+        missing = [c for c in wanted if not components.is_installed(c, state)]
+        if missing:
+            self._components.start(missing)
 
     def update_check(self) -> dict[str, Any]:
         try:

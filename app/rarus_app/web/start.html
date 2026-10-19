@@ -6,8 +6,8 @@
 <title>Rarus AI</title>
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --line: #272b35; --text: #e8eaf0; --muted: #98a0b3;
-    --accent: #5b8cff; --accent-text: #ffffff; --danger: #ff6b6b;
+    --bg: #0f1115; --panel: #171a21; --raised: #1d212a; --line: #272b35; --text: #e8eaf0; --muted: #98a0b3;
+    --accent: #f2a35a; --accent-text: #1a1206; --accent-soft: rgba(242, 163, 90, .16); --danger: #ff6b6b; --ok: #5fd08a;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
@@ -15,28 +15,94 @@
   main { min-height: 100%; display: grid; place-items: center; padding: 24px; }
   .card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
     border-radius: 14px; padding: 32px 28px; text-align: center; }
+  .card.wide { width: min(640px, 100%); text-align: left; padding: 28px; }
+  .logo { display: block; width: 64px; height: 64px; margin: 0 auto 14px; }
   h1 { font-size: 22px; margin: 0 0 8px; }
+  .wide h1 { text-align: center; }
   p { margin: 0 0 20px; color: var(--muted); }
+  .wide > p { text-align: center; }
   button { font: inherit; border: 0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
-    background: var(--accent); color: var(--accent-text); }
-  button.quiet { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.quiet { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 400; }
   button:disabled { opacity: .6; cursor: default; }
   .error { color: var(--danger); margin-top: 16px; min-height: 1.4em; }
   .spinner { width: 28px; height: 28px; margin: 0 auto 18px; border-radius: 50%;
     border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   [hidden] { display: none !important; }
+
+  .list { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; max-height: 52vh; overflow: auto; }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .row .name { font-weight: 600; }
+  .row .about { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .chip { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    margin-left: 6px; vertical-align: 2px; background: var(--accent-soft); color: var(--accent); }
+  .chip.done { background: rgba(95, 208, 138, .14); color: var(--ok); }
+  .size { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(18px); }
+  .switch input:disabled { cursor: default; }
+  .switch input:disabled + span { opacity: .55; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .foot .total { color: var(--muted); font-size: 13px; }
+  .foot .buttons { display: flex; gap: 8px; }
+
+  .bar { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; margin: 6px 0 4px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .item .line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); }
+  .item.failed .line { color: var(--danger); }
+  .item.done .bar i { background: var(--ok); }
+  .overall { margin: 0 0 14px; }
+  .overall .line { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
 <main>
   <section class="card" id="starting">
+    <img class="logo" src="../rarus-icon.png" alt="">
     <div class="spinner"></div>
     <h1>Rarus AI</h1>
     <p>Запускаем программу…</p>
   </section>
 
+  <section class="card wide" id="components" hidden>
+    <img class="logo" src="../rarus-icon.png" alt="">
+    <h1>Компоненты Rarus AI</h1>
+    <p>Они скачаются с нашего сервера. Снимите отметку с ненужного — включить или выключить можно и потом, в настройках.</p>
+    <div class="list" id="comp-list"></div>
+    <div class="foot">
+      <span class="total" id="comp-total"></span>
+      <div class="buttons"><button id="comp-go">Установить</button></div>
+    </div>
+  </section>
+
+  <section class="card wide" id="installing" hidden>
+    <img class="logo" src="../rarus-icon.png" alt="">
+    <h1 id="inst-title">Устанавливаем компоненты</h1>
+    <div class="overall">
+      <div class="line"><span id="inst-count"></span><span id="inst-eta"></span></div>
+      <div class="bar"><i id="inst-bar"></i></div>
+    </div>
+    <div class="list" id="inst-list"></div>
+    <div class="error" id="inst-note"></div>
+    <div class="foot">
+      <span class="total"></span>
+      <div class="buttons">
+        <button class="quiet" id="inst-cancel">Отмена</button>
+        <button class="quiet" id="inst-skip" hidden>Продолжить без них</button>
+        <button id="inst-retry" hidden>Повторить</button>
+      </div>
+    </div>
+  </section>
+
   <section class="card" id="signin" hidden>
+    <img class="logo" src="../rarus-icon.png" alt="">
     <h1>Вход в Rarus AI</h1>
     <p>Откроется страница входа в браузере. Войдите так же, как на сайте, — и вернитесь сюда.</p>
     <button id="signin-go">Войти</button>
@@ -70,17 +136,173 @@
     for (const el of document.querySelectorAll("main > section")) el.hidden = el.id !== id;
   };
   const api = () => window.pywebview && window.pywebview.api;
+  const $ = (id) => document.getElementById(id);
   let signing = false;
 
   async function boot() {
     const state = await api().boot();
     if (state.phase === "ready") { window.location.href = state.url; return; }
     if (state.phase === "error") {
-      document.getElementById("failed-text").textContent = state.error;
+      $("failed-text").textContent = state.error;
       show("failed"); return;
     }
     if (state.phase === "signin" && !signing) show("signin");
     setTimeout(boot, 400);
+  }
+
+  // -- components: the first start lists them before anything else (rarus_app/components.py) --
+  const mb = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " ГБ" : Math.max(1, Math.round(n / 1e6)) + " МБ");
+  let view = null;
+  const choice = {};
+  let titles = {};
+
+  function dependents(id) {
+    return view.items.filter((i) => i.requires.includes(id)).map((i) => i.id);
+  }
+
+  function setChoice(id, on) {
+    choice[id] = on;
+    const item = view.items.find((i) => i.id === id);
+    if (on) for (const need of item.requires) if (choice[need] === false) setChoice(need, true);
+    if (!on) for (const dep of dependents(id)) if (choice[dep]) setChoice(dep, false);
+  }
+
+  function drawList() {
+    const list = $("comp-list");
+    list.textContent = "";
+    let total = view.hidden_bytes;
+    for (const item of view.items) {
+      const locked = item.setup === "locked";
+      const on = locked || choice[item.id];
+      if (on && !item.installed) total += item.size;
+      const row = document.createElement("div");
+      row.className = "row";
+      const text = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = item.title;
+      const chip = document.createElement("span");
+      chip.className = "chip" + (item.installed ? " done" : "");
+      chip.textContent = item.installed ? "Установлен" : locked ? "Обязательно" : item.setup === "optional" ? "Рекомендуем" : "";
+      if (chip.textContent) name.appendChild(chip);
+      const about = document.createElement("div");
+      about.className = "about";
+      about.textContent = item.about;
+      text.append(name, about);
+      const size = document.createElement("span");
+      size.className = "size";
+      size.textContent = mb(item.size);
+      const label = document.createElement("label");
+      label.className = "switch";
+      label.title = locked ? "Без этого Rarus AI не работает полностью" : "";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!on;
+      input.disabled = locked;
+      input.onchange = () => { setChoice(item.id, input.checked); drawList(); };
+      label.append(input, document.createElement("span"));
+      row.append(text, size, label);
+      list.appendChild(row);
+    }
+    $("comp-total").textContent = total ? "Скачать: " + mb(total) : "Всё уже установлено";
+  }
+
+  async function components() {
+    view = await api().components_view("ru");
+    if (!view.pending || !view.items) return false;
+    titles = Object.fromEntries(view.items.map((i) => [i.id, i.title]));
+    for (const item of view.items) choice[item.id] = item.on;
+    drawList();
+    show("components");
+    return true;
+  }
+
+  function drawProgress(status) {
+    const items = status.items;
+    const done = items.filter((i) => i.state === "done").length;
+    const working = status.state === "working";
+    const failed = items.filter((i) => i.state === "failed");
+    $("inst-count").textContent = working
+      ? "Компонент " + Math.min(done + 1, items.length) + " из " + items.length
+      : failed.length ? "Не установилось: " + failed.length + " из " + items.length : "Готово";
+    const rate = items.reduce((s, i) => s + (i.state === "downloading" ? i.rate : 0), 0);
+    const left = status.total - status.received;
+    $("inst-eta").textContent = working && rate > 0 ? mb(rate) + "/с · осталось " + Math.ceil(left / rate / 60) + " мин" : "";
+    $("inst-bar").style.width = status.total ? (100 * status.received / status.total).toFixed(1) + "%" : "0";
+    const list = $("inst-list");
+    list.textContent = "";
+    for (const item of items) {
+      const box = document.createElement("div");
+      box.className = "row item " + item.state;
+      box.style.gridTemplateColumns = "1fr";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = titles[item.id] || "Части программы";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const fill = document.createElement("i");
+      fill.style.width = (item.state === "done" ? 100 : (100 * item.received / item.size)).toFixed(1) + "%";
+      bar.appendChild(fill);
+      const line = document.createElement("div");
+      line.className = "line";
+      const left = document.createElement("span");
+      const right = document.createElement("span");
+      if (item.state === "failed") left.textContent = reason(item.error);
+      else if (item.state === "done") left.textContent = "Установлен";
+      else if (item.state === "installing") left.textContent = "Распаковываем…";
+      else if (item.state === "queued") left.textContent = "Ждёт очереди";
+      else left.textContent = mb(item.received) + " из " + mb(item.size) + (item.rate ? " · " + mb(item.rate) + "/с" : "");
+      right.textContent = item.state === "failed" ? "" : mb(item.size);
+      line.append(left, right);
+      box.append(name, bar, line);
+      list.appendChild(box);
+    }
+    $("inst-cancel").hidden = !working;
+    $("inst-retry").hidden = working || !failed.length;
+    $("inst-skip").hidden = working || !failed.length;
+  }
+
+  function reason(error) {
+    const text = String(error || "");
+    if (/cancel/i.test(text)) return "Отменено";
+    if (/SHA-256|sha256/i.test(text)) return "Файл пришёл повреждённым — попробуйте ещё раз";
+    if (/space|No space|errno 28/i.test(text)) return "Не хватает места на диске";
+    if (/answered|connect|timed out|network|download/i.test(text)) return "Нет связи с сервером";
+    return "Ошибка: " + text.slice(0, 120);
+  }
+
+  async function watchInstall() {
+    const status = await api().components_status();
+    drawProgress(status);
+    if (status.state === "working") { setTimeout(watchInstall, 500); return; }
+    if (!status.failed.length) finish();
+  }
+
+  async function install() {
+    $("comp-go").disabled = true;
+    show("installing");
+    const status = await api().components_install(choice);
+    drawProgress(status);
+    if (status.state === "working") watchInstall();
+    else finish();
+  }
+
+  async function finish() {
+    show("starting");
+    await api().components_finish();
+    boot();
+  }
+
+  $("comp-go").onclick = install;
+  $("inst-cancel").onclick = async () => { $("inst-cancel").disabled = true; await api().components_cancel(); };
+  $("inst-retry").onclick = () => { $("inst-cancel").disabled = false; install(); };
+  $("inst-skip").onclick = finish;
+
+  async function start() {
+    try {
+      if (await components()) return;
+    } catch (e) { /* an older shell without components: go straight on */ }
+    boot();
   }
 
   async function watchSignIn() {
@@ -88,21 +310,21 @@
     if (outcome === null) { setTimeout(watchSignIn, 500); return; }
     signing = false;
     if (outcome === "done") { show("starting"); return; }
-    document.getElementById("signin-note").textContent = MESSAGES[outcome] || MESSAGES.claim;
+    $("signin-note").textContent = MESSAGES[outcome] || MESSAGES.claim;
     show("signin");
   }
 
-  document.getElementById("signin-go").onclick = async () => {
+  $("signin-go").onclick = async () => {
     signing = true; show("waiting");
     await api().sign_in_start();
     watchSignIn();
   };
-  document.getElementById("signin-cancel").onclick = async () => {
+  $("signin-cancel").onclick = async () => {
     await api().sign_in_cancel();
   };
-  document.getElementById("retry").onclick = () => api().quit();
+  $("retry").onclick = () => api().quit();
 
-  window.addEventListener("pywebviewready", boot);
+  window.addEventListener("pywebviewready", start);
 </script>
 </body>
 </html>
