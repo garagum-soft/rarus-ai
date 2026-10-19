@@ -92,6 +92,67 @@
 .canvas-hist-text { font-size: 12.5px; color: var(--canvas-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-link { font: inherit; font-size: 13.5px; padding: 0; border: 0; background: none; color: var(--canvas-actor); cursor: pointer; text-align: left; }
 
+/* Companies and departments (2026-10-19): big boxes behind the cards, each with its own office
+   background (art.ts) and a header the box is dragged by. A frozen company is greyed and says so. */
+.canvas-co { position: absolute; box-sizing: border-box; border-radius: 22px; border: 1px solid #ffffff1f;
+  box-shadow: 0 18px 50px #00000080, inset 0 0 0 1px #ffffff08; }
+.canvas-co[data-frozen] { filter: grayscale(.85) brightness(.8); border-color: #9cc9ff66; }
+.canvas-co-head { display: flex; align-items: center; gap: 12px; height: 58px; box-sizing: border-box; padding: 9px 14px;
+  border-radius: 22px 22px 0 0; background: #0000006b; border-bottom: 1px solid #ffffff14; cursor: move; }
+.canvas-co-logo { width: 40px; height: 40px; border-radius: 11px; object-fit: cover; flex: none; background: #ffffff10; }
+.canvas-co-id { min-width: 0; flex: 1; }
+.canvas-co-name { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-co-meta { font-size: 12px; color: var(--canvas-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-co-badge { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 999px; color: #cfe6ff; background: #2a4a7466; border: 1px solid #9cc9ff66; }
+.canvas-dept { position: absolute; box-sizing: border-box; border-radius: 16px; border: 1px solid #ffffff26;
+  box-shadow: 0 10px 26px #0000006b, inset 0 0 0 1px #ffffff0a; }
+.canvas-dept[data-frozen] { filter: grayscale(.85) brightness(.85); }
+.canvas-dept-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; height: 34px; box-sizing: border-box;
+  padding: 8px 12px; border-radius: 16px 16px 0 0; background: #00000059; cursor: move; }
+.canvas-dept-name { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-dept-boss { font-size: 11.5px; color: var(--canvas-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.canvas-card-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.canvas-card-id { min-width: 0; flex: 1; }
+.canvas-face { width: 36px; height: 36px; border-radius: 50%; flex: none; background: #ffffff12; }
+.canvas-face-letter { display: grid; place-items: center; font-size: 15px; font-weight: 700; color: var(--canvas-muted); }
+.canvas-face-big { width: 52px; height: 52px; }
+.canvas-crown { color: var(--canvas-gold); }
+.canvas-card[data-frozen] { filter: grayscale(.7); }
+.canvas-pane-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.canvas-menu { position: absolute; z-index: 5; min-width: 230px; max-width: 320px; padding: 6px; border-radius: 12px;
+  background: #16181c; border: 1px solid var(--canvas-line); box-shadow: 0 18px 40px #000000a6; display: flex; flex-direction: column; }
+.canvas-menu-title { padding: 6px 10px 8px; font-size: 12px; color: var(--canvas-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 1px solid var(--canvas-line-soft); margin-bottom: 4px; }
+.canvas-menu-item { text-align: left; font: inherit; font-size: 13.5px; padding: 7px 10px; border: 0; border-radius: 8px; background: none;
+  color: var(--canvas-ink); cursor: pointer; }
+.canvas-menu-item:hover:not(:disabled), .canvas-menu-item:focus-visible { background: #ffffff12; outline: none; }
+.canvas-menu-item[data-danger] { color: #ef8a7a; }
+.canvas-menu-item:disabled { opacity: .4; cursor: default; }
+
+.canvas-scrim { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: #000000a3; }
+.canvas-dialog { width: min(420px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box; padding: 18px; border-radius: 16px;
+  background: #15171b; border: 1px solid var(--canvas-line); box-shadow: 0 24px 60px #000000b3; display: flex; flex-direction: column; gap: 12px; }
+.canvas-dialog[data-wide] { width: min(560px, 100%); }
+.canvas-dialog-title { font-size: 16px; font-weight: 650; }
+.canvas-dialog-form { display: flex; flex-direction: column; gap: 12px; }
+.canvas-dialog-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.canvas-logo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.canvas-logo-big { width: 56px; height: 56px; border-radius: 14px; object-fit: cover; background: #ffffff10; }
+.canvas-prompt-short { min-height: 110px; }
+.canvas-avatars { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; }
+.canvas-avatar-opt { padding: 3px; border-radius: 50%; border: 2px solid transparent; background: none; cursor: pointer; }
+.canvas-avatar-opt img { display: block; width: 100%; aspect-ratio: 1; border-radius: 50%; }
+.canvas-avatar-opt[aria-checked="true"] { border-color: var(--amber); }
+.canvas-bgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.canvas-bg-opt { display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 12px; border: 2px solid var(--canvas-line);
+  background: none; color: var(--canvas-ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.canvas-bg-opt[aria-checked="true"] { border-color: var(--amber); }
+.canvas-bg-swatch { display: block; height: 64px; border-radius: 8px; }
+.canvas-avatar-opt:focus-visible, .canvas-bg-opt:focus-visible, .canvas-dialog :is(input, textarea, select):focus-visible {
+  outline: 2px solid var(--canvas-gold); outline-offset: 2px; }
+
 @media (prefers-reduced-motion: reduce) {
   .canvas-card, .canvas-edge { transition: none; }
 }

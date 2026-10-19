@@ -103,15 +103,18 @@ export function createSubagents(env: FixtureEnv): SubagentsFixture {
      across a redraw. The engine's checks (one manager each, no loop, six
      levels) are not repeated here; the page runs them before it sends. */
   type Member = ResultOf<'org.get'>['members'][number]
-  let org: Member[] = [{ name: 'claude_code', reports_to: 'raven', department: 'Engineering', title: 'Coder' }]
+  let org: Member[] = [{ name: 'claude_code', reports_to: 'raven', department: 'Engineering', title: 'Coder', company: '', avatar: '' }]
+  type Company = ResultOf<'org.get'>['companies'][number]
+  let companies: Company[] = []
   const MAX_DEPTH = 6
 
   return {
     fixtures: {
-      'org.get': () => ({ members: org.map((m) => ({ ...m })), max_depth: MAX_DEPTH }),
+      'org.get': () => ({ members: org.map((m) => ({ ...m })), companies: companies.map((c) => ({ ...c })), max_depth: MAX_DEPTH }),
       'org.set': (p) => {
         org = p.members.map((m) => ({ ...m }))
-        return { members: org.map((m) => ({ ...m })), max_depth: MAX_DEPTH }
+        if (p.companies) companies = p.companies.map((c) => ({ ...c }))
+        return { members: org.map((m) => ({ ...m })), companies: companies.map((c) => ({ ...c })), max_depth: MAX_DEPTH }
       },
       'subagents.list': () => ({ rows: rows.map((r) => ({ ...r })) }),
       'subagents.add': (p) => {

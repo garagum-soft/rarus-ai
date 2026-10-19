@@ -10,6 +10,7 @@ import { CanvasApp } from './CanvasPage'
 import * as store from './store'
 
 import type { AgentNode, OrgRow } from './graph'
+import type { Company } from './org'
 import type { CanvasSource } from './types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -17,10 +18,11 @@ import type { CanvasSource } from './types'
 const node = (name: string, over: Partial<AgentNode> = {}): AgentNode => ({
   name, origin: 'agent', role: '', description: '', model: '', ready: true, ...over,
 })
-const row = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '' })
+const row = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '', company: '', avatar: '' })
 
 interface Harness {
   chart: OrgRow[]
+  companies: Company[]
   prompts: Map<string, string>
   source: CanvasSource
 }
@@ -28,6 +30,7 @@ interface Harness {
 function install(): Harness {
   const h: Harness = {
     chart: [row('raven'), row('coder', 'raven')],
+    companies: [],
     prompts: new Map([['ana', 'be kind']]),
     source: null as unknown as CanvasSource,
   }
@@ -38,11 +41,14 @@ function install(): Harness {
     node('ana', { origin: 'employee', role: 'Analyst', model: 'm-1' }),
   ]
   h.source = {
-    load: async () => ({ agents, org: h.chart.map((r) => ({ ...r })), maxDepth: 6 }),
-    saveOrg: vi.fn(async (rows: OrgRow[]) => {
+    load: async () => ({ agents, org: h.chart.map((r) => ({ ...r })), companies: h.companies.map((c) => ({ ...c })), maxDepth: 6 }),
+    saveOrg: vi.fn(async (rows: OrgRow[], companies: Company[] = []) => {
       h.chart = rows.map((r) => ({ ...r }))
-      return h.chart.map((r) => ({ ...r }))
+      h.companies = companies.map((c) => ({ ...c }))
+      return { org: h.chart.map((r) => ({ ...r })), companies: h.companies.map((c) => ({ ...c })) }
     }),
+    hire: vi.fn(async (spec) => ({ name: spec.name, origin: 'employee' as const, role: spec.role, description: '', model: '', ready: true })),
+    retire: vi.fn(async () => undefined),
     promptGet: async (name: string) => h.prompts.get(name) ?? '',
     promptSet: async (name: string, text: string) => {
       h.prompts.set(name, text)
@@ -121,10 +127,10 @@ describe('the canvas island', () => {
 
   it('says so when there is nothing to draw', async () => {
     const h = install()
-    h.source.load = async () => ({ agents: [], org: [], maxDepth: 6 })
+    h.source.load = async () => ({ agents: [], org: [], companies: [], maxDepth: 6 })
     mount()
     await openPage()
-    expect(document.querySelector('.canvas-empty')?.textContent).toBe('gui.canvas.empty')
+    expect(document.querySelector('.canvas-empty')?.textContent).toBe('gui.canvas.hint_empty')
   })
 
   it('shows an engine error in the bar', async () => {
@@ -335,5 +341,100 @@ describe('the file panel', () => {
     expect(document.querySelector('.canvas-json')).toBeTruthy()
     expect(document.querySelector('[role="alert"]')?.textContent).toBe('gui.canvas.import_bad')
     expect(h.source.saveOrg).not.toHaveBeenCalled()
+  })
+})
+
+describe('companies on the canvas', () => {
+  const menuItems = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.canvas-menu-item')].map((b) => b.textContent ?? '')
+  const pick = async (label: string): Promise<void> => {
+    const item = [...document.querySelectorAll<HTMLButtonElement>('.canvas-menu-item')].find((b) => b.textContent === label)!
+    await act(async () => { fireEvent.click(item) })
+  }
+  const rightClick = async (el: Element): Promise<void> => {
+    await act(async () => { fireEvent.contextMenu(el, { clientX: 300, clientY: 200 }) })
+  }
+  const typeInto = async (input: Element, value: string): Promise<void> => {
+    await act(async () => { fireEvent.change(input, { target: { value } }) })
+  }
+  const submit = async (): Promise<void> => {
+    await act(async () => { fireEvent.submit(document.querySelector('.canvas-dialog form')!) })
+    await act(async () => { await Promise.resolve() })
+  }
+
+  it('adds a company from the empty canvas, drawn with its first letter for a logo', async () => {
+    const h = install()
+    mount()
+    await openPage()
+    await rightClick(stage())
+    expect(menuItems()).toEqual(['gui.canvas.m_add_company', 'gui.canvas.m_add_employee', 'gui.canvas.m_fit', 'gui.canvas.m_layout'])
+    await pick('gui.canvas.m_add_company')
+    await typeInto(document.querySelector('.canvas-dialog input')!, 'Garagum Games')
+    await submit()
+    await vi.waitFor(() => expect(h.companies.map((c) => c.name)).toEqual(['Garagum Games']))
+    const box = document.querySelector<HTMLElement>('[data-company="garagum-games"]')!
+    expect(box.textContent).toContain('Garagum Games')
+    expect(box.querySelector('img')?.getAttribute('src')).toContain('data:image/svg+xml')
+  })
+
+  it('offers what a company, a department and a card can do', async () => {
+    const h = install()
+    h.companies = [{ id: 'acme', name: 'Acme', logo: '', head: '', frozen: false, background: '', departments: [{ name: 'Dev', head: '', background: '' }] }]
+    h.chart = [...h.chart, { ...row('writer'), company: 'acme', department: 'Dev' }]
+    mount()
+    await openPage()
+    await rightClick(document.querySelector('[data-company="acme"] .canvas-co-head')!)
+    expect(menuItems()).toEqual(expect.arrayContaining([
+      'gui.canvas.m_add_dept', 'gui.canvas.m_add_employee', 'gui.canvas.m_freeze', 'gui.canvas.m_export_company', 'gui.canvas.m_delete_company',
+      'gui.canvas.m_logo', 'gui.canvas.m_background', 'gui.canvas.m_rename',
+    ]))
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }) })
+    await rightClick(document.querySelector('[data-dept="Dev"]')!)
+    expect(menuItems()).toEqual(expect.arrayContaining(['gui.canvas.m_add_dept_employee', 'gui.canvas.m_set_head', 'gui.canvas.m_delete_dept']))
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }) })
+    await rightClick(card('writer'))
+    expect(menuItems()).toEqual(expect.arrayContaining([
+      'gui.canvas.m_open', 'gui.canvas.m_avatar', 'gui.canvas.m_make_head', 'gui.canvas.m_to_company_level', 'gui.canvas.m_leave_company',
+    ]))
+  })
+
+  it('freezes a company from its menu, and its cards say they take no work', async () => {
+    const h = install()
+    h.companies = [{ id: 'acme', name: 'Acme', logo: '', head: '', frozen: false, background: '', departments: [] }]
+    h.chart = [...h.chart, { ...row('writer'), company: 'acme' }]
+    mount()
+    await openPage()
+    await rightClick(document.querySelector('[data-company="acme"] .canvas-co-head')!)
+    await pick('gui.canvas.m_freeze')
+    await vi.waitFor(() => expect(h.companies[0]?.frozen).toBe(true))
+    expect(document.querySelector('[data-company="acme"]')?.getAttribute('data-frozen')).toBe('true')
+    expect(card('writer').textContent).toContain('gui.canvas.co_frozen')
+  })
+
+  it('hires an employee into a department from the department menu', async () => {
+    const h = install()
+    h.companies = [{ id: 'acme', name: 'Acme', logo: '', head: '', frozen: false, background: '', departments: [{ name: 'Dev', head: '', background: '' }] }]
+    mount()
+    await openPage()
+    await rightClick(document.querySelector('[data-dept="Dev"]')!)
+    await pick('gui.canvas.m_add_dept_employee')
+    const inputs = [...document.querySelectorAll<HTMLInputElement>('.canvas-dialog input')]
+    await typeInto(inputs[0]!, 'Zara')
+    await typeInto(inputs[1]!, 'Writes tests')
+    await submit()
+    await vi.waitFor(() => expect(h.chart.find((r) => r.name === 'Zara')).toMatchObject({ company: 'acme', department: 'Dev' }))
+    expect(h.source.hire).toHaveBeenCalledWith(expect.objectContaining({ name: 'Zara', role: 'Writes tests' }))
+    expect(card('Zara').querySelector('img.canvas-face')).not.toBeNull()
+  })
+
+  it('changes a card avatar from its menu', async () => {
+    const h = install()
+    mount()
+    await openPage()
+    await rightClick(card('coder'))
+    await pick('gui.canvas.m_avatar')
+    const options = [...document.querySelectorAll<HTMLButtonElement>('.canvas-avatar-opt')]
+    await act(async () => { fireEvent.click(options[3]!) })
+    await submit()
+    await vi.waitFor(() => expect(h.chart.find((r) => r.name === 'coder')?.avatar).toBe('p4'))
   })
 })

@@ -6,13 +6,14 @@ import { resetSources, setSources } from '../../state/sources'
 import * as store from './store'
 
 import type { AgentNode, OrgRow } from './graph'
+import type { Company } from './org'
 import type { CanvasSource } from './types'
 
 const node = (name: string, origin: AgentNode['origin'] = 'agent'): AgentNode => ({
   name, origin, role: '', description: '', model: '', ready: true,
 })
 const row = (name: string, reports_to: string | null = null, department = '', title = ''): OrgRow => ({
-  name, reports_to, department, title,
+  name, reports_to, department, title, company: '', avatar: '',
 })
 
 interface Harness {
@@ -21,13 +22,14 @@ interface Harness {
   prompts: Map<string, string>
   failNext: string | null
   chart: OrgRow[]
+  companies: Company[]
 }
 
 function install(chart: OrgRow[], agents: AgentNode[] = [node('raven'), node('coder'), node('writer'), node('ana', 'employee')]): Harness {
-  const h: Harness = { source: null as unknown as CanvasSource, saved: [], prompts: new Map([['ana', 'be kind']]), failNext: null, chart }
+  const h: Harness = { source: null as unknown as CanvasSource, saved: [], prompts: new Map([['ana', 'be kind']]), failNext: null, chart, companies: [] }
   h.source = {
-    load: vi.fn(async () => ({ agents, org: h.chart.map((r) => ({ ...r })), maxDepth: 6 })),
-    saveOrg: vi.fn(async (rows: OrgRow[]) => {
+    load: vi.fn(async () => ({ agents, org: h.chart.map((r) => ({ ...r })), companies: [], maxDepth: 6 })),
+    saveOrg: vi.fn(async (rows: OrgRow[], companies: Company[] = []) => {
       if (h.failNext) {
         const message = h.failNext
         h.failNext = null
@@ -35,13 +37,16 @@ function install(chart: OrgRow[], agents: AgentNode[] = [node('raven'), node('co
       }
       h.saved.push(rows.map((r) => ({ ...r })))
       h.chart = rows.map((r) => ({ ...r }))
-      return h.chart.map((r) => ({ ...r }))
+      h.companies = companies.map((c) => ({ ...c }))
+      return { org: h.chart.map((r) => ({ ...r })), companies: h.companies.map((c) => ({ ...c })) }
     }),
     promptGet: vi.fn(async (name: string) => h.prompts.get(name) ?? ''),
     promptSet: vi.fn(async (name: string, text: string) => {
       h.prompts.set(name, text)
       return true
     }),
+    hire: vi.fn(async (spec) => ({ name: spec.name, origin: 'employee' as const, role: spec.role, description: '', model: '', ready: true })),
+    retire: vi.fn(async () => undefined),
   }
   setSources({ canvas: h.source })
   return h
@@ -306,5 +311,122 @@ describe('the prompt', () => {
     expect(store.isEmployee('raven')).toBe(false)
     expect(h.source.promptGet).not.toHaveBeenCalled()
     expect(store.get().prompt.name).toBe('')
+  })
+})
+
+describe('companies and departments', () => {
+  it('adds a company where it was asked for and saves it with the chart', async () => {
+    const h = install([row('raven')])
+    await store.load()
+    const id = await store.addCompany('Acme', '', { x: 900, y: 40 })
+    expect(id).toBe('acme')
+    expect(h.companies.map((c) => c.name)).toEqual(['Acme'])
+    expect(store.layout().boxes.companies.get('acme')).toMatchObject({ x: 900, y: 40 })
+  })
+
+  it('adds departments, refuses a second one of the same name, and renames one with its people', async () => {
+    const h = install([row('raven')])
+    await store.load()
+    await store.addCompany('Acme', '')
+    expect(await store.addDepartment('acme', 'Dev')).toBe(true)
+    expect(await store.addDepartment('acme', 'Dev')).toBe(false)
+    expect(store.get().error).toBe('dept_taken')
+    await store.moveMember('raven', 'acme', 'Dev')
+    await store.updateDepartment('acme', 'Dev', { name: 'Engineering', background: 'night' })
+    expect(h.companies[0]?.departments[0]).toMatchObject({ name: 'Engineering', background: 'night' })
+    expect(h.chart.find((r) => r.name === 'raven')?.department).toBe('Engineering')
+  })
+
+  it('writes the reporting lines from the boxes once someone heads them', async () => {
+    const h = install([])
+    await store.load()
+    await store.addCompany('Acme', '')
+    await store.addDepartment('acme', 'Dev')
+    await store.moveMember('raven', 'acme', '')
+    await store.moveMember('coder', 'acme', 'Dev')
+    await store.moveMember('writer', 'acme', 'Dev')
+    await store.makeHead('raven')
+    await store.makeHead('coder')
+    const lines = Object.fromEntries(h.chart.map((r) => [r.name, r.reports_to]))
+    expect(lines).toEqual({ raven: null, coder: 'raven', writer: 'coder' })
+  })
+
+  it('hires an employee straight into a department with an avatar', async () => {
+    const h = install([])
+    await store.load()
+    await store.addCompany('Acme', '')
+    await store.addDepartment('acme', 'Dev')
+    expect(await store.hire({ name: 'Zara', role: 'Tester', system_prompt: 'You test.' }, 'acme', 'Dev', 'r2')).toBe(true)
+    expect(h.source.hire).toHaveBeenCalledWith({ name: 'Zara', role: 'Tester', system_prompt: 'You test.' })
+    expect(h.chart.find((r) => r.name === 'Zara')).toMatchObject({ company: 'acme', department: 'Dev', avatar: 'r2' })
+    expect(store.isEmployee('Zara')).toBe(true)
+  })
+
+  it('says why a hire was refused and changes nothing', async () => {
+    const h = install([])
+    await store.load()
+    ;(h.source.hire as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('an employee name needs a latin letter'))
+    expect(await store.hire({ name: 'Анна', role: 'x', system_prompt: 'y' }, '', '', 'p1')).toBe(false)
+    expect(store.get().error).toBe('an employee name needs a latin letter')
+    expect(h.saved).toEqual([])
+  })
+
+  it('lets an employee go: its card and row leave, its head post is left empty', async () => {
+    const h = install([], [node('ana', 'employee'), node('raven')])
+    await store.load()
+    await store.addCompany('Acme', '')
+    await store.moveMember('ana', 'acme', '')
+    await store.makeHead('ana')
+    expect(await store.retire('ana')).toBe(true)
+    expect(h.source.retire).toHaveBeenCalledWith('ana')
+    expect(store.names()).toEqual(['raven'])
+    expect(h.chart).toEqual([])
+    expect(h.companies[0]?.head).toBe('')
+  })
+
+  it('freezes and unfreezes a company, and deleting it leaves its people on the canvas', async () => {
+    const h = install([])
+    await store.load()
+    await store.addCompany('Acme', '')
+    await store.moveMember('coder', 'acme', '')
+    await store.updateCompany('acme', { frozen: true })
+    expect(h.companies[0]?.frozen).toBe(true)
+    await store.deleteCompany('acme')
+    expect(h.companies).toEqual([])
+    expect(h.chart.find((r) => r.name === 'coder')).toMatchObject({ company: '', department: '' })
+  })
+
+  it('takes everything back when the engine refuses a change', async () => {
+    const h = install([])
+    await store.load()
+    await store.addCompany('Acme', '')
+    h.failNext = 'the head of Acme must work in it'
+    expect(await store.moveMember('coder', 'acme', '')).toBe(false)
+    expect(store.get().error).toBe('the head of Acme must work in it')
+    expect(store.rowOf('coder')).toBeUndefined()
+  })
+
+  it('moves a whole box with what is in it', async () => {
+    install([])
+    await store.load()
+    await store.addCompany('Acme', '', { x: 0, y: 0 })
+    await store.moveMember('coder', 'acme', '')
+    const before = store.positions().get('coder')!
+    const grip = store.gripBox({ kind: 'company', id: 'acme' })
+    store.moveBox(grip, 100, 50, true)
+    expect(store.positions().get('coder')).toEqual({ x: before.x + 100, y: before.y + 50 })
+    expect(store.layout().boxes.companies.get('acme')).toMatchObject({ x: 100, y: 50 })
+  })
+
+  it('exports a company and brings it back as a new one', async () => {
+    const h = install([])
+    await store.load()
+    await store.addCompany('Acme', '')
+    await store.addDepartment('acme', 'Dev')
+    await store.moveMember('coder', 'acme', 'Dev')
+    const text = store.exportCompanyText('acme')
+    expect(await store.importText(text)).toBe(true)
+    expect(h.companies.map((c) => c.id)).toEqual(['acme', 'acme-2'])
+    expect(h.chart.find((r) => r.name === 'coder')).toMatchObject({ company: 'acme-2', department: 'Dev' })
   })
 })

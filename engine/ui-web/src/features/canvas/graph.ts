@@ -13,6 +13,9 @@ export interface OrgRow {
   reports_to: string | null
   department: string
   title: string
+  /* The company the member works in ('' for none) and its picture (org.ts, art.ts). */
+  company: string
+  avatar: string
 }
 
 /** Where a card's data came from: a hired employee, a roster agent, or only the chart. */
@@ -48,7 +51,7 @@ export type Refusal = 'self' | 'cycle' | 'depth' | 'unknown'
 
 export type Move = { ok: true; org: OrgRow[] } | { ok: false; reason: Refusal }
 
-const row = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '' })
+const row = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '', company: '', avatar: '' })
 
 export const byName = (org: readonly OrgRow[]): Map<string, OrgRow> => new Map(org.map((r) => [r.name, r]))
 
@@ -142,7 +145,7 @@ export function dropFromChart(org: readonly OrgRow[], name: string): OrgRow[] {
   return org.filter((r) => r.name !== name).map((r) => (r.reports_to === name ? { ...r, reports_to: manager } : { ...r }))
 }
 
-export function editRow(org: readonly OrgRow[], name: string, patch: Partial<Pick<OrgRow, 'department' | 'title'>>): OrgRow[] {
+export function editRow(org: readonly OrgRow[], name: string, patch: Partial<Pick<OrgRow, 'department' | 'title' | 'avatar'>>): OrgRow[] {
   const next = org.map((r) => (r.name === name ? { ...r, ...patch } : { ...r }))
   return next.some((r) => r.name === name) ? next : [...next, { ...row(name), ...patch }]
 }
@@ -312,34 +315,39 @@ export interface GraphFile {
   version: 1
   org: OrgRow[]
   positions: Record<string, Pos>
+  /* Companies and departments (org.ts); a file written before them has none. */
+  companies?: unknown[]
 }
 
-export function exportGraph(org: readonly OrgRow[], positions: ReadonlyMap<string, Pos>): string {
-  const file: GraphFile = { version: 1, org: org.map((r) => ({ ...r })), positions: Object.fromEntries(positions) }
+export function exportGraph(org: readonly OrgRow[], positions: ReadonlyMap<string, Pos>, companies: readonly unknown[] = []): string {
+  const file: GraphFile = { version: 1, org: org.map((r) => ({ ...r })), positions: Object.fromEntries(positions), companies: [...companies] }
   return JSON.stringify(file, null, 2)
 }
 
-/** The file's chart and positions, or null when it is not one this page wrote. */
-export function importGraph(text: string): { org: OrgRow[]; positions: Map<string, Pos> } | null {
+/** The file's chart, positions and companies, or null when it is not one this page wrote. */
+export function importGraph(text: string): { org: OrgRow[]; positions: Map<string, Pos>; companies: unknown[] } | null {
   let data: unknown
   try { data = JSON.parse(text) } catch { return null }
   const file = data as Partial<GraphFile> | null
   if (!file || file.version !== 1 || !Array.isArray(file.org)) return null
   const org: OrgRow[] = []
+  const asText = (v: unknown): string => (typeof v === 'string' ? v : '')
   for (const r of file.org) {
     if (!r || typeof r.name !== 'string' || !r.name.trim()) return null
     org.push({
       name: r.name,
       reports_to: typeof r.reports_to === 'string' && r.reports_to ? r.reports_to : null,
-      department: typeof r.department === 'string' ? r.department : '',
-      title: typeof r.title === 'string' ? r.title : '',
+      department: asText(r.department),
+      title: asText(r.title),
+      company: asText(r.company),
+      avatar: asText(r.avatar),
     })
   }
   const positions = new Map<string, Pos>()
   for (const [name, p] of Object.entries(file.positions ?? {})) {
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) positions.set(name, { x: p.x, y: p.y })
   }
-  return { org, positions }
+  return { org, positions, companies: Array.isArray(file.companies) ? file.companies : [] }
 }
 
 /** The curve a link is drawn along: from the bottom middle of the manager to the top middle of the report. */

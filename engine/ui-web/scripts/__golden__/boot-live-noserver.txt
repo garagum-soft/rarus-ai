@@ -3,27 +3,7 @@ div.app[data-rail=on]
   aside.rail[data-counts=pending]
     div.railtop
       span.wordmark
-        svg
-          g
-            rect
-            rect
-            path
-            path
-            path
-            circle
-            circle
-            circle
-            circle
-            circle
-            path
-            rect
-            rect
-          defs
-            lineargradient#rvm_r_0_g
-              stop
-              stop
-            clippath#rvm_r_0_c
-              rect
+        img
       button#railBtn.ghost-ic.tipdn
         svg
           path
@@ -107,27 +87,7 @@ div.app[data-rail=on]
         div#wsGrip.grip
         div#brand
           span.mk
-            svg
-              g
-                rect
-                rect
-                path
-                path
-                path
-                circle
-                circle
-                circle
-                circle
-                circle
-                path
-                rect
-                rect
-              defs
-                lineargradient#rvm_r_1_g
-                  stop
-                  stop
-                clippath#rvm_r_1_c
-                  rect
+            img
           span.wl
         div.dock
           div#sheetRack.sheets

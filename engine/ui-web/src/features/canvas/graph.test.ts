@@ -7,7 +7,7 @@ import {
 
 import type { AgentNode, OrgRow } from './graph'
 
-const r = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '' })
+const r = (name: string, reports_to: string | null = null): OrgRow => ({ name, reports_to, department: '', title: '', company: '', avatar: '' })
 const node = (name: string): AgentNode => ({ name, origin: 'agent', role: '', description: '', model: '', ready: true })
 const known = ['lead', 'dev', 'qa', 'ops', 'free']
 
@@ -108,7 +108,7 @@ describe('moving a card onto another', () => {
   it('edits a row, or adds one for a free card', () => {
     expect(editRow(chart, 'dev', { title: 'Dev' }).find((x) => x.name === 'dev')?.title).toBe('Dev')
     expect(editRow(chart, 'free', { department: 'R&D' }).find((x) => x.name === 'free')).toEqual({
-      name: 'free', reports_to: null, department: 'R&D', title: '',
+      name: 'free', reports_to: null, department: 'R&D', title: '', company: '', avatar: '',
     })
   })
 })
@@ -221,10 +221,11 @@ describe('the keyboard', () => {
 
 describe('the file', () => {
   it('comes back as it went out', () => {
-    const rows: OrgRow[] = [{ name: 'lead', reports_to: null, department: 'Core', title: 'Head' }, r('dev', 'lead')]
+    const rows: OrgRow[] = [{ name: 'lead', reports_to: null, department: 'Core', title: 'Head', company: 'c1', avatar: 'p2' }, r('dev', 'lead')]
     const positions = new Map([['lead', { x: 1, y: 2 }], ['dev', { x: 3.5, y: 4 }]])
-    const back = importGraph(exportGraph(rows, positions))
-    expect(back).toEqual({ org: rows, positions })
+    const companies = [{ id: 'c1', name: 'Acme' }]
+    const back = importGraph(exportGraph(rows, positions, companies))
+    expect(back).toEqual({ org: rows, positions, companies })
   })
 
   it('refuses what this page did not write', () => {
