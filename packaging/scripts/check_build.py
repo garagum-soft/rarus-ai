@@ -79,6 +79,22 @@ ALLOW: tuple[tuple[str, str, str], ...] = (
         "an example key in litellm's API docstring",
     ),
     ("pythonnet/runtime/Python.Runtime.deps.json", _NET10, "a dependency version number (10.0.0.12)"),
+    # litellm 1.85.0, the version engine/uv.lock pins (builds take the lock's versions since 2026-10-19).
+    (
+        "litellm/proxy/_experimental/out/_next/static/chunks/0279e5299e9f6e98.js",
+        _NET10,
+        "litellm admin page: the placeholder listing the private ranges",
+    ),
+    (
+        "litellm/proxy/_experimental/out/_next/static/chunks/0279e5299e9f6e98.js",
+        _NET192,
+        "litellm admin page: the placeholder listing the private ranges",
+    ),
+    (
+        "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+        _SK,
+        "a curl example in litellm's docstring (sk-test-example-key-123)",
+    ),
 )
 
 #: Where the scan does not go: a sibling's metadata cannot hold ours, and the cache directories are
