@@ -16741,6 +16741,26 @@
       "en": "In a company a department talks only inside itself; the company level, the company head and the department heads talk to each other. Work never crosses companies, and a frozen company takes none.",
       "zh": "在公司内，部门只在内部沟通；公司层级、公司负责人和各部门主管之间互相沟通。工作不会跨公司传递，冻结的公司不接受任何工作。",
       "ru": "В компании отдел общается только внутри себя; уровень компании, её глава и начальники отделов общаются между собой. Работа не переходит между компаниями, а замороженная компания её не берёт."
+    },
+    "gui.autoupd.title": {
+      "en": "Rarus AI {v} is out",
+      "zh": "Rarus AI {v} 已发布",
+      "ru": "Вышло обновление Rarus AI {v}"
+    },
+    "gui.autoupd.body": {
+      "en": "The new version is downloaded and checked. Update now? If you press nothing and no agent is working, Rarus AI updates itself in 10 minutes. Cancel puts it off until the next start.",
+      "zh": "新版本已下载并校验。现在更新吗？如果不做任何操作且没有智能体在工作，Rarus AI 将在 10 分钟后自动更新。点“取消”则推迟到下次启动。",
+      "ru": "Новая версия уже скачана и проверена. Обновить сейчас? Если ничего не нажимать и агент ничего не делает, Rarus AI обновится сам через 10 минут. «Отмена» — не обновлять до следующего запуска."
+    },
+    "gui.autoupd.now": {
+      "en": "Update now",
+      "zh": "立即更新",
+      "ru": "Обновить сейчас"
+    },
+    "gui.autoupd.failed": {
+      "en": "Could not update: {e}",
+      "zh": "更新失败：{e}",
+      "ru": "Не удалось обновиться: {e}"
     }
   }
 }

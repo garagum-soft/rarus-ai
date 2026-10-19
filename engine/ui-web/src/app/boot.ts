@@ -44,6 +44,7 @@ import { open as sessionOpen, rows as sessionRows, sess } from '../state/session
 import { sources } from '../state/sources'
 import { load as loadTier } from '../state/tier'
 import { bump as bumpWs } from '../state/ws'
+import { start as watchShellUpdates } from './autoUpdate'
 import { authFail, bootFail, shellReady, surface } from './connection'
 import { installPage } from './install'
 import { hideSplash } from './splash'
@@ -195,6 +196,7 @@ async function sequence(): Promise<void> {
     })
     watchForUpdates()
     resumeUpgrade()
+    void watchShellUpdates()
   } catch (e) {
     bootFail(e)
   }
