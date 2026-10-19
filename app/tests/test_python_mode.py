@@ -116,3 +116,32 @@ def test_no_components_folder_changes_nothing(monkeypatch) -> None:
 
     assert component_paths.activate() == []
     assert sys.path == ["bundle"]
+
+
+def test_a_frozen_program_execing_itself_continues_in_the_same_process(tmp_path, monkeypatch) -> None:
+    """On Windows exec loses the windowed program's pipes, so an agent's re-exec runs in place."""
+    out = tmp_path / "out.txt"
+    calls = []
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "argv", list(sys.argv))
+    monkeypatch.setattr(os, "execv", lambda path, args: calls.append((path, args)))
+    monkeypatch.setattr(os, "execve", lambda path, args, env: calls.append((path, args)))
+    monkeypatch.setattr(os, "_rarus_in_place", False, raising=False)
+    monkeypatch.setattr(entry, "_activate_components", lambda: None)
+    script = tmp_path / "run.py"
+    code = f"open({str(out)!r}, 'w').write('in place')"
+    script.write_text(
+        "import os, sys\n"
+        "os.execv('C:/Windows/notepad.exe', ['notepad'])\n"
+        f"os.execv(sys.executable, [sys.executable, '-c', {code!r}])\n"
+        "raise AssertionError('exec returned')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as stop:
+        entry.run_python([str(script)])
+
+    assert stop.value.code == 0
+    assert out.read_text(encoding="utf-8") == "in place"
+    assert calls == [("C:/Windows/notepad.exe", ["notepad"])]

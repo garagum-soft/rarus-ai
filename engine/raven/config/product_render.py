@@ -656,7 +656,12 @@ def exec_raven_acp(rendered: Path) -> None:
     if sys.platform == "win32" and os.execv is _REAL_EXECV:
         import subprocess
 
-        raise SystemExit(subprocess.call(argv))  # noqa: S603 - this interpreter, a fixed argv
+        # The streams are handed over by name, not left to inheritance: a windowed interpreter (the
+        # frozen Rarus AI program is one) is given no standard handles unless the start says which.
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:
+                stream.flush()
+        raise SystemExit(subprocess.call(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr))  # noqa: S603
     os.execv(sys.executable, argv)
     raise AssertionError("unreachable: execv does not return")
 

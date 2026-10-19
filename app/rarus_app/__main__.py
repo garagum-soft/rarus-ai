@@ -48,10 +48,43 @@ def python_call(args: list[str]) -> list[str] | None:
     return None
 
 
+def _exec_in_place() -> None:
+    """Make ``os.execv``/``os.execve`` of this program continue in the same process.
+
+    An agent's launcher ends with ``os.execv(sys.executable, [..., "-m", "raven", "acp", ...])``.
+    On Windows exec starts a new process, and a windowed executable started that way does not get
+    the pipes its parent talks ACP over: the agent would answer nothing. Running the new command
+    line here instead keeps the pipes; any other program is still exec'd as asked.
+    """
+    if not getattr(sys, "frozen", False) or sys.platform != "win32" or getattr(os, "_rarus_in_place", False):
+        return
+    real_execv, real_execve = os.execv, os.execve
+    own = os.path.normcase(os.path.abspath(sys.executable))
+
+    def ours(path: object) -> bool:
+        return os.path.normcase(os.path.abspath(os.fsdecode(path))) == own  # type: ignore[arg-type]
+
+    def execv(path, args):  # type: ignore[no-untyped-def]
+        if not ours(path):
+            return real_execv(path, args)
+        raise SystemExit(main([os.fsdecode(a) for a in list(args)[1:]]))
+
+    def execve(path, args, env):  # type: ignore[no-untyped-def]
+        if not ours(path):
+            return real_execve(path, args, env)
+        os.environ.clear()
+        os.environ.update(env)
+        raise SystemExit(main([os.fsdecode(a) for a in list(args)[1:]]))
+
+    os.execv, os.execve = execv, execve
+    os._rarus_in_place = True  # type: ignore[attr-defined]
+
+
 def run_python(rest: list[str]) -> None:
     """``-m module ...``, ``-c code ...`` or ``script.py ...``, as the interpreter would run them."""
     import runpy
 
+    _exec_in_place()
     if rest[0] == "-m":
         sys.argv = [rest[1], *rest[2:]]
         runpy.run_module(rest[1], run_name="__main__", alter_sys=True)

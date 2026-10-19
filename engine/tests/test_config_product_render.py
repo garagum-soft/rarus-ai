@@ -664,14 +664,16 @@ def test_on_windows_the_server_runs_as_a_child_and_the_launcher_exits_with_its_c
 
     calls = []
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(subprocess, "call", lambda argv: calls.append(argv) or 3)
+    monkeypatch.setattr(subprocess, "call", lambda argv, **streams: calls.append((argv, streams)) or 3)
 
     with pytest.raises(SystemExit) as done:
         render.exec_raven_acp(tmp_path / "rendered.json")
 
     assert done.value.code == 3
-    (argv,) = calls
+    ((argv, streams),) = calls
     assert argv[1:] == ["-m", "raven", "acp", "--config", str(tmp_path / "rendered.json")]
+    # Named, so a windowed interpreter (the frozen Rarus AI program) gets the pipes too.
+    assert streams == {"stdin": sys.stdin, "stdout": sys.stdout, "stderr": sys.stderr}
 
 
 def test_elsewhere_the_launcher_becomes_the_server(tmp_path, monkeypatch):

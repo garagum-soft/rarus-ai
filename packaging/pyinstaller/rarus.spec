@@ -15,6 +15,11 @@ datas, binaries, hiddenimports = [], [], []
 # so every submodule rides along, with the data files the wheel carries beside them.
 hiddenimports += collect_submodules("raven")
 datas += collect_data_files("raven")
+# The agents' own launchers and plugins (agents/*/run.py, install.py, plugins/**) and the scaffold a
+# hired employee is made from are scripts the engine runs from disk, not modules it imports, so they
+# ship as files: without them no agent could start in the frozen program.
+for tree in ("agents", "templates"):
+    datas += collect_data_files("raven", include_py_files=True, subdir=tree)
 hiddenimports += collect_submodules("rarus_app")
 datas += collect_data_files("rarus_app")
 
