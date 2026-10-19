@@ -7,6 +7,7 @@ import { t } from '../../../i18n/t'
 import { Card, Chip, Empty, GLYPH, KeyLink, Row, Rov, Spin, Switch, Xrow } from '../Fields'
 import { KeyFieldsWait } from '../Skeletons'
 import * as store from '../store'
+import { ComponentsCard } from './Components'
 
 import type { McpSnapshot } from '../../../rpc/generated'
 import type { AuthField, McpDetail } from '../types'
@@ -178,6 +179,9 @@ export function Plugins(): JSX.Element {
   }
   return (
     <>
+      {/* What the window downloaded after install sits above the servers: in Rarus AI both are
+          "what the agent can use", and the first start asked about the components on this footing. */}
+      <ComponentsCard />
       {/* "0 of 0 connected" is a number about nothing: the empty card below
           already says there is no server, so the count only runs with rows. */}
       {rows.length > 0 && (

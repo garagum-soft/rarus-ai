@@ -10773,9 +10773,9 @@
       "ru": "Ни у одного подключённого поставщика нет API переранжирования, которое может вызвать EverOS"
     },
     "gui.settings.roles.everos_missing": {
-      "en": "The EverOS memory plugin isn't installed",
-      "zh": "未安装 EverOS 记忆插件",
-      "ru": "Плагин памяти EverOS не установлен"
+      "en": "Long-term memory (EverOS) is not installed yet: see Settings → Plugins → Components",
+      "zh": "长期记忆（EverOS）尚未安装：请到 设置 → 插件 → 组件",
+      "ru": "Долговременная память (EverOS) ещё не установлена: см. Настройки → Плагины → Компоненты"
     },
     "gui.settings.roles.locked_foreign": {
       "en": "This EverOS install is yours to manage, so Rarus reads its config and does not write it",
@@ -16761,6 +16761,61 @@
       "en": "Could not update: {e}",
       "zh": "更新失败：{e}",
       "ru": "Не удалось обновиться: {e}"
+    },
+    "gui.settings.components.title": {
+      "en": "Components",
+      "zh": "组件",
+      "ru": "Компоненты"
+    },
+    "gui.settings.components.lead": {
+      "en": "Downloaded from the Rarus AI server. Switch off what you do not need; required ones stay on.",
+      "zh": "从 Rarus AI 服务器下载。不需要的可以关闭，必需的保持开启。",
+      "ru": "Скачиваются с сервера Rarus AI. Ненужное можно выключить, обязательные остаются включёнными."
+    },
+    "gui.settings.components.installed": {
+      "en": "Installed",
+      "zh": "已安装",
+      "ru": "Установлен"
+    },
+    "gui.settings.components.required": {
+      "en": "Required",
+      "zh": "必需",
+      "ru": "Обязательно"
+    },
+    "gui.settings.components.apply": {
+      "en": "Apply",
+      "zh": "应用",
+      "ru": "Применить"
+    },
+    "gui.settings.components.size": {
+      "en": "{n} MB",
+      "zh": "{n} MB",
+      "ru": "{n} МБ"
+    },
+    "gui.settings.components.working": {
+      "en": "Downloading: {got} of {total} MB",
+      "zh": "正在下载：{got} / {total} MB",
+      "ru": "Скачивается: {got} из {total} МБ"
+    },
+    "gui.settings.components.failed": {
+      "en": "Not installed: {names}. Press Apply to try again.",
+      "zh": "未能安装：{names}。点“应用”重试。",
+      "ru": "Не установилось: {names}. Нажмите «Применить», чтобы попробовать ещё раз."
+    },
+    "gui.settings.components.restart_note": {
+      "en": "The changes take effect after the engine restarts.",
+      "zh": "引擎重启后更改生效。",
+      "ru": "Изменения заработают после перезапуска движка."
+    },
+    "gui.settings.components.restart": {
+      "en": "Restart now",
+      "zh": "立即重启",
+      "ru": "Перезапустить сейчас"
+    },
+    "gui.settings.components.browser_hint": {
+      "en": "Components are managed in the Rarus AI window.",
+      "zh": "组件在 Rarus AI 窗口中管理。",
+      "ru": "Компоненты настраиваются в окне программы Rarus AI."
     }
   }
 }

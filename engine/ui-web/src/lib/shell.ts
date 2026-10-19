@@ -28,6 +28,45 @@ export interface UpdateApplied {
   error?: string
 }
 
+/* What the window downloads after install (app/rarus_app/components.py): the listed ones, never
+   the hidden parts of the program. Older shells have none of these methods. */
+export interface ComponentItem {
+  id: string
+  setup: 'locked' | 'optional' | 'off'
+  title: string
+  about: string
+  size: number
+  unpacked: number
+  requires: string[]
+  installed: boolean
+  on: boolean
+}
+
+export interface ComponentQueueItem {
+  id: string
+  size: number
+  received: number
+  rate: number
+  state: 'queued' | 'downloading' | 'installing' | 'done' | 'failed'
+  error: string
+}
+
+export interface ComponentStatus {
+  state: 'idle' | 'working' | 'done'
+  items: ComponentQueueItem[]
+  received: number
+  total: number
+  failed: string[]
+  installed_any: boolean
+}
+
+export interface ComponentsView {
+  pending: boolean
+  items: ComponentItem[]
+  hidden_bytes: number
+  status: ComponentStatus
+}
+
 export interface ShellApi {
   first_run(): Promise<boolean>
   onboarded(): Promise<void>
@@ -38,6 +77,10 @@ export interface ShellApi {
   update_start(): Promise<UpdateStatus>
   update_status(): Promise<UpdateStatus>
   update_apply(): Promise<UpdateApplied>
+  components_view?(lang: string): Promise<ComponentsView>
+  components_install?(choices: Record<string, boolean>): Promise<ComponentStatus>
+  components_status?(): Promise<ComponentStatus>
+  components_restart?(): Promise<{ ok: boolean }>
 }
 
 type Host = Window & { pywebview?: { api?: Partial<ShellApi> } }
