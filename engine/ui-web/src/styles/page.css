@@ -545,7 +545,7 @@ button, [role="button"] { -webkit-user-select: none; user-select: none; }
    at the window's corner and the buttons where the design has them. */
 .wordmark { display: flex; align-items: center; gap: 6px; margin-right: auto;
   font-size: 14px; font-weight: 600; color: var(--text); }
-.wordmark svg { display: block; flex: none; }
+.wordmark svg, .wordmark img { display: block; flex: none; }
 .railtop .ghost-ic { color: var(--rail-quiet); border-radius: 8px; }
 .railtop .ghost-ic:hover { color: var(--rail-ink-on); background: var(--rail-hover); }
 .railtop .ghost-ic svg { width: 16px; height: 16px; }
@@ -1135,7 +1135,7 @@ button, [role="button"] { -webkit-user-select: none; user-select: none; }
 .chrome-wd-btn { padding: 4px 10px; border-radius: 7px; font-size: 12px; color: var(--text); background: var(--surface); }
 .chrome-wd-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--text) 9%, transparent); }
 .chrome-wd-btn:disabled { opacity: .45; }
-.chrome-wd-use { color: var(--ink-on-accent); background: var(--amber); }
+.chrome-wd-use { color: var(--amber-ink); background: var(--amber); }
 .chrome-wd-use:hover:not(:disabled) { background: color-mix(in oklab, var(--amber) 88%, var(--text)); }
 
 /* The workspace tag beside a conversation's title (src/chrome/WorkdirTag.tsx):
@@ -2775,7 +2775,7 @@ textarea:focus, textarea:focus-visible,
 .chat[data-fresh] #brand { display: flex; animation: brandin .5s cubic-bezier(.2, .7, .3, 1) backwards; }
 /* The mark is the tile (components/RavenMark.tsx), which brings its own ground. */
 #brand .mk { flex: none; display: block; }
-#brand .mk svg { display: block; }
+#brand .mk svg, #brand .mk img { display: block; }
 /* A greeting, not a hero. The 70px serif wordmark this replaced was the single
    largest thing on the page, and it was announcing the product to someone who
    had already opened it. */
@@ -3855,8 +3855,8 @@ details[open] summary { margin-bottom: 8px; }
    other: 68 holds the Chinese words, Disconnect needs 96. */
 :root[data-lang="en"] .mini { min-width: 96px; }
 .mini:hover:not(:disabled) { border-color: var(--muted); background: var(--surface); }
-.mini.go { background: var(--text); border-color: var(--text); color: var(--ink); }
-.mini.go:hover:not(:disabled) { background: var(--text); filter: brightness(1.18); }
+.mini.go { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); }
+.mini.go:hover:not(:disabled) { background: var(--amber); filter: brightness(1.08); }
 /* Primary market action: quiet gold outline that turns solid only under its
    own pointer -- the card and the button are separate hit zones. */
 .mini.gold { border-color: color-mix(in oklab, var(--gold) 42%, transparent); color: var(--gold); font-weight: 600; }
@@ -6948,7 +6948,17 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
    scripts/contrast.mjs is the check); the light block is left as it was (spec 10.4 item 8 keeps
    light out of v1 by defaulting the page to dark, not by deleting it).
    ═══════════════════════════════════════════════════════════════════ */
+/* One colour for every filled button and accent: a light orange (owner, 2026-10-19: "all buttons the same,
+   not the yellow, a slightly light orange"). Light theme first, so the dark blocks below win on a dark page;
+   there the orange is darker so it still reads as text on white. */
+:root {
+  --amber: #a85a14;
+  --amber-dp: #f8e0c8;
+  --amber-ink: #fff;
+}
 :root[data-theme="dark"] {
+  --amber: #f2a35a;
+  --amber-dp: #6b3f15;
   --surface: #1a1a1a;
   --raised: #262626;
   --card: #1b1b1b;
@@ -6960,6 +6970,8 @@ body:has(.app[data-page="on"]) #deskHost { display: none; }
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --amber: #f2a35a;
+    --amber-dp: #6b3f15;
     --surface: #1a1a1a;
     --raised: #262626;
     --card: #1b1b1b;

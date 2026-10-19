@@ -21,9 +21,12 @@ import type { AccountInfo, FoundAgent, ImportPlatform, ImportScan, OnboardSource
    bodies and verbs stay, and the tests put them back with `_showStepsForTests`. */
 export const STEPS: readonly StepId[] = ['model', 'search', 'agents', 'sync']
 
-/* A first run with no API key to type: who is signed in, language and theme,
-   what happens at Windows start. Sign-in itself is the window's start page. */
-export const RARUS_STEPS: readonly StepId[] = ['account', 'look', 'launch']
+/* A first run with no API key to type and nothing to page through: one screen with the
+   language, the theme and the Windows start, and a Start button. Sign-in itself is the
+   window's start page, so the account step that only repeated it is not shown; it and the
+   look and launch steps stay for the tests that put them back. */
+export const RARUS_STEPS: readonly StepId[] = ['start']
+export const RARUS_STEPS_PAGED: readonly StepId[] = ['account', 'look', 'launch']
 const SHOWN: readonly StepId[] = RARUS_STEPS
 let shown: readonly StepId[] = SHOWN
 
@@ -100,7 +103,7 @@ export function open(): void {
   for (const key of new Set(shown.map((id) => BODY_OF[id]))) if (key) void bodies[key].load().catch(() => {})
   if (shown.includes('sync')) void scan()
   if (shown.includes('account')) void loadAccount()
-  if (shown.includes('launch')) void loadAutostart()
+  if (shown.includes('launch') || shown.includes('start')) void loadAutostart()
 }
 
 /* The signed-in person, read again on demand: the page can be open before the
@@ -181,7 +184,7 @@ export function stepDone(id: StepId): boolean {
   if (!s.bodies) return false
   /* Rarus steps: the first waits on a signed-in account, the others hold nobody. */
   if (id === 'account') return s.account?.signed_in === true
-  if (id === 'look' || id === 'launch') return true
+  if (id === 'start' || id === 'look' || id === 'launch') return true
   if (id === 'model') return s.bodies.model.done()
   /* Search is optional: nothing on the step holds the reader. */
   if (id === 'search') return true

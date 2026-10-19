@@ -2,27 +2,7 @@ div.app
   aside.rail
     div.railtop
       span.wordmark
-        svg
-          g
-            rect
-            rect
-            path
-            path
-            path
-            circle
-            circle
-            circle
-            circle
-            circle
-            path
-            rect
-            rect
-          defs
-            lineargradient#rvm_r_a_g
-              stop
-              stop
-            clippath#rvm_r_a_c
-              rect
+        img
       button#railBtn.ghost-ic.tipdn
         svg
           path
@@ -106,27 +86,7 @@ div.app
         div#wsGrip.grip
         div#brand
           span.mk
-            svg
-              g
-                rect
-                rect
-                path
-                path
-                path
-                circle
-                circle
-                circle
-                circle
-                circle
-                path
-                rect
-                rect
-              defs
-                lineargradient#rvm_r_b_g
-                  stop
-                  stop
-                clippath#rvm_r_b_c
-                  rect
+            img
           span.wl
         div.dock
           div#sheetRack.sheets

@@ -117,8 +117,8 @@
   display: inline-flex; align-items: center; gap: 6px;
 }
 :root[data-lang="en"] .extAgents-ctl .mini, :root[data-lang="en"] .extAgents-act .mini { min-width: 96px; }
-.extAgents-ctl .mini.go, .extAgents-act .mini.go { background: var(--text); border-color: var(--text); color: var(--ink); }
-.extAgents-ctl .mini.go:hover:not(:disabled), .extAgents-act .mini.go:hover:not(:disabled) { background: var(--text); filter: brightness(1.18); }
+.extAgents-ctl .mini.go, .extAgents-act .mini.go { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); }
+.extAgents-ctl .mini.go:hover:not(:disabled), .extAgents-act .mini.go:hover:not(:disabled) { background: var(--amber); filter: brightness(1.08); }
 .extAgents-ctl .mini.danger, .extAgents-act .mini.danger { color: var(--clay); border-color: color-mix(in oklab, var(--clay) 35%, transparent); }
 .extAgents-ctl .mini.danger:hover:not(:disabled), .extAgents-act .mini.danger:hover:not(:disabled) { border-color: var(--clay); background: color-mix(in oklab, var(--clay) 8%, transparent); }
 .extAgents-state { font-family: var(--mono); font-size: 11px; color: var(--faint); }

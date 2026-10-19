@@ -126,9 +126,12 @@ def _make_tray(*, show: Any, quit_app: Any) -> Any | None:
         from PIL import Image, ImageDraw
     except ImportError:
         return None
-    image = Image.new("RGBA", (64, 64), (15, 17, 21, 255))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((10, 10, 54, 54), fill=(91, 140, 255, 255))
+    try:
+        # The program's globe (tools/dev/make_icons.py); a drawn disc only if the file is missing.
+        image = Image.open(Path(__file__).with_name("rarus-icon.png")).convert("RGBA")
+    except OSError:
+        image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        ImageDraw.Draw(image).ellipse((8, 8, 56, 56), fill=(212, 161, 14, 255))
     menu = pystray.Menu(
         pystray.MenuItem("Открыть Rarus AI", lambda *_: show(), default=True),
         pystray.MenuItem("Выход", lambda *_: quit_app()),

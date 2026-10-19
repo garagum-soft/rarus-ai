@@ -113,10 +113,9 @@ describe('the chat column chrome', () => {
        lockup says something rather than what the copy is -- the same way the
        session title above is asserted. */
     expect(document.querySelector('#brand .wl')?.textContent).not.toBe('')
-    /* The slot carries the mark now (components/RavenMark.tsx), drawn rather
-       than fetched -- so it is one element, and it is hidden from the reader
-       along with the lockup around it. */
-    expect(document.querySelector('#brand .mk > svg')).toBeTruthy()
+    /* The slot carries the mark (components/RavenMark.tsx, the Rarus globe as a picture) -- one
+       element, hidden from the reader along with the lockup around it. */
+    expect(document.querySelector('#brand .mk > img')?.getAttribute('aria-hidden')).toBe('true')
     for (const svg of [...top().querySelectorAll('svg'), ...el('backpill').querySelectorAll('svg')]) {
       expect(svg.getAttribute('aria-hidden')).toBe('true')
     }

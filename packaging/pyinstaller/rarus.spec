@@ -45,6 +45,8 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="RarusAI",
+    # The dark yellow globe (tools/dev/make_icons.py): the exe, its window, the taskbar and the shortcuts.
+    icon=str(ROOT / "packaging" / "assets" / "rarus.ico"),
     console=False,
     disable_windowed_traceback=False,
     upx=False,

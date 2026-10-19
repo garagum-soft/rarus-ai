@@ -838,7 +838,7 @@ button.settings-xname {cursor:pointer}
 .settings-wf-pb[aria-pressed='true'] { border-color: var(--amber); background: var(--raised); }
 .settings-wf-pb[data-origin='builtin'] { font-style: italic; }
 .settings-wf-new, .settings-wf-add { border-style: dashed; }
-.settings-wf-save { background: var(--amber); border-color: var(--amber); color: var(--paper); }
+.settings-wf-save { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); }
 .settings-wf-save:disabled { opacity: 0.5; cursor: default; }
 .settings-wf-remove { color: var(--clay); margin-left: auto; align-self: flex-end; }
 
@@ -901,6 +901,6 @@ button.settings-xname {cursor:pointer}
 .settings-team-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .settings-team-actions button { height: var(--ctl-h); border-radius: var(--ctl-r); border: 1px solid var(--line);
   background: var(--surface); color: var(--text); padding: 0 10px; font: inherit; font-size: 13px; cursor: pointer; }
-.settings-team-hire-btn { background: var(--amber) !important; border-color: var(--amber) !important; color: var(--paper) !important; }
+.settings-team-hire-btn { background: var(--amber) !important; border-color: var(--amber) !important; color: var(--amber-ink) !important; }
 .settings-team-hire-btn:disabled { opacity: 0.5; cursor: default; }
 .settings-team-retire { color: var(--clay) !important; margin-left: auto; }

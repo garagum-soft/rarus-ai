@@ -43,7 +43,7 @@ const opened = async (scan: ImportScan, found: FoundAgent[], done = false, embed
 }
 
 describe('the first run as shipped', () => {
-  it('shows the account, the look and the launch, and asks for no provider', async () => {
+  it('is one start screen that asks for no account, no provider and no scan', async () => {
     const asked: string[] = []
     setSources({
       onboard: {
@@ -58,15 +58,37 @@ describe('the first run as shipped', () => {
     store.open()
     await Promise.resolve()
     await Promise.resolve()
-    expect(store.visibleSteps()).toEqual(['account', 'look', 'launch'])
-    expect(store.isLast('launch')).toBe(true)
-    /* Neither a provider body nor the roster is asked for, and nothing is scanned. */
+    expect(store.visibleSteps()).toEqual(['start'])
+    expect(store.isLast('start')).toBe(true)
+    expect(store.stepDone('start')).toBe(true)
+    expect(store.skippable('start')).toBe(false)
     expect(model.load).not.toHaveBeenCalled()
     expect(agents.load).not.toHaveBeenCalled()
+    expect(asked).toEqual([])
+    await store.finish()
+    expect(store.get().closing).toBe(true)
+  })
+})
+
+describe('the paged first run (account, look, launch)', () => {
+  beforeEach(() => store._showStepsForTests(store.RARUS_STEPS_PAGED))
+
+  it('shows the account, the look and the launch, and asks for no provider', async () => {
+    const asked: string[] = []
+    setSources({
+      onboard: {
+        ...source(READY),
+        account: async () => { asked.push('account'); return { signed_in: true, email: 'me@example.com', balance: 5, error: '' } },
+        scan: async () => { asked.push('scan'); return READY },
+      },
+    })
+    store.setBodies({ model: body(false) as StepBody, search: body(false) as StepBody, agents: body(true), memory: body(true) })
+    store.open()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.visibleSteps()).toEqual(['account', 'look', 'launch'])
     expect(asked).toEqual(['account'])
     expect(store.stepDone('account')).toBe(true)
-    expect(store.stepDone('look')).toBe(true)
-    expect(store.skippable('account')).toBe(false)
     await store.next()
     expect(store.get().step).toBe('look')
     await store.next()

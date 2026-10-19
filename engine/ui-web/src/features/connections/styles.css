@@ -187,5 +187,5 @@
 /* The sheet's one verb in the ink the agent hub's sheet uses for its own. A
    disabled one keeps that ink and takes the page's disabled fade, as the
    agent sheet's does, rather than turning a grey of its own. */
-.su-sheet > .sufoot .mini.key { background: var(--text); border-color: var(--text); color: var(--ink); }
-.su-sheet > .sufoot .mini.key:hover:not(:disabled) { filter: brightness(1.18); }
+.su-sheet > .sufoot .mini.key { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); }
+.su-sheet > .sufoot .mini.key:hover:not(:disabled) { filter: brightness(1.08); }

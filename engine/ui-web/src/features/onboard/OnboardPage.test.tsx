@@ -136,22 +136,19 @@ afterEach(() => {
 })
 
 describe('the first run as shipped', () => {
-  it('offers the account, the look and the launch, and enters from the last', async () => {
+  it('is one screen with the language, the theme and Start, and Start takes the reader in', async () => {
     const h = install(SCAN_CLAUDE)
     h.agents.agents = [{ id: 'claude_code', name: 'Claude Code' }]
     mount()
     await open()
-    expect(steps()).toEqual(['1gui.onb.step_account:current', '2gui.onb.step_look:upcoming', '3gui.onb.step_launch:upcoming'])
-    /* No provider step, no key field: the built-in models need nothing. */
+    /* One screen: no strip of steps, no account card, no provider form. */
+    expect(steps()).toEqual([])
+    expect(document.body.textContent).toContain('gui.onb.start_title')
+    expect(document.body.textContent).not.toContain('gui.onb.account_in')
     expect(h.model.load).not.toHaveBeenCalled()
     expect(h.agents.load).not.toHaveBeenCalled()
-    expect(document.body.textContent).toContain('gui.onb.account_in:{"email":"me@example.com"}')
-    expect(document.body.textContent).toContain('gui.onb.account_balance:{"balance":1200}')
-    await click(button('gui.onb.next'))
-    await click(button('gui.onb.next'))
-    /* Nothing on the last step is optional or skippable: Start chatting takes the reader in. */
-    expect(buttons().map((b) => b.textContent)).toEqual(['gui.onb.back', 'gui.onb.enter'])
-    await click(button('gui.onb.enter'))
+    expect(buttons().map((b) => b.textContent)).toEqual(['gui.onb.begin'])
+    await click(button('gui.onb.begin'))
     expect(host().dataset.off).toBe('1')
     expect(setupState.providerConfigured).toBe(true)
     expect(h.runs).toEqual([])
@@ -163,9 +160,71 @@ describe('the first run as shipped', () => {
     install(SCAN_CLAUDE)
     mount()
     await open()
-    expect(domSnapshot(host())).toMatchSnapshot('account step')
+    expect(domSnapshot(host())).toMatchSnapshot('start screen')
+  })
+
+  it('switches the theme on the start screen', async () => {
+    install()
+    mount()
+    await open()
+    const light = [...document.querySelectorAll<HTMLButtonElement>('.ob-segopt')].find((b) => b.textContent === 'gui.onb.theme_light')!
+    await click(light)
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(light.getAttribute('aria-checked')).toBe('true')
+    look._resetForTests()
+    delete document.documentElement.dataset.theme
+  })
+
+  it('shows no autostart switch in a plain browser', async () => {
+    install()
+    mount()
+    await open()
+    expect(document.querySelector('.ob-switch')).toBeNull()
+  })
+
+  it('offers the autostart switch inside the desktop window, and tells it when Start is pressed', async () => {
+    install()
+    const calls: string[] = []
+    let on = false
+    ;(window as unknown as { pywebview?: unknown }).pywebview = {
+      api: {
+        first_run: async () => true,
+        onboarded: async () => { calls.push('onboarded') },
+        autostart_enabled: async () => on,
+        set_autostart: async (v: boolean) => { on = v; calls.push(`autostart:${v}`); return on },
+        sign_out: async () => ({}),
+      },
+    }
+    try {
+      mount()
+      await open()
+      const sw = document.querySelector<HTMLButtonElement>('.ob-switch')!
+      expect(sw.getAttribute('aria-checked')).toBe('false')
+      await click(sw)
+      expect(document.querySelector('.ob-switch')!.getAttribute('aria-checked')).toBe('true')
+      await click(button('gui.onb.begin'))
+      expect(calls).toEqual(['autostart:true', 'onboarded'])
+    } finally {
+      delete (window as unknown as { pywebview?: unknown }).pywebview
+    }
+  })
+})
+
+describe('the paged first run (account, look, launch)', () => {
+  beforeEach(() => store._showStepsForTests(store.RARUS_STEPS_PAGED))
+
+  it('offers the account, the look and the launch, and enters from the last', async () => {
+    const h = install(SCAN_CLAUDE)
+    mount()
+    await open()
+    expect(steps()).toEqual(['1gui.onb.step_account:current', '2gui.onb.step_look:upcoming', '3gui.onb.step_launch:upcoming'])
+    expect(document.body.textContent).toContain('gui.onb.account_in:{"email":"me@example.com"}')
     await click(button('gui.onb.next'))
-    expect(domSnapshot(host())).toMatchSnapshot('look step')
+    await click(button('gui.onb.next'))
+    expect(buttons().map((b) => b.textContent)).toEqual(['gui.onb.back', 'gui.onb.enter'])
+    await click(button('gui.onb.enter'))
+    expect(host().dataset.off).toBe('1')
+    expect(h.runs).toEqual([])
   })
 
   it('holds the reader on the first step until someone is signed in, and asks again on request', async () => {
@@ -182,19 +241,6 @@ describe('the first run as shipped', () => {
     expect(document.body.textContent).toContain('gui.onb.account_balance_unknown')
   })
 
-  it('switches the theme on the look step', async () => {
-    install()
-    mount()
-    await open()
-    await click(button('gui.onb.next'))
-    const light = [...document.querySelectorAll<HTMLButtonElement>('.ob-segopt')].find((b) => b.textContent === 'gui.onb.theme_light')!
-    await click(light)
-    expect(document.documentElement.dataset.theme).toBe('light')
-    expect(light.getAttribute('aria-checked')).toBe('true')
-    look._resetForTests()
-    delete document.documentElement.dataset.theme
-  })
-
   it('says autostart lives in the desktop app when the page is in a plain browser', async () => {
     install()
     mount()
@@ -203,35 +249,6 @@ describe('the first run as shipped', () => {
     await click(button('gui.onb.next'))
     expect(document.body.textContent).toContain('gui.onb.launch_app_only')
     expect(document.querySelector('.ob-switch')).toBeNull()
-  })
-
-  it('offers the autostart switch inside the desktop window, and tells it when the wizard is finished', async () => {
-    install()
-    const calls: string[] = []
-    let on = false
-    ;(window as unknown as { pywebview?: unknown }).pywebview = {
-      api: {
-        first_run: async () => true,
-        onboarded: async () => { calls.push('onboarded') },
-        autostart_enabled: async () => on,
-        set_autostart: async (v: boolean) => { on = v; calls.push(`autostart:${v}`); return on },
-        sign_out: async () => ({}),
-      },
-    }
-    try {
-      mount()
-      await open()
-      await click(button('gui.onb.next'))
-      await click(button('gui.onb.next'))
-      const sw = document.querySelector<HTMLButtonElement>('.ob-switch')!
-      expect(sw.getAttribute('aria-checked')).toBe('false')
-      await click(sw)
-      expect(document.querySelector('.ob-switch')!.getAttribute('aria-checked')).toBe('true')
-      await click(button('gui.onb.enter'))
-      expect(calls).toEqual(['autostart:true', 'onboarded'])
-    } finally {
-      delete (window as unknown as { pywebview?: unknown }).pywebview
-    }
   })
 })
 

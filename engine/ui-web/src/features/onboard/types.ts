@@ -3,7 +3,7 @@
 
 import type { JSX } from 'react'
 
-export type StepId = 'account' | 'look' | 'launch' | 'model' | 'search' | 'agents' | 'sync'
+export type StepId = 'start' | 'account' | 'look' | 'launch' | 'model' | 'search' | 'agents' | 'sync'
 
 /** What `rarus.account` says about the signed-in person. */
 export interface AccountInfo {

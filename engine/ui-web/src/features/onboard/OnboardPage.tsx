@@ -16,6 +16,7 @@ import './styles.css'
 
 /* Literal keys, so the i18n gate can read each one. */
 const STEP_NAME: Record<StepId, string> = {
+  start: 'gui.onb.step_start',
   account: 'gui.onb.step_account',
   look: 'gui.onb.step_look',
   launch: 'gui.onb.step_launch',
@@ -161,11 +162,19 @@ const THEMES = [
 
 /* Step 2: the language and the theme as two small segmented choices. */
 function LookBody(): JSX.Element {
-  const cur = useSyncExternalStore(lang.subscribe, lang.get).lang
-  const [theme, setTheme] = useState(look.get().theme)
   return (
     <div className="ob-card">
       <div className="ob-ch"><div className="ob-t">{t('gui.onb.look_title')}</div></div>
+      <LookRows />
+    </div>
+  )
+}
+
+function LookRows(): JSX.Element {
+  const cur = useSyncExternalStore(lang.subscribe, lang.get).lang
+  const [theme, setTheme] = useState(look.get().theme)
+  return (
+    <>
       <div className="ob-row">
         <div className="ob-am"><div className="ob-at">{t('gui.onb.look_lang')}</div></div>
         <div className="ob-seg" role="radiogroup" aria-label={t('gui.onb.look_lang')}>
@@ -188,6 +197,30 @@ function LookBody(): JSX.Element {
           ))}
         </div>
       </div>
+    </>
+  )
+}
+
+/* Rarus's only step: the language, the theme and the Windows start on one screen, then Start. */
+function StartBody(): JSX.Element {
+  const on = store.get().autostart
+  return (
+    <div className="ob-card">
+      <div className="ob-ch">
+        <div className="ob-t">{t('gui.onb.start_title')}</div>
+        <div className="ob-ad">{t('gui.onb.start_lead')}</div>
+      </div>
+      <LookRows />
+      {on === null ? null : (
+        <div className="ob-row">
+          <div className="ob-am">
+            <div className="ob-at">{t('gui.onb.launch_autostart')}</div>
+            <div className="ob-ad">{t('gui.onb.launch_autostart_hint')}</div>
+          </div>
+          <button type="button" className="ob-switch" role="switch" aria-checked={on}
+            aria-label={t('gui.onb.launch_autostart')} onClick={() => void store.setAutostart(!on)} />
+        </div>
+      )}
     </div>
   )
 }
@@ -296,13 +329,15 @@ function Wizard(): JSX.Element {
   const at = steps.indexOf(s.step)
   const done = store.stepDone(s.step)
   const last = store.isLast(s.step)
-  const primaryKey = last ? (s.step === 'sync' && store.syncable().length ? 'gui.onb.start_sync' : 'gui.onb.enter') : 'gui.onb.next'
+  const primaryKey = s.step === 'start' ? 'gui.onb.begin'
+    : last ? (s.step === 'sync' && store.syncable().length ? 'gui.onb.start_sync' : 'gui.onb.enter') : 'gui.onb.next'
 
   return (
     <div className="ob-app">
       <header className="ob-top">
         <div className="ob-brand">Rarus AI</div>
-        <nav className="ob-steps" aria-label={t('gui.onb.steps')}>
+        {/* One step needs no strip of steps. */}
+        {steps.length > 1 ? <nav className="ob-steps" aria-label={t('gui.onb.steps')}>
           {steps.map((id, i) => {
             const state = i < at ? (s.skipped[id] ? 'skipped' : 'done') : i === at ? 'current' : 'upcoming'
             const mark = state === 'done' ? '✓' : state === 'skipped' ? '-' : String(i + 1)
@@ -313,12 +348,13 @@ function Wizard(): JSX.Element {
               </div>
             )
           })}
-        </nav>
+        </nav> : <span className="ob-grow" />}
         <LangPick cur={cur} />
       </header>
       <div className="ob-main" ref={scroll}>
         <div className="ob-col" data-step={s.step}>
-          {s.step === 'account' ? <AccountBody />
+          {s.step === 'start' ? <StartBody />
+            : s.step === 'account' ? <AccountBody />
             : s.step === 'look' ? <LookBody />
             : s.step === 'launch' ? <LaunchBody />
             : s.step === 'sync' ? <SyncBody />

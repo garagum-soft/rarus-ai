@@ -16331,6 +16331,26 @@
       "en": "Turns off loading and transition animations. Follows the system setting until you choose.",
       "zh": "关闭加载和过渡动画。在你选择之前跟随系统设置。",
       "ru": "Отключает анимации загрузки и переходов. Пока вы не выбрали, следует настройке системы."
+    },
+    "gui.onb.step_start": {
+      "en": "Start",
+      "zh": "开始",
+      "ru": "Начало"
+    },
+    "gui.onb.begin": {
+      "en": "Start",
+      "zh": "开始",
+      "ru": "Начать"
+    },
+    "gui.onb.start_title": {
+      "en": "Welcome to Rarus AI",
+      "zh": "欢迎使用 Rarus AI",
+      "ru": "Добро пожаловать в Rarus AI"
+    },
+    "gui.onb.start_lead": {
+      "en": "Pick the language and the look. All of it can be changed later in Settings.",
+      "zh": "选择语言和外观，之后都可以在设置中更改。",
+      "ru": "Выберите язык и оформление. Всё это можно поменять позже в настройках."
     }
   }
 }

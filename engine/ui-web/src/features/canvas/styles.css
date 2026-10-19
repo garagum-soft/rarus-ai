@@ -83,7 +83,7 @@
   font-size: 13.5px; line-height: 1.5; color: var(--canvas-ink); background: var(--canvas-prompt-bg); border: 1px solid var(--canvas-prompt-line); }
 .canvas-json { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; font-size: 12px; min-height: 260px; }
 .canvas-save { align-self: flex-start; font: inherit; font-size: 12.5px; font-weight: 650; padding: 6px 16px; border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, .6); background: linear-gradient(#fbf6ec, #e9dfcd); color: #17140f; cursor: pointer; }
+  border: 1px solid var(--amber); background: var(--amber); color: var(--amber-ink); cursor: pointer; }
 .canvas-save:disabled { opacity: .45; cursor: not-allowed; }
 .canvas-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .canvas-hist-title { font-size: 12.5px; font-weight: 600; margin-top: 4px; }

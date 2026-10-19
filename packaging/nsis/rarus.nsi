@@ -58,6 +58,9 @@ VIAddVersionKey "LegalCopyright" "Rarus AI. Built on Raven, Apache License 2.0"
 Var IsUpdate
 
 !define MUI_ABORTWARNING
+; The same globe as the program (tools/dev/make_icons.py), for the setup and the uninstaller.
+!define MUI_ICON "${__FILEDIR__}\..\assets\rarus.ico"
+!define MUI_UNICON "${__FILEDIR__}\..\assets\rarus.ico"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
