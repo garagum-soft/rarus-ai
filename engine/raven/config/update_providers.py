@@ -1277,6 +1277,14 @@ def resolve_provider_credentials(name: str, *, config_path: Path | None = None) 
     anonymous request to somebody's paid endpoint.
     """
     name = canonical_provider_name(name)
+    if name == "rarus":
+        # OAuth-shaped to routing, but what the sign-in stored is a long-lived agent key for an
+        # OpenAI-style API, not a token that refreshes: a caller about to make the call (the memory
+        # service following the main model) can be given it.
+        from raven.providers.rarus_session import default_api_base, load_key
+
+        key = load_key()
+        return (default_api_base().rstrip("/"), key) if key else None
     spec = _provider_spec(name)
     if spec is not None and spec.is_oauth:
         return None

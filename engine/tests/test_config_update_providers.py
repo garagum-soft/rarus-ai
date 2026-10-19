@@ -2316,6 +2316,24 @@ class TestResolveProviderCredentials:
 
         assert resolve_provider_credentials("openai_codex", config_path=cfg_path) is None
 
+    def test_the_rarus_sign_in_resolves_to_its_agent_key(self, cfg_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The Rarus key is long-lived, not a refreshing token: the memory service following the
+        main model needs it, and without it memory never starts on a Rarus-only install."""
+        from raven.config.update_providers import resolve_provider_credentials
+        from raven.providers import rarus_session
+
+        monkeypatch.setenv("RARUS_SECRET_STORE", "plain")
+        monkeypatch.setattr(rarus_session, "token_path", lambda: cfg_path.parent / "oauth" / "rarus.json")
+        monkeypatch.delenv("RARUS_SITE", raising=False)
+        assert resolve_provider_credentials("rarus", config_path=cfg_path) is None
+
+        rarus_session.save_session("sk-ab-" + "a1b2c3d4" * 4, email="me@example.com")
+
+        assert resolve_provider_credentials("rarus", config_path=cfg_path) == (
+            "https://rarus-ai.com/api/agent/v1",
+            "sk-ab-" + "a1b2c3d4" * 4,
+        )
+
     def test_an_unreadable_config_answers_nothing(self, cfg_path: Path) -> None:
         from raven.config.update_providers import resolve_provider_credentials
 
