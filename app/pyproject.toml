@@ -1,6 +1,6 @@
 [project]
 name = "rarus-app"
-version = "0.1.2"
+version = "0.1.3"
 description = "Rarus AI desktop shell: window, tray, engine launcher, sign-in bridge, updates"
 requires-python = ">=3.12"
 dependencies = ["httpx>=0.27"]
