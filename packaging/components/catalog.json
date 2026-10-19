@@ -1,0 +1,118 @@
+{
+  "_comment": "What Rarus AI downloads after it is installed (packaging/components/build.py builds each one into a zip and writes the catalogue the program ships with). setup: hidden = part of the program, fetched in the background and never shown; locked = shown with its switch on and fixed; optional = shown, on by default, can be switched off; off = shown, off by default. Owner, 2026-10-19: like Alem AI's first-start list, everything from our own server. The parts of the program itself (the panels, the agents, the knowledge base) are in the installer and never listed, which is what Alem AI hides.",
+  "base_url": "https://rarus-ai.com/api/mirror/rarus/components/",
+  "components": [
+    {
+      "id": "memory",
+      "setup": "locked",
+      "title": {
+        "ru": "Долговременная память",
+        "en": "Long-term memory"
+      },
+      "about": {
+        "ru": "EverOS: агент помнит прошлые разговоры, факты о вас и ваших делах.",
+        "en": "EverOS: the agent remembers past conversations and what it learned about you and your work."
+      },
+      "packages": [
+        "engine/plugins-dist/everos-memory"
+      ],
+      "check": "import raven_everos.backend, raven_everos.server, everos.entrypoints.cli.main"
+    },
+    {
+      "id": "documents",
+      "setup": "locked",
+      "title": {
+        "ru": "Чтение документов",
+        "en": "Document reading"
+      },
+      "about": {
+        "ru": "Распознавание PDF, сканов и таблиц для базы знаний.",
+        "en": "Reads PDFs, scans and tables into the knowledge base."
+      },
+      "fetch": [
+        "deepdoc"
+      ],
+      "env": {
+        "RAVEN_KNOWLEDGE_RES": "{dir}/knowledge-res"
+      },
+      "check": "from raven.knowledge.parser.deepdoc import _onnx; [_onnx.session(n) for n in ('det', 'rec', 'layout', 'tsr')]"
+    },
+    {
+      "id": "browser",
+      "setup": "optional",
+      "title": {
+        "ru": "Работа в браузере",
+        "en": "Browser work"
+      },
+      "about": {
+        "ru": "Агент сам открывает сайты, нажимает кнопки и заполняет формы во встроенном Chromium.",
+        "en": "The agent opens sites, clicks and fills in forms in a built-in Chromium."
+      },
+      "packages": [
+        "playwright>=1.58,<2"
+      ],
+      "fetch": [
+        "chromium"
+      ],
+      "env": {
+        "PLAYWRIGHT_BROWSERS_PATH": "{dir}/browsers",
+        "RAVEN_BROWSER_CHANNEL": "chromium"
+      },
+      "check": "from playwright.sync_api import sync_playwright\nwith sync_playwright() as p:\n    b = p.chromium.launch(channel='chromium', headless=True)\n    page = b.new_page(); page.set_content('<p>ok</p>'); assert page.inner_text('p') == 'ok'; b.close()"
+    },
+    {
+      "id": "presentations",
+      "setup": "optional",
+      "requires": [
+        "browser"
+      ],
+      "title": {
+        "ru": "Презентации",
+        "en": "Presentations"
+      },
+      "about": {
+        "ru": "Агент Raven-PPT собирает презентации PowerPoint из ваших материалов.",
+        "en": "The Raven-PPT agent builds PowerPoint decks from your material."
+      },
+      "packages": [
+        "engine/plugins-dist/ppt-engine"
+      ],
+      "check": "import raven_ppt, pptx, fitz, pypdfium2, matplotlib, raven_ppt.tools.fetch"
+    },
+    {
+      "id": "design",
+      "setup": "optional",
+      "requires": [
+        "browser"
+      ],
+      "title": {
+        "ru": "Дизайн",
+        "en": "Design"
+      },
+      "about": {
+        "ru": "Агент Raven-Design делает макеты, постеры и другие визуалы.",
+        "en": "The Raven-Design agent makes layouts, posters and other visuals."
+      },
+      "packages": [
+        "engine/plugins-dist/design-engine[render]"
+      ],
+      "check": "import raven_design, fitz, pypdfium2"
+    },
+    {
+      "id": "messengers",
+      "setup": "off",
+      "title": {
+        "ru": "Мосты в мессенджеры",
+        "en": "Messenger bridges"
+      },
+      "about": {
+        "ru": "Telegram, Slack, Discord и другие: агент отвечает там, где вам пишут.",
+        "en": "Telegram, Slack, Discord and more: the agent answers where people write to you."
+      },
+      "packages": [
+        "raven[channels]"
+      ],
+      "check": "import telegram, slack_sdk, websockets, lark_oapi"
+    }
+  ]
+}

@@ -106,3 +106,25 @@ def test_the_model_error_names_the_same_command(monkeypatch: pytest.MonkeyPatch,
 
     assert "rarus resources" in str(caught.value)
     assert "scripts/" not in str(caught.value)
+
+
+def test_the_resource_folders_can_live_outside_the_package(monkeypatch, tmp_path):
+    """A frozen install cannot write into its package: its components point both folders elsewhere."""
+    import importlib
+
+    from raven import resources
+    from raven.knowledge.parser.deepdoc import _onnx
+
+    monkeypatch.setenv("RAVEN_CORE_RES", str(tmp_path / "core"))
+    monkeypatch.setenv("RAVEN_KNOWLEDGE_RES", str(tmp_path / "knowledge"))
+    try:
+        importlib.reload(resources)
+        importlib.reload(_onnx)
+        assert resources.CORE_RES == tmp_path / "core"
+        assert resources.KNOWLEDGE_RES == _onnx.RES_DIR == tmp_path / "knowledge"
+        assert {r.path.parent for r in resources.DEEPDOC} == {tmp_path / "knowledge"}
+    finally:
+        monkeypatch.delenv("RAVEN_CORE_RES")
+        monkeypatch.delenv("RAVEN_KNOWLEDGE_RES")
+        importlib.reload(resources)
+        importlib.reload(_onnx)

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import re
 import shlex
 import sys
@@ -318,6 +319,11 @@ class Browser:
 
         w, h = DEFAULT_VIEWPORT
         launch: dict[str, Any] = {"headless": not self._headful}
+        channel = os.environ.get("RAVEN_BROWSER_CHANNEL", "").strip()
+        if channel:
+            # An install that ships one Chromium (Rarus AI's browser component) has no
+            # separate headless shell: the "chromium" channel runs it headless too.
+            launch["channel"] = channel
         if self._headful:
             # Drop the "controlled by automated software" banner: to the
             # reader this window is simply their browser.

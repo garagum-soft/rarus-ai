@@ -24,7 +24,8 @@ from loguru import logger
 
 #: Where `raven.resources` puts the weights. Beside the package that
 #: reads them, like the tokenizer's dictionary, so an install is one tree.
-RES_DIR = Path(__file__).resolve().parent.parent.parent / "res"
+#: ``RAVEN_KNOWLEDGE_RES`` moves them, as ``RAVEN_CORE_RES`` moves the dictionary.
+RES_DIR = Path(os.environ.get("RAVEN_KNOWLEDGE_RES") or Path(__file__).resolve().parent.parent.parent / "res")
 
 #: Threads per session. Two, not "as many as there are cores": an indexing run
 #: shares this process with a gateway serving turns, and onnxruntime's default

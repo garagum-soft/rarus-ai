@@ -1,8 +1,9 @@
 # Build Rarus AI: page -> engine wheel -> frozen program -> gates -> installer.
 #
-#   powershell -File packaging\scripts\build.ps1 [-Version <x.y.z>] [-SkipPage] [-SkipInstaller] [-GatesOnly]
+#   powershell -File packaging\scripts\build.ps1 [-Version <x.y.z>] [-SkipPage] [-SkipComponents] [-SkipInstaller] [-GatesOnly]
 #
 # -GatesOnly stops after step 3 (page, wheel, shell and packaging tests): what CI runs on every push.
+# -SkipComponents reuses the components built last time (build\components\out) instead of building them.
 #
 # Every step checks its result and stops the build when it fails. Needs: node (npm) on PATH for the
 # page (-SkipPage uses the ui-web/dist that is already built), `uv` for the build venv, and
@@ -13,6 +14,7 @@
 param(
   [string]$Version = "",
   [switch]$SkipPage,
+  [switch]$SkipComponents,
   [switch]$SkipInstaller,
   [switch]$GatesOnly
 )
@@ -27,7 +29,7 @@ if (-not $Version) {
 $venv = Join-Path $build "venv"
 $py = Join-Path $venv "Scripts\python.exe"
 
-function Step($n, $text) { Write-Host "[$n/8] $text" -ForegroundColor Cyan }
+function Step($n, $text) { Write-Host "[$n/9] $text" -ForegroundColor Cyan }
 function Run($exe, [string[]]$arguments) {
   & $exe @arguments
   if ($LASTEXITCODE -ne 0) { throw "failed ($LASTEXITCODE): $exe $($arguments -join ' ')" }
@@ -55,9 +57,15 @@ if (-not $wheel) { throw "no engine wheel was built" }
 
 Step 3 "gates: engine tests that guard the contract, shell tests, page gates"
 Run "uv" @("venv", $venv, "--python", "3.12", "--allow-existing")
+# The versions engine\uv.lock pins -- the ones the engine is tested with -- for everything the program
+# and its components carry. Without them uv took the newest of every range, and the program ended up
+# with libraries the lock never saw (lancedb 0.40 where the lock and EverOS need 0.34).
+$pins = Join-Path $build "lock-constraints.txt"
+Run "uv" @("export", "--project", (Join-Path $root "engine"), "--frozen", "--no-hashes", "--no-emit-workspace",
+  "--all-packages", "--all-extras", "--no-dev", "-o", $pins)
 # The wheel keeps its version number between builds, so the two local packages are reinstalled every
 # time: without that the venv would keep the code of an earlier build.
-Run "uv" @("pip", "install", "--python", $py, "--reinstall-package", "raven", "--reinstall-package", "rarus-app",
+Run "uv" @("pip", "install", "--python", $py, "--constraint", $pins, "--reinstall-package", "raven", "--reinstall-package", "rarus-app",
   $wheel.FullName, "$root\app[gui]", "pyinstaller", "pytest", "pytest-asyncio")
 $env:PYTHONUTF8 = "1"
 Run $py @("-m", "pytest", "-q", "-p", "no:cacheprovider", (Join-Path $root "app\tests"), (Join-Path $root "packaging\tests"))
@@ -88,10 +96,21 @@ if (Test-Path $bootstrapper) {
   Write-Host "packaging\redist\MicrosoftEdgeWebview2Setup.exe is missing: the installer will not carry the WebView2 bootstrapper" -ForegroundColor Yellow
 }
 
-Step 5 "gate: no key shapes and no internal addresses in the build (spec 12.4)"
+Step 5 "components: the zips the program downloads after install, and the catalogue it ships with"
+if ($SkipComponents) {
+  $catalogue = Join-Path $build "components\out\components.json"
+  if (-not (Test-Path $catalogue)) { throw "-SkipComponents: no components were built yet ($catalogue)" }
+  Write-Host "-SkipComponents: using the components built last time" -ForegroundColor Yellow
+  Copy-Item $catalogue (Join-Path $dist "_internal\rarus_app\components.json")
+} else {
+  Run $py @((Join-Path $root "packaging\components\build.py"), "--dist", $dist, "--work", (Join-Path $build "work\rarus"),
+    "--wheels", (Join-Path $build "wheels"), "--out", (Join-Path $build "components"), "--constraints", $pins)
+}
+
+Step 6 "gate: no key shapes and no internal addresses in the build (spec 12.4)"
 Run $py @((Join-Path $PSScriptRoot "check_build.py"), $dist)
 
-Step 6 "smoke: the program answers --engine --help"
+Step 7 "smoke: the program answers --engine --help"
 Run (Join-Path $dist "RarusAI.exe") @("--engine", "--help")
 
 $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
@@ -104,12 +123,12 @@ if ($SkipInstaller -or -not $makensis) {
   exit 0
 }
 
-Step 7 "NSIS: RarusSetup-$Version.exe"
+Step 8 "NSIS: RarusSetup-$Version.exe"
 $setup = Join-Path $build "RarusSetup-$Version.exe"
 Run $makensis @("/DVERSION=$Version", "/DSOURCE=$dist", "/DOUTFILE=$setup", (Join-Path $root "packaging\nsis\rarus.nsi"))
 Run $py @((Join-Path $PSScriptRoot "check_build.py"), $setup)
 
-Step 8 "SHA-256 and size"
+Step 9 "SHA-256 and size"
 $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
 $size = (Get-Item $setup).Length
 "$hash  $(Split-Path $setup -Leaf)  $size" | Set-Content (Join-Path $build "RarusSetup-$Version.sha256") -Encoding ascii

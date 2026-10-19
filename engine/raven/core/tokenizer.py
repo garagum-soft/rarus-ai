@@ -79,8 +79,9 @@ _SPLIT_CHAR = r"([ ,\.<>/?;:'\[\]\\`!@#$%^&*\(\)\{\}\|_+=" + _FULL_WIDTH_PUNCTUA
 #: Where the dictionary is fetched to. Beside this module rather than under the
 #: data directory because it is part of the install rather than part of a
 #: deployment's state: two Ravens on one machine share it, and reinstalling is
-#: what replaces it.
-RES_DIR = Path(__file__).resolve().parent / "res"
+#: what replaces it. ``RAVEN_CORE_RES`` moves it for an install whose package
+#: folder is read-only, where the files arrive as a component of their own.
+RES_DIR = Path(os.environ.get("RAVEN_CORE_RES") or Path(__file__).resolve().parent / "res")
 
 DICTIONARY = "huqie.txt"
 """The word list, as Infinity's resource repository names it (MIT; see

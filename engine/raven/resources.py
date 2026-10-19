@@ -80,8 +80,9 @@ class Resource:
         return self.into / (self.saved_as or self.name)
 
 
-CORE_RES = PACKAGE / "core" / "res"
-KNOWLEDGE_RES = PACKAGE / "knowledge" / "res"
+#: The readers honour the same two variables (``core.tokenizer``, deepdoc ``_onnx``).
+CORE_RES = Path(os.environ.get("RAVEN_CORE_RES") or PACKAGE / "core" / "res")
+KNOWLEDGE_RES = Path(os.environ.get("RAVEN_KNOWLEDGE_RES") or PACKAGE / "knowledge" / "res")
 
 DICTIONARY = (Resource("huqie.txt", CORE_RES, "the word dictionary"),)
 
