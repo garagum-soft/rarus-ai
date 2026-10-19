@@ -101,6 +101,34 @@ class TestEverosExecutable:
             _everos_executable()
 
 
+class TestEverosCommand:
+    """A frozen host with no everos executable names the command that runs the CLI instead."""
+
+    def test_the_configured_command_wins(self, monkeypatch) -> None:
+        monkeypatch.setenv("EVEROS_CLI", '["C:/Rarus/RarusAI.exe", "--everos"]')
+        monkeypatch.setattr(everos_server, "_everos_executable", lambda: pytest.fail("looked for the executable"))
+
+        assert everos_server._everos_command() == ["C:/Rarus/RarusAI.exe", "--everos"]
+
+    def test_without_it_the_executable_is_the_command(self, monkeypatch) -> None:
+        monkeypatch.delenv("EVEROS_CLI", raising=False)
+        monkeypatch.setattr(everos_server, "_everos_executable", lambda: "/venv/bin/everos")
+
+        assert everos_server._everos_command() == ["/venv/bin/everos"]
+
+    @pytest.mark.parametrize("value", ["not json", "[]", '"everos"', '["", "x"]', "[1]"])
+    def test_an_unreadable_value_falls_back_to_the_executable(self, monkeypatch, value) -> None:
+        monkeypatch.setenv("EVEROS_CLI", value)
+        monkeypatch.setattr(everos_server, "_everos_executable", lambda: "/venv/bin/everos")
+
+        assert everos_server._everos_command() == ["/venv/bin/everos"]
+
+    def test_the_command_line_of_a_frozen_server_is_still_recognised(self) -> None:
+        line = '"C:\\Rarus\\RarusAI.exe" --everos server start --root C:\\Users\\a\\.rarus\\everos'
+
+        assert everos_server._SERVER_CMDLINE_RE.search(line) is not None
+
+
 @pytest.fixture
 def everos_toml(tmp_path, monkeypatch):
     """Redirect the EverOS config read/write to a throwaway root raven owns."""
@@ -1436,7 +1464,7 @@ class TestAnUnwritableRootFailsAsAStartFailure:
     situation the user can act on: fix the permissions and run it again.
     """
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="chmod 0o555 does not block root")
+    @pytest.mark.skipif(getattr(os, "geteuid", lambda: -1)() == 0, reason="chmod 0o555 does not block root")
     def test_it_surfaces_as_runtime_error(self, tmp_path, monkeypatch) -> None:
         from raven_everos import server as _server
 

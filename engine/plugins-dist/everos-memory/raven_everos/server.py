@@ -267,6 +267,25 @@ def _require_llm_configured() -> None:
     )
 
 
+EVEROS_CLI_ENV = "EVEROS_CLI"
+"""A JSON list that replaces the everos executable, for a host with no separate one: a
+frozen program that runs the CLI itself (Rarus AI sets ``["<its exe>", "--everos"]``)."""
+
+
+def _everos_command() -> list[str]:
+    """The argv prefix that runs the everos CLI: ``EVEROS_CLI`` when set, else the executable."""
+    configured = os.environ.get(EVEROS_CLI_ENV, "").strip()
+    if configured:
+        try:
+            command = json.loads(configured)
+        except ValueError:
+            command = None
+        if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command):
+            return command
+        logger.warning("{} is not a JSON list of strings; looking for the everos executable instead", EVEROS_CLI_ENV)
+    return [_everos_executable()]
+
+
 def _everos_executable() -> str:
     """Locate the everos CLI, preferring the one installed alongside raven.
 
@@ -977,7 +996,7 @@ def _start_server_if_unlocked(base_url: str) -> subprocess.Popen | None:
     """
     from raven_everos.config import everos_root, set_everos_api
 
-    everos = _everos_executable()
+    everos = _everos_command()
     root = everos_root()
     parsed = urlparse(base_url)
 
@@ -1014,7 +1033,7 @@ def _start_server_if_unlocked(base_url: str) -> subprocess.Popen | None:
                     # EVEROS_ROOT: a server that names its own root is one `ps`
                     # away from being identified, which matters when a stale
                     # instance has to be found and stopped.
-                    [everos, "server", "start", "--root", str(root)],
+                    [*everos, "server", "start", "--root", str(root)],
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
                     env=_child_env(),
